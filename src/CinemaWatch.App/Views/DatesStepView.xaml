@@ -1,0 +1,65 @@
+<UserControl x:Class="CinemaWatch.Views.DatesStepView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="680" HorizontalAlignment="Left">
+            <TextBlock Text="Kino i termin" Style="{StaticResource PageTitleText}" />
+            <TextBlock Text="Wybierz dzień albo zakres dni, w których chcesz szukać seansów."
+                       Style="{StaticResource CaptionText}" Margin="0,4,0,16" />
+
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="Kino" Style="{StaticResource SectionHeaderText}" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Miasto" Style="{StaticResource FieldLabelText}" />
+                            <ComboBox ItemsSource="{Binding Cities}" SelectedIndex="0" IsEnabled="False" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Kino" Style="{StaticResource FieldLabelText}" />
+                            <ComboBox ItemsSource="{Binding Cinemas}" SelectedIndex="0" IsEnabled="False" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Technologia" Style="{StaticResource FieldLabelText}" />
+                            <ComboBox ItemsSource="{Binding Technologies}" SelectedIndex="0" IsEnabled="False" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="Wybór miasta, kina i technologii pojawi się w kolejnej wersji."
+                               Style="{StaticResource CaptionText}" Margin="0,10,0,0" />
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+                <StackPanel>
+                    <TextBlock Text="Termin" Style="{StaticResource SectionHeaderText}" />
+                    <CheckBox Content="Zakres dat" IsChecked="{Binding IsRange}" Margin="0,0,0,12" />
+                    <Grid HorizontalAlignment="Left">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="240" />
+                            <ColumnDefinition Width="16" />
+                            <ColumnDefinition Width="240" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="{Binding DateFromLabel}" Style="{StaticResource FieldLabelText}" />
+                            <DatePicker SelectedDate="{Binding DateFrom, Mode=TwoWay}" SelectedDateFormat="Long" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="2"
+                                    Visibility="{Binding IsRange, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock Text="Do" Style="{StaticResource FieldLabelText}" />
+                            <DatePicker SelectedDate="{Binding DateTo, Mode=TwoWay}" SelectedDateFormat="Long" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock Text="{Binding RangeHint}" Style="{StaticResource CaptionText}" Margin="0,10,0,0"
+                               Visibility="{Binding IsRange, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

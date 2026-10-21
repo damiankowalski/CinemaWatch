@@ -1,0 +1,140 @@
+<UserControl x:Class="CinemaWatch.Views.SummaryStepView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="16" />
+            <ColumnDefinition Width="380" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Left: what is watched + results of "check now" -->
+        <Grid Grid.Column="0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Text="Podsumowanie" Style="{StaticResource PageTitleText}" />
+            <TextBlock Grid.Row="1" Text="{Binding ConditionText}" Style="{StaticResource CaptionText}" Margin="0,4,0,16" />
+
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <ItemsControl ItemsSource="{Binding Items}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" Text="{Binding CountsText}"
+                                                       Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
+                                            <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding Subtitle}" Style="{StaticResource CaptionText}" Margin="0,2,0,10" />
+                                        <ItemsControl ItemsSource="{Binding Rows}" Focusable="False">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid Margin="0,2">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="90" />
+                                                            <ColumnDefinition Width="*" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Text="{Binding Row}" Style="{StaticResource CaptionText}" />
+                                                        <TextBlock Grid.Column="1" Text="{Binding Text}" TextWrapping="Wrap" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <!-- Result of the last "check now" -->
+                                        <Border x:Name="Result" Margin="0,10,0,0" Padding="10,6" CornerRadius="6" BorderThickness="1"
+                                                Background="{StaticResource NeutralBackgroundBrush}" BorderBrush="Transparent"
+                                                Visibility="{Binding HasResult, Converter={StaticResource BoolToVisibility}}">
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" Content="Kup bilet" Margin="12,0,0,0"
+                                                        Command="{Binding BuyCommand}"
+                                                        Visibility="{Binding IsMatch, Converter={StaticResource BoolToVisibility}}" />
+                                                <TextBlock Text="{Binding ResultText}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                            </DockPanel>
+                                        </Border>
+                                    </StackPanel>
+                                </Border>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsMatch}" Value="True">
+                                        <Setter TargetName="Result" Property="Background" Value="{StaticResource MatchBackgroundBrush}" />
+                                        <Setter TargetName="Result" Property="BorderBrush" Value="{StaticResource MatchBorderBrush}" />
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="{Binding SkippedText}" Style="{StaticResource CaptionText}" Margin="0,4,0,0"
+                               Visibility="{Binding HasSkipped, Converter={StaticResource BoolToVisibility}}" />
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Right: profile actions -->
+        <Border Grid.Column="2" Style="{StaticResource Card}">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <!-- Right margin keeps the (overlay) scrollbar off the controls. -->
+                <StackPanel Margin="0,0,14,0">
+                    <TextBlock Text="Profil" Style="{StaticResource SectionHeaderText}" />
+
+                    <TextBlock Text="Nazwa" Style="{StaticResource FieldLabelText}" />
+                    <TextBox Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
+                    <TextBlock Text="Plik" Style="{StaticResource FieldLabelText}" />
+                    <TextBlock Text="{Binding ProfilePathText}" Style="{StaticResource CaptionText}" Margin="0,0,0,12" />
+
+                    <Button Content="Sprawdź teraz" Command="{Binding CheckNowCommand}" HorizontalAlignment="Stretch"
+                            Style="{DynamicResource AccentButtonStyle}" />
+                    <TextBlock Text="{Binding LastCheckText}" Style="{StaticResource CaptionText}" Margin="0,6,0,0"
+                               Visibility="{Binding LastCheckText, Converter={StaticResource EmptyToCollapsed}}" />
+
+                    <UniformGrid Columns="2" Margin="0,12,0,0">
+                        <Button Content="Zapisz profil…" Command="{Binding SaveCommand}" Margin="0,0,4,0" HorizontalAlignment="Stretch" />
+                        <Button Content="Kopiuj polecenie" Command="{Binding CopyCommandLineCommand}" Margin="4,0,0,0" HorizontalAlignment="Stretch"
+                                ToolTip="Kopiuje do schowka polecenie uruchamiające sprawdzenie tego profilu bez okna" />
+                    </UniformGrid>
+
+                    <Separator Margin="0,14" />
+
+                    <TextBlock Text="Harmonogram zadań" Style="{StaticResource SectionHeaderText}" />
+                    <TextBlock Text="Sprawdzaj" Style="{StaticResource FieldLabelText}" />
+                    <ComboBox ItemsSource="{Binding IntervalOptions}" SelectedItem="{Binding IntervalMinutes, Mode=TwoWay}"
+                              HorizontalAlignment="Left" MinWidth="140" Margin="0,0,0,12">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding StringFormat='co {0} min'}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <UniformGrid Columns="2">
+                        <Button Content="Dodaj do Harmonogramu" Command="{Binding ScheduleCommand}" Margin="0,0,4,0" HorizontalAlignment="Stretch" />
+                        <Button Content="Usuń z Harmonogramu" Command="{Binding UnscheduleCommand}" Margin="4,0,0,0" HorizontalAlignment="Stretch" />
+                    </UniformGrid>
+                    <TextBlock Text="{Binding ScheduleStatusText}" Style="{StaticResource CaptionText}" Margin="0,6,0,0" />
+
+                    <ProgressBar IsIndeterminate="True" Margin="0,12,0,0"
+                                 Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock Text="{Binding ActionText}" TextWrapping="Wrap" Margin="0,12,0,0"
+                               Visibility="{Binding ActionText, Converter={StaticResource EmptyToCollapsed}}">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ActionIsError}" Value="True">
+                                        <Setter Property="Foreground" Value="{StaticResource SoldOutBrush}" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <TextBlock Text="{Binding HintText}" Style="{StaticResource CaptionText}" Margin="0,14,0,0" />
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</UserControl>

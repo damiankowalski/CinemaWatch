@@ -1,0 +1,38 @@
+name: Release
+
+# Push a tag like v1.0.0 to build CinemaWatch.exe and publish it as a GitHub release.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test
+        run: dotnet run --project tests/CinemaWatch.Tests -c Release
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          ./publish.ps1 -Version $version
+
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME `
+            artifacts/CinemaWatch.exe artifacts/CinemaWatch.exe.sha256 `
+            --title "CinemaWatch $env:GITHUB_REF_NAME" `
+            --notes-file .github/RELEASE_NOTES.md

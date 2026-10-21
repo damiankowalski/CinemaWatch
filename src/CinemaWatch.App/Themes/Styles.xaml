@@ -1,0 +1,88 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:conv="clr-namespace:CinemaWatch.Converters">
+
+    <!--
+        Only keyed styles here. Control styles come from the built-in Fluent theme (App.ThemeMode),
+        so implicit styles must not replace them. Theme colours are referenced with DynamicResource,
+        which keeps them in sync with light/dark mode.
+    -->
+
+    <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVisibility" />
+    <conv:EmptyToCollapsedConverter x:Key="EmptyToCollapsed" />
+
+    <!-- Brushes that must stay readable in both light and dark mode -->
+    <SolidColorBrush x:Key="ErrorBackgroundBrush" Color="#26E81123" />
+    <SolidColorBrush x:Key="ErrorBorderBrush" Color="#99E81123" />
+    <SolidColorBrush x:Key="InfoBackgroundBrush" Color="#1F0078D4" />
+    <SolidColorBrush x:Key="InfoBorderBrush" Color="#800078D4" />
+    <SolidColorBrush x:Key="SoldOutBrush" Color="#FFD13438" />
+    <SolidColorBrush x:Key="AvailableBrush" Color="#FF0F9D58" />
+
+    <!-- Hall map -->
+    <SolidColorBrush x:Key="SeatFreeBrush" Color="#FF1E9E57" />
+    <SolidColorBrush x:Key="SeatTakenBrush" Color="#4D8A8A8A" />
+    <SolidColorBrush x:Key="SeatTakenTextBrush" Color="#B39A9A9A" />
+    <SolidColorBrush x:Key="SeatWatchedBrush" Color="#FFFFB900" />
+    <SolidColorBrush x:Key="SeatHoverBrush" Color="#33FFFFFF" />
+    <SolidColorBrush x:Key="RowLabelHoverBrush" Color="#268A8A8A" />
+
+    <!-- Check results -->
+    <SolidColorBrush x:Key="MatchBackgroundBrush" Color="#261E9E57" />
+    <SolidColorBrush x:Key="MatchBorderBrush" Color="#991E9E57" />
+    <SolidColorBrush x:Key="NeutralBackgroundBrush" Color="#148A8A8A" />
+
+    <Style x:Key="Card" TargetType="Border">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16" />
+    </Style>
+
+    <Style x:Key="ErrorBar" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource ErrorBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource ErrorBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="12,8" />
+    </Style>
+
+    <Style x:Key="InfoBar" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource InfoBackgroundBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource InfoBorderBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="Padding" Value="12,8" />
+    </Style>
+
+    <Style x:Key="AppTitleText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="26" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="PageTitleText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="20" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="SectionHeaderText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin" Value="0,0,0,10" />
+    </Style>
+
+    <Style x:Key="FieldLabelText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Margin" Value="0,0,0,4" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    </Style>
+
+    <Style x:Key="CaptionText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    </Style>
+
+</ResourceDictionary>

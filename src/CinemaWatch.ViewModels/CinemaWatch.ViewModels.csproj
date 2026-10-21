@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- UI-agnostic view models (no WPF references), so the whole wizard can be tested without a window. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CinemaWatch.ViewModels</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CinemaWatch.Core\CinemaWatch.Core.csproj" />
+  </ItemGroup>
+
+</Project>
