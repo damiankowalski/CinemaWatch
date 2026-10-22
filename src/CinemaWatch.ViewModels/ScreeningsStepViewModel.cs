@@ -108,6 +108,8 @@ public sealed class ScreeningsStepViewModel : ObservableObject
 
     private void RebuildDays()
     {
+        // Ticked screenings stay ticked when the list is rebuilt (e.g. after widening the date range).
+        var ticked = AllOptions.Where(o => o.IsChecked).Select(o => o.Screening.Id).ToHashSet(StringComparer.Ordinal);
         Days.Clear();
         if (_selectedFilm is not null)
         {
@@ -116,7 +118,7 @@ public sealed class ScreeningsStepViewModel : ObservableObject
                 var options = Matching(day.Screenings)
                     .Where(s => s.FilmId == _selectedFilm.FilmId)
                     .OrderBy(s => s.StartsAt)
-                    .Select(s => new ScreeningOption(s, OnSelectionChanged))
+                    .Select(s => new ScreeningOption(s, OnSelectionChanged) { IsChecked = ticked.Contains(s.Id) })
                     .ToList();
                 if (options.Count > 0)
                     Days.Add(new DayGroup(day.Date, options));

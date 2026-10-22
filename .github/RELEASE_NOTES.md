@@ -1,11 +1,13 @@
-## CinemaWatch 1.1.0
+## CinemaWatch 1.2.0
 
-- **English user interface.** The app follows the Windows display language (Polish → Polish, anything else →
-  English) and can be switched at any time from the drop-down in the top-right corner - no restart needed.
-  The choice is remembered and also used for background notifications.
-- **Compact summary.** Screenings in the summary are collapsed by default (date, hall, counts); the arrow on
-  the right expands the selected rows and seats. Results of *Check now* stay visible in both states.
-- **Version in the title bar** (e.g. "CinemaWatch 1.1.0").
+- **Clickable steps.** The step indicator at the top is now navigation: click any step you have already visited
+  (or the next one) to jump straight to it.
+  - Going back is instant; nothing is reloaded.
+  - Going forward runs the same checks and loading as *Next*, step by step, and stops at the first step that
+    needs your input (for example when no screening is selected).
+  - Data that has not changed - same dates, same screenings, loaded less than 5 minutes ago - is reused, so
+    jumping back and forth costs no extra requests to Cinema City.
+- Ticked screenings stay ticked when you change the dates (for example when widening the date range).
 
 ### Download
 

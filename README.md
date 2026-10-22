@@ -39,7 +39,8 @@ It is a small Windows desktop app (WPF, .NET 10) with a Polish and English user 
 
 ## Features
 
-- **Guided wizard** - date or date range → film and screenings → hall map → summary.
+- **Guided wizard** - date or date range → film and screenings → hall map → summary. Every step in the
+  indicator is clickable; data that has not changed is reused, so jumping between steps is instant.
 - **Interactive hall map** drawn from the cinema's own seat plan, with live occupancy.
   - Click a row number to watch the whole row, click seats to add or remove them - taken seats too.
   - Wheelchair spaces are shown separately and never counted as regular free seats.
@@ -90,6 +91,8 @@ The exe is not code-signed, so Windows SmartScreen may show a warning on first s
 3. **Seats** (*Miejsca*) - mark rows and seats on the hall map of each screening.
 4. **Summary** (*Podsumowanie*) - *Check now* checks immediately; save the profile and *Add to Task Scheduler*
    to keep watching in the background.
+
+Click any step in the indicator at the top to jump back (or forward to a step you have already visited).
 
 ### Stopping and cleaning up
 

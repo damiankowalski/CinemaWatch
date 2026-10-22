@@ -16,6 +16,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private const int SummaryIndex = 3;
     private const int MaxParallelRequests = 3;
 
+    /// <summary>Loaded repertoire / seat data younger than this is reused when navigating forward again.</summary>
+    private static readonly TimeSpan ReuseLoadedDataFor = TimeSpan.FromMinutes(5);
+
     private readonly CinemaCityClient _client;
     private readonly SeatAvailabilityService _seatService;
     private readonly IUserInteraction _ui;
@@ -31,6 +34,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private Func<string?>? _statusText;
     private Func<string?>? _errorText;
     private CancellationTokenSource? _loadCts;
+
+    // Step navigation: the furthest step visited, and what the loaded data of steps 2 and 3 was built from.
+    private int _furthestVisited;
+    private int _navigationVersion;
+    private string? _repertoireKey;
+    private DateTime _repertoireLoadedAt;
+    private string? _seatsKey;
+    private DateTime _seatsLoadedAt;
 
     /// <param name="languageChanged">Called after the user switched the language (the app saves it and updates WPF).</param>
     public MainViewModel(
@@ -56,13 +67,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         Steps =
         [
-            new StepItem(1, "Kino i termin", "Cinema and dates"),
-            new StepItem(2, "Film i seanse", "Film and screenings"),
-            new StepItem(3, "Miejsca", "Seats"),
-            new StepItem(4, "Podsumowanie", "Summary"),
+            new StepItem(1, "Kino i termin", "Cinema and dates", NavigateToAsync),
+            new StepItem(2, "Film i seanse", "Film and screenings", NavigateToAsync),
+            new StepItem(3, "Miejsca", "Seats", NavigateToAsync),
+            new StepItem(4, "Podsumowanie", "Summary", NavigateToAsync),
         ];
 
-        NextCommand = new AsyncRelayCommand(GoNextAsync, () => !IsBusy && _stepIndex < SummaryIndex);
+        NextCommand = new AsyncRelayCommand(() => NavigateToAsync(_stepIndex + 1), () => !IsBusy && _stepIndex < SummaryIndex);
         BackCommand = new RelayCommand(GoBack, () => CanGoBack);
         NewProfileCommand = new RelayCommand(StartNewProfile, () => !IsBusy);
         OpenProfileCommand = new AsyncRelayCommand(OpenProfileAsync, () => !IsBusy);
@@ -217,6 +228,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         SummaryStep.Reset();
         SetError(null);
         SetStatus(null);
+        _furthestVisited = DatesIndex;
+        _repertoireKey = null;
+        _seatsKey = null;
+        _navigationVersion++;
         GoTo(DatesIndex);
     }
 
@@ -330,22 +345,35 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     // ------------------------------------------------------------------ navigation
 
-    private async Task GoNextAsync()
+    /// <summary>
+    /// Opens a step. Backwards is immediate. Forwards runs each step's checks and loading in turn (exactly like
+    /// pressing "Next" repeatedly) and stops at the first step that needs the user's input. Data that is still
+    /// valid - same dates, same screenings, loaded less than 5 minutes ago - is reused, so revisiting a step is instant.
+    /// </summary>
+    private async Task NavigateToAsync(int target)
     {
+        if (target < DatesIndex || target > SummaryIndex || target == _stepIndex) return;
+        if (target < _stepIndex)
+        {
+            GoBackTo(target);
+            return;
+        }
+        if (IsBusy || (target > _furthestVisited && target != _stepIndex + 1)) return;
+
+        var navigation = ++_navigationVersion;
         SetError(null);
         try
         {
-            switch (_stepIndex)
+            while (_stepIndex < target && navigation == _navigationVersion)
             {
-                case DatesIndex:
-                    await LeaveDatesStepAsync();
-                    break;
-                case ScreeningsIndex:
-                    await LeaveScreeningsStepAsync();
-                    break;
-                case SeatsIndex:
-                    LeaveSeatsStep();
-                    break;
+                var advanced = _stepIndex switch
+                {
+                    DatesIndex => await LeaveDatesStepAsync(),
+                    ScreeningsIndex => await LeaveScreeningsStepAsync(),
+                    SeatsIndex => LeaveSeatsStep(),
+                    _ => false,
+                };
+                if (!advanced) break;
             }
         }
         catch (OperationCanceledException) when (_loadCts?.IsCancellationRequested == true)
@@ -374,6 +402,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
 
         var dates = DatesStep.GetDates();
+        var key = string.Join(",", dates);
+        if (key == _repertoireKey && IsFresh(_repertoireLoadedAt))
+        {
+            SetStatus(null);
+            GoTo(ScreeningsIndex);
+            return true;
+        }
+
         IsBusy = true;
         SetStatus(() => T("Pobieranie repertuaru (", "Loading the repertoire (")
                         + Count(dates.Count, "dzień", "dni", "dni", "day", "days") + ")…");
@@ -388,6 +424,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             results.Where(r => r.Day is not null).Select(r => r.Day!).ToList(),
             ScreeningFilter.ImaxWithoutDubbing,
             _clock());
+        _repertoireKey = failures.Count == 0 ? key : null; // partial results are reloaded next time
+        _repertoireLoadedAt = _clock();
+        _seatsKey = null;
 
         SetStatus(failures.Count == 0
             ? null
@@ -407,10 +446,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return false;
         }
 
+        var key = string.Join(",", selected.Select(s => s.Id));
+        if (key == _seatsKey && IsFresh(_seatsLoadedAt))
+        {
+            SetStatus(null);
+            GoTo(SeatsIndex);
+            return true;
+        }
+
         GoTo(SeatsIndex);
         IsBusy = true;
         SetStatus(() => T("Pobieranie układu sali i zajętości miejsc…", "Loading the hall layout and seat occupancy…"));
-        await SeatsStep.LoadAsync(_seatService, selected, StartLoad());
+        var allLoaded = await SeatsStep.LoadAsync(_seatService, selected, StartLoad());
+        _seatsKey = allLoaded ? key : null;
+        _seatsLoadedAt = _clock();
         SetStatus(() => SeatsStep.Summary);
         return true;
     }
@@ -431,16 +480,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void GoBack()
     {
-        if (!CanGoBack) return;
+        if (CanGoBack)
+            GoBackTo(_stepIndex - 1);
+    }
+
+    /// <summary>Going back never reloads anything; a load in progress is cancelled.</summary>
+    private void GoBackTo(int index)
+    {
+        _navigationVersion++;
         _loadCts?.Cancel();
         SetError(null);
         SetStatus(null);
-        GoTo(_stepIndex - 1);
+        GoTo(index);
     }
+
+    private bool IsFresh(DateTime loadedAt) => _clock() - loadedAt < ReuseLoadedDataFor;
 
     private void GoTo(int index)
     {
         _stepIndex = index;
+        _furthestVisited = Math.Max(_furthestVisited, index);
         CurrentPage = index switch
         {
             DatesIndex => DatesStep,
@@ -492,6 +551,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             Steps[i].IsCurrent = i == _stepIndex;
             Steps[i].IsDone = i < _stepIndex;
+            Steps[i].IsReachable = i <= _furthestVisited || i == _stepIndex + 1;
         }
     }
 

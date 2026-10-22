@@ -61,7 +61,8 @@ public sealed class SeatsStepViewModel : ObservableObject
 
     public string? ActionText => _actionText?.Invoke();
 
-    public async Task LoadAsync(SeatAvailabilityService service, IReadOnlyList<Screening> screenings, CancellationToken cancellationToken)
+    /// <returns>True when every screening loaded without an error.</returns>
+    public async Task<bool> LoadAsync(SeatAvailabilityService service, IReadOnlyList<Screening> screenings, CancellationToken cancellationToken)
     {
         Items.Clear();
         SetSummary(null);
@@ -94,6 +95,7 @@ public sealed class SeatsStepViewModel : ObservableObject
             ? () => T("Pobrano mapy sal: ", "Hall maps loaded: ") + Count(loaded, "seans", "seanse", "seansów", "screening", "screenings") + "."
             : () => T($"Pobrano {loaded} z {total}. Seanse z błędem zostaną pominięte.",
                       $"Loaded {loaded} of {total}. Screenings with errors will be skipped."));
+        return loaded == total;
     }
 
     /// <summary>Preloads watched seats per screening id (used when opening a profile).</summary>

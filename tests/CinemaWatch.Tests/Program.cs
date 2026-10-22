@@ -385,6 +385,7 @@ TestRunner.Add("Localization: language detection, plurals, translated Core texts
 
 ViewModelTests.Register();
 ViewModelTests.RegisterLanguageTests();
+ViewModelTests.RegisterNavigationTests();
 
 return await TestRunner.RunAsync();
 

@@ -8,8 +8,11 @@ namespace CinemaWatch.Tests;
 /// <summary>Serves the same captured responses for every screening id (several maps of the same hall).</summary>
 internal sealed class AnyScreeningHandler : HttpMessageHandler
 {
+    public int RequestCount { get; private set; }
+
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        RequestCount++;
         var path = request.RequestUri!.AbsolutePath;
         var fixture = path switch
         {

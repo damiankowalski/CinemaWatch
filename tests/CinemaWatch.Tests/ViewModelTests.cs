@@ -196,6 +196,73 @@ internal static class ViewModelTests
         });
     }
 
+    public static void RegisterNavigationTests()
+    {
+        TestRunner.Add("Step navigation: clickable steps, instant revisits, reload after changes, stop at missing input", async () =>
+        {
+            var http = new AnyScreeningHandler();
+            using var client = new CinemaCityClient(http);
+            var vm = new MainViewModel(client, new FakeUi(), new FakeScheduler(), Environment, () => Now);
+            var steps = vm.Steps;
+
+            // Fresh wizard: only the next step can be opened.
+            Assert.SequenceEqual([true, true, false, false], steps.Select(s => s.IsReachable));
+            Assert.True(!steps[3].NavigateCommand.CanExecute(null));
+            Assert.Equal("Najpierw przejdź poprzednie kroki", steps[3].ToolTip);
+
+            vm.DatesStep.DateFrom = new DateTime(2026, 12, 16);
+            await steps[1].NavigateCommand.ExecuteAsync();
+            vm.ScreeningsStep.Days[0].Screenings.Single(o => o.TimeText == "16:00").IsChecked = true;
+            vm.ScreeningsStep.Days[0].Screenings.Single(o => o.TimeText == "22:30").IsChecked = true;
+            await steps[2].NavigateCommand.ExecuteAsync();
+            vm.SeatsStep.Items[0].Map!.RowLabels.First(l => l.Label == "8").ToggleCommand.Execute(null);
+            await steps[3].NavigateCommand.ExecuteAsync();
+            Assert.Equal(3, vm.StepIndex);
+            Assert.SequenceEqual([true, true, true, false], steps.Select(s => s.IsDone));
+
+            // Back to step 1 and straight to the summary again: nothing is reloaded.
+            var requests = http.RequestCount;
+            await steps[0].NavigateCommand.ExecuteAsync();
+            Assert.Equal(0, vm.StepIndex);
+            Assert.SequenceEqual([true, true, true, true], steps.Select(s => s.IsReachable));
+            await steps[3].NavigateCommand.ExecuteAsync();
+            Assert.Equal(3, vm.StepIndex);
+            Assert.Equal(requests, http.RequestCount);
+            Assert.Equal(37, vm.SeatsStep.Items[0].WatchedCount);
+
+            // Different screenings: only the seat data is reloaded (2 requests: screening details + free seats).
+            await steps[1].NavigateCommand.ExecuteAsync();
+            vm.ScreeningsStep.Days[0].Screenings.Single(o => o.TimeText == "22:30").IsChecked = false;
+            await steps[3].NavigateCommand.ExecuteAsync();
+            Assert.Equal(3, vm.StepIndex);
+            Assert.Equal(requests + 2, http.RequestCount);
+            Assert.Equal(1, vm.SeatsStep.Items.Count);
+            Assert.Equal(37, vm.SeatsStep.Items[0].WatchedCount); // seat selection kept
+
+            // Wider date range: the repertoire reloads, ticked screenings stay ticked, the chain runs to the summary.
+            await steps[0].NavigateCommand.ExecuteAsync();
+            vm.DatesStep.DateFrom = new DateTime(2026, 12, 15);
+            vm.DatesStep.IsRange = true;
+            vm.DatesStep.DateTo = new DateTime(2026, 12, 16);
+            await steps[3].NavigateCommand.ExecuteAsync();
+            Assert.Equal(3, vm.StepIndex);
+            Assert.Equal(1, vm.ScreeningsStep.SelectedCount);
+            Assert.Equal(37, vm.SeatsStep.Items[0].WatchedCount);
+
+            // Missing input stops the chain at that step.
+            await steps[1].NavigateCommand.ExecuteAsync();
+            vm.ScreeningsStep.ClearAllCommand.Execute(null);
+            await steps[3].NavigateCommand.ExecuteAsync();
+            Assert.Equal(1, vm.StepIndex);
+            Assert.Equal("Zaznacz co najmniej jeden seans.", vm.ErrorText);
+
+            // A new profile resets what can be clicked.
+            vm.NewProfileCommand.Execute(null);
+            Assert.SequenceEqual([true, true, false, false], steps.Select(s => s.IsReachable));
+            vm.Dispose();
+        });
+    }
+
     public static void RegisterLanguageTests()
     {
         TestRunner.Add("Language switch: every visible text follows without a restart; cards start collapsed", async () =>

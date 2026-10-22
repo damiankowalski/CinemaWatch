@@ -48,8 +48,33 @@
             </StackPanel>
         </Grid>
 
-        <!-- Step indicator -->
-        <ItemsControl Grid.Row="1" Margin="0,20,0,20" ItemsSource="{Binding Steps}" Focusable="False">
+        <!-- Step indicator: each step is clickable (visited steps and the next one) -->
+        <ItemsControl Grid.Row="1" Margin="-8,16,0,16" ItemsSource="{Binding Steps}" Focusable="False">
+            <ItemsControl.Resources>
+                <Style x:Key="StepButtonStyle" TargetType="Button">
+                    <Setter Property="Cursor" Value="Hand" />
+                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                    <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="Button">
+                                <Border x:Name="Back" Background="Transparent" CornerRadius="18" Padding="8,4,12,4">
+                                    <ContentPresenter VerticalAlignment="Center" />
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Back" Property="Background" Value="{StaticResource NeutralBackgroundBrush}" />
+                                    </Trigger>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter TargetName="Back" Property="Opacity" Value="0.45" />
+                                        <Setter Property="Cursor" Value="Arrow" />
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ItemsControl.Resources>
             <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                     <StackPanel Orientation="Horizontal" />
@@ -57,19 +82,29 @@
             </ItemsControl.ItemsPanel>
             <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                    <StackPanel Orientation="Horizontal" Margin="0,0,28,0">
-                        <Border x:Name="Dot" Width="28" Height="28" CornerRadius="14" BorderThickness="1.5"
-                                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-                            <TextBlock x:Name="Number" Text="{Binding Number}" FontSize="13"
-                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                        <TextBlock x:Name="Title" Text="{Binding Title}" Margin="8,0,0,0"
-                                   VerticalAlignment="Center" Opacity="0.65" />
-                    </StackPanel>
+                    <Button Command="{Binding NavigateCommand}" ToolTip="{Binding ToolTip}" Margin="0,0,8,0"
+                            Style="{StaticResource StepButtonStyle}">
+                        <StackPanel Orientation="Horizontal">
+                            <Border x:Name="Dot" Width="28" Height="28" CornerRadius="14" BorderThickness="1.5"
+                                    BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                <Grid>
+                                    <TextBlock x:Name="Number" Text="{Binding Number}" FontSize="13"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="Check" Text="&#xE73E;" FontSize="13" Visibility="Collapsed"
+                                               FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Grid>
+                            </Border>
+                            <TextBlock x:Name="Title" Text="{Binding Title}" Margin="8,0,0,0"
+                                       VerticalAlignment="Center" Opacity="0.65" />
+                        </StackPanel>
+                    </Button>
                     <DataTemplate.Triggers>
                         <DataTrigger Binding="{Binding IsDone}" Value="True">
                             <Setter TargetName="Dot" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
-                            <Setter TargetName="Number" Property="Foreground" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter TargetName="Check" Property="Foreground" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                            <Setter TargetName="Check" Property="Visibility" Value="Visible" />
+                            <Setter TargetName="Number" Property="Visibility" Value="Collapsed" />
                             <Setter TargetName="Title" Property="Opacity" Value="0.9" />
                         </DataTrigger>
                         <DataTrigger Binding="{Binding IsCurrent}" Value="True">
