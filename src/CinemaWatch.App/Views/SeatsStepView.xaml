@@ -86,7 +86,7 @@
                                     Width="{Binding ScreenWidth}">
                             <Border Height="{Binding ScreenBarHeight}" CornerRadius="9" Opacity="0.85"
                                     Background="{DynamicResource AccentFillColorDefaultBrush}" />
-                            <TextBlock Text="EKRAN" FontSize="28" FontWeight="SemiBold" Opacity="0.6"
+                            <TextBlock Text="{Binding Screen, Source={StaticResource T}}" FontSize="28" FontWeight="SemiBold" Opacity="0.6"
                                        HorizontalAlignment="Center" Margin="0,8,0,0" />
                         </StackPanel>
                     </Canvas>
@@ -148,7 +148,7 @@
                     <StackPanel Margin="6,4" MinWidth="150">
                         <TextBlock Text="{Binding Title}" FontWeight="SemiBold" />
                         <TextBlock x:Name="Status" Text="{Binding StatusText}" Style="{StaticResource CaptionText}" />
-                        <TextBlock x:Name="Watched" Text="{Binding WatchedCount, StringFormat='Monitorowane: {0}'}"
+                        <TextBlock x:Name="Watched" Text="{Binding WatchedText}"
                                    FontSize="12" Foreground="{StaticResource SeatWatchedBrush}" />
                     </StackPanel>
                     <DataTemplate.Triggers>
@@ -183,13 +183,13 @@
                         <TextBlock Text="{Binding ActionText}" Style="{StaticResource CaptionText}" />
                     </StackPanel>
                     <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="Miejsc obok siebie" Style="{StaticResource CaptionText}"
+                        <TextBlock Text="{Binding SeatsTogether, Source={StaticResource T}}" Style="{StaticResource CaptionText}"
                                    VerticalAlignment="Center" Margin="0,0,8,0" />
                         <ComboBox ItemsSource="{Binding AdjacentOptions}" SelectedItem="{Binding MinAdjacent, Mode=TwoWay}"
                                   MinWidth="72" Margin="0,0,16,0"
-                                  ToolTip="Powiadamiaj tylko, gdy tyle zaznaczonych miejsc będzie wolnych obok siebie" />
-                        <Button Content="Zastosuj do wszystkich seansów" Command="{Binding ApplyToAllCommand}" Margin="0,0,8,0" />
-                        <Button Content="Wyczyść" Command="{Binding ClearCommand}" />
+                                  ToolTip="{Binding SeatsTogetherToolTip, Source={StaticResource T}}" />
+                        <Button Content="{Binding ApplyToAll, Source={StaticResource T}}" Command="{Binding ApplyToAllCommand}" Margin="0,0,8,0" />
+                        <Button Content="{Binding Clear, Source={StaticResource T}}" Command="{Binding ClearCommand}" />
                     </StackPanel>
                 </Grid>
 
@@ -209,14 +209,14 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <Ellipse Width="14" Height="14" Fill="{StaticResource SeatFreeBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Wolne" Style="{StaticResource CaptionText}" Margin="6,0,16,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding LegendFree, Source={StaticResource T}}" Style="{StaticResource CaptionText}" Margin="6,0,16,0" VerticalAlignment="Center" />
                         <Ellipse Width="14" Height="14" Fill="{StaticResource SeatTakenBrush}" VerticalAlignment="Center" />
-                        <TextBlock Text="Zajęte" Style="{StaticResource CaptionText}" Margin="6,0,16,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding LegendTaken, Source={StaticResource T}}" Style="{StaticResource CaptionText}" Margin="6,0,16,0" VerticalAlignment="Center" />
                         <Ellipse Width="14" Height="14" Stroke="{StaticResource SeatWatchedBrush}" StrokeThickness="3"
                                  VerticalAlignment="Center" />
-                        <TextBlock Text="Monitorowane" Style="{StaticResource CaptionText}" Margin="6,0,16,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding LegendWatched, Source={StaticResource T}}" Style="{StaticResource CaptionText}" Margin="6,0,16,0" VerticalAlignment="Center" />
                         <TextBlock Text="&#x267F;" FontSize="13" VerticalAlignment="Center" />
-                        <TextBlock Text="Dla osoby na wózku" Style="{StaticResource CaptionText}" Margin="6,0,0,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding LegendWheelchair, Source={StaticResource T}}" Style="{StaticResource CaptionText}" Margin="6,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
                     <TextBlock Grid.Column="1" Text="{Binding HintText}" Style="{StaticResource CaptionText}"
                                TextAlignment="Right" Margin="24,0,0,0" VerticalAlignment="Center" />

@@ -9,13 +9,13 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Grid.Row="0" Text="Film i seanse" Style="{StaticResource PageTitleText}" />
+        <TextBlock Grid.Row="0" Text="{Binding ScreeningsTitle, Source={StaticResource T}}" Style="{StaticResource PageTitleText}" />
         <TextBlock Grid.Row="1" Style="{StaticResource CaptionText}" Margin="0,4,0,16"
-                   Text="Widoczne są tylko seanse IMAX z napisami. Wyprzedane też możesz zaznaczyć - właśnie je warto monitorować." />
+                   Text="{Binding ScreeningsIntro, Source={StaticResource T}}" />
 
         <Border Grid.Row="2" Style="{StaticResource Card}">
             <StackPanel>
-                <TextBlock Text="Film" Style="{StaticResource FieldLabelText}" />
+                <TextBlock Text="{Binding Film, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
                 <ComboBox ItemsSource="{Binding Films}" SelectedItem="{Binding SelectedFilm, Mode=TwoWay}"
                           DisplayMemberPath="DisplayName" MinWidth="360" HorizontalAlignment="Left"
                           IsEnabled="{Binding HasFilms}" />
@@ -30,13 +30,13 @@
                 </Grid.RowDefinitions>
 
                 <DockPanel Grid.Row="0" LastChildFill="False">
-                    <TextBlock DockPanel.Dock="Left" Text="Seanse" Style="{StaticResource SectionHeaderText}"
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding Screenings, Source={StaticResource T}}" Style="{StaticResource SectionHeaderText}"
                                Margin="0" VerticalAlignment="Center" />
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                         <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource CaptionText}"
                                    VerticalAlignment="Center" Margin="0,0,12,0" />
-                        <Button Content="Zaznacz wszystkie" Command="{Binding SelectAllCommand}" Margin="0,0,8,0" />
-                        <Button Content="Wyczyść" Command="{Binding ClearAllCommand}" />
+                        <Button Content="{Binding SelectAll, Source={StaticResource T}}" Command="{Binding SelectAllCommand}" Margin="0,0,8,0" />
+                        <Button Content="{Binding Clear, Source={StaticResource T}}" Command="{Binding ClearAllCommand}" />
                     </StackPanel>
                 </DockPanel>
 

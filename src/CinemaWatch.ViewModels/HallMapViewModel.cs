@@ -1,5 +1,6 @@
 using System.Windows.Input;
 using CinemaWatch.Core;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.ViewModels;
 
@@ -144,6 +145,12 @@ public sealed class HallMapViewModel : ObservableObject
 
     public void Clear() => SetWatched([]);
 
+    public void RefreshTexts()
+    {
+        foreach (var seat in SeatViews) seat.RefreshTexts();
+        foreach (var label in RowLabels) label.RefreshTexts();
+    }
+
     private void Batch(Action action)
     {
         _suppressChanges = true;
@@ -221,8 +228,11 @@ public sealed class SeatViewModel : ObservableObject
     public string Text => IsWheelchair ? "\u267F" : Seat.Label;
 
     public string ToolTip =>
-        $"Rząd {Seat.Row}, miejsce {Seat.Label} · {(IsFree ? "wolne" : "zajęte")}"
-        + (IsWheelchair ? " · dla osoby na wózku" : "");
+        T($"Rząd {Seat.Row}, miejsce {Seat.Label} · {(IsFree ? "wolne" : "zajęte")}",
+          $"Row {Seat.Row}, seat {Seat.Label} · {(IsFree ? "free" : "taken")}")
+        + (IsWheelchair ? T(" · dla osoby na wózku", " · wheelchair space") : "");
+
+    public void RefreshTexts() => OnPropertyChanged(nameof(ToolTip));
 
     public bool IsWatched
     {
@@ -245,7 +255,10 @@ public sealed class RowLabelViewModel(string label, double left, double top, dou
     public double Size { get; } = size;
     public ICommand ToggleCommand { get; } = toggleCommand;
 
-    public string ToolTip => $"Rząd {Label}: kliknij, aby zaznaczyć lub odznaczyć cały rząd";
+    public string ToolTip => T($"Rząd {Label}: kliknij, aby zaznaczyć lub odznaczyć cały rząd",
+        $"Row {Label}: click to select or clear the whole row");
+
+    public void RefreshTexts() => OnPropertyChanged(nameof(ToolTip));
 
     public RowWatchState State
     {

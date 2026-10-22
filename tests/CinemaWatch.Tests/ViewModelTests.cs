@@ -196,10 +196,68 @@ internal static class ViewModelTests
         });
     }
 
-    /// <summary>Wizard on 16.12 with the 16:00 and 22:30 screenings selected, ending on the hall maps.</summary>
-    private static async Task<MainViewModel> OpenSeatsStepAsync(CinemaCityClient client, FakeUi ui, FakeScheduler scheduler)
+    public static void RegisterLanguageTests()
     {
-        var vm = new MainViewModel(client, ui, scheduler, Environment, () => Now);
+        TestRunner.Add("Language switch: every visible text follows without a restart; cards start collapsed", async () =>
+        {
+            using var client = new CinemaCityClient(new AnyScreeningHandler());
+            var refreshes = 0;
+            var uiChanges = 0;
+            var vm = await OpenSeatsStepAsync(client, new FakeUi(), new FakeScheduler(), () => refreshes++);
+            try
+            {
+                Assert.Equal($"CinemaWatch {AppInfo.Version}", vm.WindowTitle);
+                vm.SeatsStep.Items[0].Map!.RowLabels.First(l => l.Label == "8").ToggleCommand.Execute(null);
+                await vm.NextCommand.ExecuteAsync();
+                var card = vm.SummaryStep.Items[0];
+                Assert.True(!card.IsExpanded);
+                card.ToggleExpandedCommand.Execute(null);
+                Assert.True(card.IsExpanded);
+                Assert.Equal("Rząd 8", card.Rows.Single().Row);
+
+                UiText.Instance.PropertyChanged += OnUiChanged;
+                vm.SelectedLanguage = vm.Languages.Single(l => l.Language == AppLanguage.English);
+                UiText.Instance.PropertyChanged -= OnUiChanged;
+
+                Assert.Equal(1, refreshes);
+                Assert.True(uiChanges >= 1);
+                Assert.Equal("Next", UiText.Instance.Next);
+                Assert.Equal("English", vm.SelectedLanguage.Name);
+                Assert.Equal("Cinema and dates", vm.Steps[0].Title);
+                Assert.Equal("Diuna: Część trzecia (4 screenings)", vm.ScreeningsStep.SelectedFilm!.DisplayName);
+                Assert.Equal("Wednesday, 16 December 2026", vm.ScreeningsStep.Days[0].Header);
+                Assert.Equal("EN · PL subtitles", vm.ScreeningsStep.Days[0].Screenings[0].DetailText);
+                Assert.Equal("Free: 198 of 383", vm.SeatsStep.Items[0].StatusText);
+                Assert.True(vm.SeatsStep.Items[0].SelectionText.StartsWith("Watching 37 seats · free now:"));
+                Assert.Equal("Row 8", card.Rows.Single().Row);
+                Assert.Equal("whole row", card.Rows.Single().Text);
+                Assert.Equal("Wednesday, 16 December 2026, 16:00", card.Title);
+                Assert.Equal("Notification: when any of the selected seats becomes free.", vm.SummaryStep.ConditionText);
+                Assert.Equal("Task Scheduler: save the profile first.", vm.SummaryStep.ScheduleStatusText);
+
+                // Messages already shown re-render in the new language.
+                vm.BackCommand.Execute(null);
+                vm.SeatsStep.Items[0].Map!.Clear();
+                await vm.NextCommand.ExecuteAsync();
+                Assert.Equal("Select at least one row or seat.", vm.ErrorText);
+                vm.SelectedLanguage = vm.Languages.Single(l => l.Language == AppLanguage.Polish);
+                Assert.Equal("Zaznacz co najmniej jeden rząd albo jedno miejsce.", vm.ErrorText);
+                Assert.Equal(2, refreshes);
+            }
+            finally
+            {
+                Localizer.SetLanguage(AppLanguage.Polish);
+                vm.Dispose();
+            }
+
+            void OnUiChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => uiChanges++;
+        });
+    }
+
+    /// <summary>Wizard on 16.12 with the 16:00 and 22:30 screenings selected, ending on the hall maps.</summary>    /// <summary>Wizard on 16.12 with the 16:00 and 22:30 screenings selected, ending on the hall maps.</summary>
+    private static async Task<MainViewModel> OpenSeatsStepAsync(CinemaCityClient client, FakeUi ui, FakeScheduler scheduler, Action? languageChanged = null)
+    {
+        var vm = new MainViewModel(client, ui, scheduler, Environment, () => Now, languageChanged);
         vm.DatesStep.DateFrom = new DateTime(2026, 12, 16);
         await vm.NextCommand.ExecuteAsync();
         vm.ScreeningsStep.Days[0].Screenings.Single(o => o.TimeText == "16:00").IsChecked = true;

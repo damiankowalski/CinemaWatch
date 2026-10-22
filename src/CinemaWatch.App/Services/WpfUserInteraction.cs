@@ -9,7 +9,6 @@ namespace CinemaWatch.Services;
 /// <summary>WPF implementation of dialogs and shell actions used by the view models.</summary>
 internal sealed class WpfUserInteraction : IUserInteraction
 {
-    private const string Filter = "Profil CinemaWatch (*.cinemawatch.json)|*.cinemawatch.json|Wszystkie pliki (*.*)|*.*";
 
     private static Window? Owner => Application.Current?.MainWindow;
 
@@ -17,8 +16,8 @@ internal sealed class WpfUserInteraction : IUserInteraction
     {
         var dialog = new OpenFileDialog
         {
-            Title = "Otwórz profil CinemaWatch",
-            Filter = Filter,
+            Title = UiText.Instance.OpenProfileDialogTitle,
+            Filter = UiText.Instance.ProfileFileFilter,
             InitialDirectory = initialDirectory,
             CheckFileExists = true,
         };
@@ -30,8 +29,8 @@ internal sealed class WpfUserInteraction : IUserInteraction
     {
         var dialog = new SaveFileDialog
         {
-            Title = "Zapisz profil CinemaWatch",
-            Filter = Filter,
+            Title = UiText.Instance.SaveProfileDialogTitle,
+            Filter = UiText.Instance.ProfileFileFilter,
             InitialDirectory = initialDirectory,
             FileName = fileName,
             AddExtension = false,

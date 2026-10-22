@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.Core;
 
@@ -39,15 +40,17 @@ public sealed class SchtasksScheduler : ITaskScheduler
     public async Task<SchedulerResult> RegisterAsync(string taskName, string exePath, string profilePath, int intervalMinutes)
     {
         if (intervalMinutes is < 1 or > 1439)
-            return new SchedulerResult(false, "Interwał musi wynosić od 1 do 1439 minut.");
+            return new SchedulerResult(false, T("Interwał musi wynosić od 1 do 1439 minut.", "The interval must be between 1 and 1439 minutes."));
         var command = BuildTaskCommand(exePath, profilePath);
         if (command.Length > MaxTaskCommandLength)
-            return new SchedulerResult(false, $"Ścieżki są za długie dla Harmonogramu zadań ({command.Length} > {MaxTaskCommandLength} znaków). Przenieś aplikację lub profil do krótszej ścieżki.");
+            return new SchedulerResult(false, T(
+                $"Ścieżki są za długie dla Harmonogramu zadań ({command.Length} > {MaxTaskCommandLength} znaków). Przenieś aplikację lub profil do krótszej ścieżki.",
+                $"The paths are too long for Task Scheduler ({command.Length} > {MaxTaskCommandLength} characters). Move the app or the profile to a shorter path."));
 
         var (exitCode, output) = await RunAsync(BuildCreateArguments(taskName, exePath, profilePath, intervalMinutes));
         return exitCode == 0
-            ? new SchedulerResult(true, $"Dodano zadanie {taskName} (co {intervalMinutes} min).")
-            : new SchedulerResult(false, $"schtasks zakończył się kodem {exitCode}: {output}");
+            ? new SchedulerResult(true, T($"Dodano zadanie {taskName} (co {intervalMinutes} min).", $"Added task {taskName} (every {intervalMinutes} min)."))
+            : new SchedulerResult(false, T($"schtasks zakończył się kodem {exitCode}: {output}", $"schtasks failed with exit code {exitCode}: {output}"));
     }
 
     public async Task<bool> ExistsAsync(string taskName) => (await RunAsync(["/Query", "/TN", taskName])).ExitCode == 0;
@@ -56,8 +59,8 @@ public sealed class SchtasksScheduler : ITaskScheduler
     {
         var (exitCode, output) = await RunAsync(["/Delete", "/F", "/TN", taskName]);
         return exitCode == 0
-            ? new SchedulerResult(true, $"Usunięto zadanie {taskName}.")
-            : new SchedulerResult(false, $"schtasks zakończył się kodem {exitCode}: {output}");
+            ? new SchedulerResult(true, T($"Usunięto zadanie {taskName}.", $"Removed task {taskName}."))
+            : new SchedulerResult(false, T($"schtasks zakończył się kodem {exitCode}: {output}", $"schtasks failed with exit code {exitCode}: {output}"));
     }
 
     private static async Task<(int ExitCode, string Output)> RunAsync(IEnumerable<string> arguments)
@@ -76,7 +79,7 @@ public sealed class SchtasksScheduler : ITaskScheduler
         foreach (var argument in arguments)
             start.ArgumentList.Add(argument);
 
-        using var process = Process.Start(start) ?? throw new InvalidOperationException("Nie udało się uruchomić schtasks.exe.");
+        using var process = Process.Start(start) ?? throw new InvalidOperationException(T("Nie udało się uruchomić schtasks.exe.", "Could not start schtasks.exe."));
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync();

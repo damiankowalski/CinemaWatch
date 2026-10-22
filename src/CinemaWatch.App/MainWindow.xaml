@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:CinemaWatch.ViewModels;assembly=CinemaWatch.ViewModels"
         xmlns:views="clr-namespace:CinemaWatch.Views"
-        Title="CinemaWatch"
+        Title="{Binding WindowTitle}"
         Icon="pack://application:,,,/Assets/CinemaWatch.ico"
         Width="1280" Height="820" MinWidth="1000" MinHeight="680"
         WindowStartupLocation="CenterScreen">
@@ -37,11 +37,14 @@
         <Grid Grid.Row="0">
             <StackPanel>
                 <TextBlock Text="CinemaWatch" Style="{StaticResource AppTitleText}" />
-                <TextBlock Text="Monitor wolnych miejsc · Cinema City" Style="{StaticResource CaptionText}" />
+                <TextBlock Text="{Binding AppSubtitle, Source={StaticResource T}}" Style="{StaticResource CaptionText}" />
             </StackPanel>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                <Button Content="Nowy profil" Command="{Binding NewProfileCommand}" Margin="0,0,8,0" />
-                <Button Content="Otwórz profil…" Command="{Binding OpenProfileCommand}" />
+                <Button Content="{Binding NewProfile, Source={StaticResource T}}" Command="{Binding NewProfileCommand}" Margin="0,0,8,0" />
+                <Button Content="{Binding OpenProfile, Source={StaticResource T}}" Command="{Binding OpenProfileCommand}" Margin="0,0,8,0" />
+                <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedLanguage, Mode=TwoWay}"
+                          DisplayMemberPath="Name" MinWidth="110" VerticalAlignment="Center"
+                          ToolTip="{Binding LanguageToolTip, Source={StaticResource T}}" />
             </StackPanel>
         </Grid>
 
@@ -107,9 +110,9 @@
             </DockPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button Content="Wstecz" MinWidth="120" Margin="0,0,8,0" Command="{Binding BackCommand}"
+                <Button Content="{Binding Back, Source={StaticResource T}}" MinWidth="120" Margin="0,0,8,0" Command="{Binding BackCommand}"
                         Visibility="{Binding CanGoBack, Converter={StaticResource BoolToVisibility}}" />
-                <Button Content="Dalej" MinWidth="120" Command="{Binding NextCommand}" IsDefault="True"
+                <Button Content="{Binding Next, Source={StaticResource T}}" MinWidth="120" Command="{Binding NextCommand}" IsDefault="True"
                         Style="{DynamicResource AccentButtonStyle}"
                         Visibility="{Binding IsLastStep, Converter={StaticResource InverseBoolToVisibility}}" />
             </StackPanel>

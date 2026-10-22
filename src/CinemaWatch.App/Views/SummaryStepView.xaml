@@ -1,6 +1,30 @@
 <UserControl x:Class="CinemaWatch.Views.SummaryStepView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <UserControl.Resources>
+        <!-- Clickable card header: the whole row toggles the details. -->
+        <Style x:Key="CardHeaderButtonStyle" TargetType="Button">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Back" Background="Transparent" CornerRadius="8" Padding="16,12">
+                            <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Back" Property="Background" Value="{StaticResource NeutralBackgroundBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
@@ -16,23 +40,39 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <TextBlock Grid.Row="0" Text="Podsumowanie" Style="{StaticResource PageTitleText}" />
+            <TextBlock Grid.Row="0" Text="{Binding SummaryTitle, Source={StaticResource T}}" Style="{StaticResource PageTitleText}" />
             <TextBlock Grid.Row="1" Text="{Binding ConditionText}" Style="{StaticResource CaptionText}" Margin="0,4,0,16" />
 
             <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                <StackPanel>
+                <StackPanel Margin="0,0,14,0">
                     <ItemsControl ItemsSource="{Binding Items}" Focusable="False">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Style="{StaticResource Card}" Margin="0,0,0,8">
+                                <Border Style="{StaticResource Card}" Margin="0,0,0,8" Padding="0">
                                     <StackPanel>
-                                        <DockPanel>
-                                            <TextBlock DockPanel.Dock="Right" Text="{Binding CountsText}"
-                                                       Style="{StaticResource CaptionText}" VerticalAlignment="Center" />
-                                            <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
-                                        </DockPanel>
-                                        <TextBlock Text="{Binding Subtitle}" Style="{StaticResource CaptionText}" Margin="0,2,0,10" />
-                                        <ItemsControl ItemsSource="{Binding Rows}" Focusable="False">
+                                        <!-- Header (always visible) -->
+                                        <Button Command="{Binding ToggleExpandedCommand}" Style="{StaticResource CardHeaderButtonStyle}"
+                                                ToolTip="{Binding ExpandToolTip, Source={StaticResource T}}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
+                                                    <TextBlock Text="{Binding Subtitle}" Style="{StaticResource CaptionText}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="1" Text="{Binding CountsText}" Style="{StaticResource CaptionText}"
+                                                           VerticalAlignment="Center" Margin="16,0,16,0" />
+                                                <TextBlock x:Name="Chevron" Grid.Column="2" Text="&#xE70D;" FontSize="14"
+                                                           FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" VerticalAlignment="Center" />
+                                            </Grid>
+                                        </Button>
+
+                                        <!-- Details (expanded only) -->
+                                        <ItemsControl ItemsSource="{Binding Rows}" Focusable="False" Margin="16,0,16,12"
+                                                      Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVisibility}}">
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate>
                                                     <Grid Margin="0,2">
@@ -47,13 +87,13 @@
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
 
-                                        <!-- Result of the last "check now" -->
-                                        <Border x:Name="Result" Margin="0,10,0,0" Padding="10,6" CornerRadius="6" BorderThickness="1"
+                                        <!-- Result of the last "check now" (visible in both states) -->
+                                        <Border x:Name="Result" Margin="16,0,16,12" Padding="10,6" CornerRadius="6" BorderThickness="1"
                                                 Background="{StaticResource NeutralBackgroundBrush}" BorderBrush="Transparent"
                                                 Visibility="{Binding HasResult, Converter={StaticResource BoolToVisibility}}">
                                             <DockPanel>
-                                                <Button DockPanel.Dock="Right" Content="Kup bilet" Margin="12,0,0,0"
-                                                        Command="{Binding BuyCommand}"
+                                                <Button DockPanel.Dock="Right" Content="{Binding BuyTicket, Source={StaticResource T}}"
+                                                        Margin="12,0,0,0" Command="{Binding BuyCommand}"
                                                         Visibility="{Binding IsMatch, Converter={StaticResource BoolToVisibility}}" />
                                                 <TextBlock Text="{Binding ResultText}" TextWrapping="Wrap" VerticalAlignment="Center" />
                                             </DockPanel>
@@ -61,6 +101,9 @@
                                     </StackPanel>
                                 </Border>
                                 <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding IsExpanded}" Value="True">
+                                        <Setter TargetName="Chevron" Property="Text" Value="&#xE70E;" />
+                                    </DataTrigger>
                                     <DataTrigger Binding="{Binding IsMatch}" Value="True">
                                         <Setter TargetName="Result" Property="Background" Value="{StaticResource MatchBackgroundBrush}" />
                                         <Setter TargetName="Result" Property="BorderBrush" Value="{StaticResource MatchBorderBrush}" />
@@ -81,39 +124,43 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <!-- Right margin keeps the (overlay) scrollbar off the controls. -->
                 <StackPanel Margin="0,0,14,0">
-                    <TextBlock Text="Profil" Style="{StaticResource SectionHeaderText}" />
+                    <TextBlock Text="{Binding Profile, Source={StaticResource T}}" Style="{StaticResource SectionHeaderText}" />
 
-                    <TextBlock Text="Nazwa" Style="{StaticResource FieldLabelText}" />
+                    <TextBlock Text="{Binding Name, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
                     <TextBox Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" />
-                    <TextBlock Text="Plik" Style="{StaticResource FieldLabelText}" />
+                    <TextBlock Text="{Binding File, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
                     <TextBlock Text="{Binding ProfilePathText}" Style="{StaticResource CaptionText}" Margin="0,0,0,12" />
 
-                    <Button Content="Sprawdź teraz" Command="{Binding CheckNowCommand}" HorizontalAlignment="Stretch"
-                            Style="{DynamicResource AccentButtonStyle}" />
+                    <Button Content="{Binding CheckNow, Source={StaticResource T}}" Command="{Binding CheckNowCommand}"
+                            HorizontalAlignment="Stretch" Style="{DynamicResource AccentButtonStyle}" />
                     <TextBlock Text="{Binding LastCheckText}" Style="{StaticResource CaptionText}" Margin="0,6,0,0"
                                Visibility="{Binding LastCheckText, Converter={StaticResource EmptyToCollapsed}}" />
 
                     <UniformGrid Columns="2" Margin="0,12,0,0">
-                        <Button Content="Zapisz profil…" Command="{Binding SaveCommand}" Margin="0,0,4,0" HorizontalAlignment="Stretch" />
-                        <Button Content="Kopiuj polecenie" Command="{Binding CopyCommandLineCommand}" Margin="4,0,0,0" HorizontalAlignment="Stretch"
-                                ToolTip="Kopiuje do schowka polecenie uruchamiające sprawdzenie tego profilu bez okna" />
+                        <Button Content="{Binding SaveProfile, Source={StaticResource T}}" Command="{Binding SaveCommand}"
+                                Margin="0,0,4,0" HorizontalAlignment="Stretch" />
+                        <Button Content="{Binding CopyCommand, Source={StaticResource T}}" Command="{Binding CopyCommandLineCommand}"
+                                Margin="4,0,0,0" HorizontalAlignment="Stretch"
+                                ToolTip="{Binding CopyCommandToolTip, Source={StaticResource T}}" />
                     </UniformGrid>
 
                     <Separator Margin="0,14" />
 
-                    <TextBlock Text="Harmonogram zadań" Style="{StaticResource SectionHeaderText}" />
-                    <TextBlock Text="Sprawdzaj" Style="{StaticResource FieldLabelText}" />
+                    <TextBlock Text="{Binding TaskScheduler, Source={StaticResource T}}" Style="{StaticResource SectionHeaderText}" />
+                    <TextBlock Text="{Binding CheckEvery, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
                     <ComboBox ItemsSource="{Binding IntervalOptions}" SelectedItem="{Binding IntervalMinutes, Mode=TwoWay}"
                               HorizontalAlignment="Left" MinWidth="140" Margin="0,0,0,12">
                         <ComboBox.ItemTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding StringFormat='co {0} min'}" />
+                                <TextBlock Text="{Binding StringFormat='{}{0} min'}" />
                             </DataTemplate>
                         </ComboBox.ItemTemplate>
                     </ComboBox>
                     <UniformGrid Columns="2">
-                        <Button Content="Dodaj do Harmonogramu" Command="{Binding ScheduleCommand}" Margin="0,0,4,0" HorizontalAlignment="Stretch" />
-                        <Button Content="Usuń z Harmonogramu" Command="{Binding UnscheduleCommand}" Margin="4,0,0,0" HorizontalAlignment="Stretch" />
+                        <Button Content="{Binding AddToScheduler, Source={StaticResource T}}" Command="{Binding ScheduleCommand}"
+                                Margin="0,0,4,0" HorizontalAlignment="Stretch" />
+                        <Button Content="{Binding RemoveFromScheduler, Source={StaticResource T}}" Command="{Binding UnscheduleCommand}"
+                                Margin="4,0,0,0" HorizontalAlignment="Stretch" />
                     </UniformGrid>
                     <TextBlock Text="{Binding ScheduleStatusText}" Style="{StaticResource CaptionText}" Margin="0,6,0,0" />
 

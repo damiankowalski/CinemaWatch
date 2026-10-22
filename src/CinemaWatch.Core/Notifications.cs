@@ -1,5 +1,5 @@
-using System.Globalization;
 using System.Xml.Linq;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.Core;
 
@@ -15,7 +15,6 @@ public interface INotifier
 public static class NotificationBuilder
 {
     private const int MaxScreeningLines = 3;
-    private static readonly CultureInfo Polish = CultureInfo.GetCultureInfo("pl-PL");
 
     public static AvailabilityNotification Build(
         WatchProfile profile, IReadOnlyList<(WatchedScreening Screening, IReadOnlyList<Seat> Seats)> matches)
@@ -23,23 +22,23 @@ public static class NotificationBuilder
         var ordered = matches.OrderBy(m => m.Screening.StartsAt).ToList();
         var lines = ordered
             .Take(MaxScreeningLines)
-            .Select(m => $"{m.Screening.StartsAt.ToString("ddd d.MM, HH:mm", Polish)} · {DescribeSeats(m.Seats)}")
+            .Select(m => $"{m.Screening.StartsAt.ToString(T("ddd d.MM, HH:mm", "ddd d MMM, HH:mm"), Culture)} · {DescribeSeats(m.Seats)}")
             .ToList();
         var rest = ordered.Count - MaxScreeningLines;
         if (rest > 0)
-            lines.Add(rest == 1 ? "+ 1 kolejny seans" : $"+ {rest} kolejne seanse");
+            lines.Add("+ " + Count(rest, "kolejny seans", "kolejne seanse", "kolejnych seansów", "more screening", "more screenings"));
 
         var film = string.IsNullOrWhiteSpace(profile.FilmName) ? profile.Name : profile.FilmName;
         var url = ordered.Select(m => m.Screening.BookingLink).FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
-        return new AvailabilityNotification($"Wolne miejsca: {film}", lines, url);
+        return new AvailabilityNotification($"{T("Wolne miejsca", "Seats available")}: {film}", lines, url);
     }
 
-    /// <summary>"rząd 8: 12, 13 · rząd 9: 5"</summary>
+    /// <summary>"rząd 8: 12, 13 · rząd 9: 5" / "row 8: 12, 13 · row 9: 5"</summary>
     public static string DescribeSeats(IEnumerable<Seat> seats) =>
         string.Join(" · ", seats
             .GroupBy(s => (s.Section, s.RowKey))
             .OrderBy(g => g.Average(s => s.Y))
-            .Select(g => $"rząd {g.First().Row}: {SeatSelectionText.CompressLabels(g.Select(s => s.Label))}"));
+            .Select(g => $"{T("rząd", "row")} {g.First().Row}: {SeatSelectionText.CompressLabels(g.Select(s => s.Label))}"));
 }
 
 /// <summary>Builds Windows toast XML. Clicking the toast or the button opens the booking page (protocol activation).</summary>
@@ -60,7 +59,7 @@ public static class ToastXml
             toast.Add(new XAttribute("activationType", "protocol"), new XAttribute("launch", notification.LaunchUrl));
             toast.Add(new XElement("actions",
                 new XElement("action",
-                    new XAttribute("content", "Kup bilet"),
+                    new XAttribute("content", T("Kup bilet", "Buy ticket")),
                     new XAttribute("activationType", "protocol"),
                     new XAttribute("arguments", notification.LaunchUrl))));
         }

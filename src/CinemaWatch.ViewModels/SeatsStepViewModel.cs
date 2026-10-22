@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CinemaWatch.Core;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.ViewModels;
 
@@ -12,8 +13,8 @@ public sealed class SeatsStepViewModel : ObservableObject
     private readonly Dictionary<string, HashSet<string>> _selections = new(StringComparer.Ordinal);
     private ScreeningSeatsItem? _selectedItem;
     private int _minAdjacent = 1;
-    private string? _summary;
-    private string? _actionText;
+    private Func<string>? _summary;
+    private Func<string>? _actionText;
 
     public SeatsStepViewModel()
     {
@@ -28,7 +29,9 @@ public sealed class SeatsStepViewModel : ObservableObject
 
     public IReadOnlyList<int> AdjacentOptions { get; } = [1, 2, 3, 4, 5, 6];
 
-    public string HintText => "Kliknij numer rzędu, aby zaznaczyć cały rząd. Kliknij miejsce, aby je dodać lub usunąć - także zajęte.";
+    public string HintText => T(
+        "Kliknij numer rzędu, aby zaznaczyć cały rząd. Kliknij miejsce, aby je dodać lub usunąć - także zajęte.",
+        "Click a row number to select the whole row. Click a seat to add or remove it - taken seats too.");
 
     public ScreeningSeatsItem? SelectedItem
     {
@@ -36,7 +39,7 @@ public sealed class SeatsStepViewModel : ObservableObject
         set
         {
             if (!SetProperty(ref _selectedItem, value)) return;
-            ActionText = null;
+            SetActionText(null);
             RefreshCommands();
         }
     }
@@ -49,29 +52,22 @@ public sealed class SeatsStepViewModel : ObservableObject
         {
             if (!SetProperty(ref _minAdjacent, Math.Max(1, value))) return;
             foreach (var item in Items)
-                item.UpdateSelectionText(_minAdjacent);
+                item.SetMinAdjacent(_minAdjacent);
         }
     }
 
-    public string? Summary
-    {
-        get => _summary;
-        private set => SetProperty(ref _summary, value);
-    }
+    /// <summary>Status line after loading (shown in the window footer).</summary>
+    public string? Summary => _summary?.Invoke();
 
-    public string? ActionText
-    {
-        get => _actionText;
-        private set => SetProperty(ref _actionText, value);
-    }
+    public string? ActionText => _actionText?.Invoke();
 
     public async Task LoadAsync(SeatAvailabilityService service, IReadOnlyList<Screening> screenings, CancellationToken cancellationToken)
     {
         Items.Clear();
-        Summary = null;
-        ActionText = null;
+        SetSummary(null);
+        SetActionText(null);
         foreach (var screening in screenings)
-            Items.Add(new ScreeningSeatsItem(screening));
+            Items.Add(new ScreeningSeatsItem(screening, _minAdjacent));
         SelectedItem = Items.FirstOrDefault();
 
         var loaded = 0;
@@ -82,20 +78,22 @@ public sealed class SeatsStepViewModel : ObservableObject
             {
                 var seats = await service.GetScreeningSeatsAsync(item.Screening.Id, cancellationToken);
                 _selections.TryGetValue(item.Screening.Id, out var previous);
-                item.SetResult(seats, previous, _minAdjacent);
+                item.SetResult(seats, previous);
                 item.Map!.SelectionChanged += (_, _) => OnSelectionChanged(item);
                 loaded++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                item.SetError(ErrorMessages.Describe(ex));
+                item.SetError(ex);
             }
             RefreshCommands();
         }
 
-        Summary = loaded == Items.Count
-            ? $"Pobrano mapy sal: {Formatting.Count(loaded, "seans", "seanse", "seansów")}."
-            : $"Pobrano {loaded} z {Items.Count}. Seanse z błędem zostaną pominięte.";
+        var total = Items.Count;
+        SetSummary(loaded == total
+            ? () => T("Pobrano mapy sal: ", "Hall maps loaded: ") + Count(loaded, "seans", "seanse", "seansów", "screening", "screenings") + "."
+            : () => T($"Pobrano {loaded} z {total}. Seanse z błędem zostaną pominięte.",
+                      $"Loaded {loaded} of {total}. Screenings with errors will be skipped."));
     }
 
     /// <summary>Preloads watched seats per screening id (used when opening a profile).</summary>
@@ -112,20 +110,29 @@ public sealed class SeatsStepViewModel : ObservableObject
         _selections.Clear();
         SelectedItem = null;
         MinAdjacent = 1;
-        Summary = null;
-        ActionText = null;
+        SetSummary(null);
+        SetActionText(null);
     }
 
-    /// <summary>Returns a Polish error message, or null when at least one seat is watched.</summary>
+    /// <summary>Returns an error message in the current language, or null when at least one seat is watched.</summary>
     public string? Validate() =>
-        Items.Any(i => i.WatchedCount > 0) ? null : "Zaznacz co najmniej jeden rząd albo jedno miejsce.";
+        Items.Any(i => i.WatchedCount > 0) ? null : T("Zaznacz co najmniej jeden rząd albo jedno miejsce.", "Select at least one row or seat.");
+
+    public void RefreshTexts()
+    {
+        foreach (var item in Items)
+            item.RefreshTexts();
+        OnPropertyChanged(nameof(HintText));
+        OnPropertyChanged(nameof(Summary));
+        OnPropertyChanged(nameof(ActionText));
+    }
 
     private void OnSelectionChanged(ScreeningSeatsItem item)
     {
         if (item.Map is null) return;
         _selections[item.Screening.Id] = new HashSet<string>(item.Map.WatchedKeys, StringComparer.Ordinal);
-        item.UpdateSelectionText(_minAdjacent);
-        ActionText = null;
+        item.UpdateSelection();
+        SetActionText(null);
     }
 
     private void ApplyToAll()
@@ -148,10 +155,25 @@ public sealed class SeatsStepViewModel : ObservableObject
             }
         }
 
-        ActionText = copied == 0
-            ? "Brak innych seansów z tą samą salą."
-            : $"Skopiowano zaznaczenie do {Formatting.Count(copied, "seansu", "seansów", "seansów")}"
-              + (skipped > 0 ? $" (pominięto {skipped}: inna sala lub błąd pobierania)." : ".");
+        SetActionText(copied == 0
+            ? () => T("Brak innych seansów z tą samą salą.", "No other screenings in the same hall.")
+            : () => T($"Skopiowano zaznaczenie do {copied} {Plural(copied, "seansu", "seansów", "seansów", "", "")}",
+                      $"Selection copied to {Count(copied, "", "", "", "screening", "screenings")}")
+                    + (skipped > 0
+                        ? T($" (pominięto {skipped}: inna sala lub błąd pobierania).", $" ({skipped} skipped: different hall or loading error).")
+                        : "."));
+    }
+
+    private void SetSummary(Func<string>? text)
+    {
+        _summary = text;
+        OnPropertyChanged(nameof(Summary));
+    }
+
+    private void SetActionText(Func<string>? text)
+    {
+        _actionText = text;
+        OnPropertyChanged(nameof(ActionText));
     }
 
     private void RefreshCommands()
@@ -162,16 +184,15 @@ public sealed class SeatsStepViewModel : ObservableObject
 }
 
 /// <summary>One screening on step 3 (a tab with its hall map).</summary>
-public sealed class ScreeningSeatsItem(Screening screening) : ObservableObject
+public sealed class ScreeningSeatsItem(Screening screening, int minAdjacent) : ObservableObject
 {
     private HallMapViewModel? _map;
-    private string _statusText = "Ładowanie…";
-    private string? _errorText;
-    private string _selectionText = "";
+    private Exception? _error;
     private bool _isLoading = true;
+    private int _minAdjacent = minAdjacent;
 
     public Screening Screening { get; } = screening;
-    public string Title { get; } = Formatting.ShortDateTime(screening.StartsAt);
+    public string Title => Formatting.ShortDateTime(Screening.StartsAt);
 
     public HallMapViewModel? Map
     {
@@ -187,76 +208,84 @@ public sealed class ScreeningSeatsItem(Screening screening) : ObservableObject
     public ScreeningSeats? Seats => Map?.Seats;
     public int WatchedCount => Map?.WatchedCount ?? 0;
 
+    /// <summary>"Monitorowane: 37" / "Watched: 37"</summary>
+    public string WatchedText => $"{T("Monitorowane", "Watched")}: {WatchedCount}";
+
     /// <summary>Short occupancy text for the tab.</summary>
-    public string StatusText
+    public string StatusText => this switch
     {
-        get => _statusText;
-        private set => SetProperty(ref _statusText, value);
-    }
+        { IsLoading: true } => T("Ładowanie…", "Loading…"),
+        { IsError: true } => T("Błąd pobierania", "Loading failed"),
+        { Seats: { FreeCount: 0 } } => T("Brak wolnych miejsc", "No free seats"),
+        { Seats: { } s } => T($"Wolne: {s.FreeCount} z {s.TotalCount}", $"Free: {s.FreeCount} of {s.TotalCount}"),
+        _ => "",
+    };
 
-    public string? ErrorText
-    {
-        get => _errorText;
-        private set
-        {
-            if (SetProperty(ref _errorText, value))
-            {
-                OnPropertyChanged(nameof(IsError));
-                OnPropertyChanged(nameof(PlaceholderText));
-            }
-        }
-    }
-
-    public bool IsError => ErrorText is not null;
+    public string? ErrorText => _error is null ? null : ErrorMessages.Describe(_error);
+    public bool IsError => _error is not null;
 
     public bool IsLoading
     {
         get => _isLoading;
-        private set
-        {
-            if (SetProperty(ref _isLoading, value))
-                OnPropertyChanged(nameof(PlaceholderText));
-        }
+        private set => SetProperty(ref _isLoading, value);
     }
 
     /// <summary>Shown instead of the map while loading or after an error.</summary>
-    public string PlaceholderText => ErrorText ?? (IsLoading ? "Ładowanie mapy sali…" : "");
+    public string PlaceholderText => ErrorText ?? (IsLoading ? T("Ładowanie mapy sali…", "Loading the hall map…") : "");
 
     /// <summary>"Monitorujesz 37 miejsc · teraz wolnych: 5"</summary>
     public string SelectionText
     {
-        get => _selectionText;
-        private set => SetProperty(ref _selectionText, value);
+        get
+        {
+            if (Map is null || Map.WatchedCount == 0)
+                return T("Nic nie zaznaczono", "Nothing selected");
+
+            var available = SeatMatcher.FindAvailable(Map.Seats, Map.WatchedKeys, _minAdjacent).Count;
+            var watched = Map.WatchedCount;
+            return _minAdjacent > 1
+                ? T($"Monitorujesz {Count(watched, "miejsce", "miejsca", "miejsc", "", "")} · teraz wolnych (min. {_minAdjacent} obok siebie): {available}",
+                    $"Watching {Count(watched, "", "", "", "seat", "seats")} · free now ({_minAdjacent}+ together): {available}")
+                : T($"Monitorujesz {Count(watched, "miejsce", "miejsca", "miejsc", "", "")} · teraz wolnych: {available}",
+                    $"Watching {Count(watched, "", "", "", "seat", "seats")} · free now: {available}");
+        }
     }
 
-    public void SetResult(ScreeningSeats seats, IEnumerable<string>? watchedKeys, int minAdjacent)
+    public void SetResult(ScreeningSeats seats, IEnumerable<string>? watchedKeys)
     {
         Map = new HallMapViewModel(seats, watchedKeys);
-        StatusText = seats.FreeCount == 0
-            ? "Brak wolnych miejsc"
-            : $"Wolne: {seats.FreeCount} z {seats.TotalCount}";
         IsLoading = false;
-        UpdateSelectionText(minAdjacent);
+        RefreshTexts();
     }
 
-    public void SetError(string message)
+    public void SetError(Exception error)
     {
-        StatusText = "Błąd pobierania";
-        ErrorText = message;
+        _error = error;
         IsLoading = false;
+        RefreshTexts();
     }
 
-    public void UpdateSelectionText(int minAdjacent)
+    public void SetMinAdjacent(int minAdjacent)
+    {
+        _minAdjacent = minAdjacent;
+        OnPropertyChanged(nameof(SelectionText));
+    }
+
+    public void UpdateSelection()
     {
         OnPropertyChanged(nameof(WatchedCount));
-        if (Map is null || Map.WatchedCount == 0)
-        {
-            SelectionText = "Nic nie zaznaczono";
-            return;
-        }
+        OnPropertyChanged(nameof(WatchedText));
+        OnPropertyChanged(nameof(SelectionText));
+    }
 
-        var available = SeatMatcher.FindAvailable(Map.Seats, Map.WatchedKeys, minAdjacent).Count;
-        var condition = minAdjacent > 1 ? $" (min. {minAdjacent} obok siebie)" : "";
-        SelectionText = $"Monitorujesz {Formatting.Count(Map.WatchedCount, "miejsce", "miejsca", "miejsc")} · teraz wolnych{condition}: {available}";
+    public void RefreshTexts()
+    {
+        Map?.RefreshTexts();
+        foreach (var name in new[]
+                 {
+                     nameof(Title), nameof(StatusText), nameof(ErrorText), nameof(IsError), nameof(PlaceholderText),
+                     nameof(WatchedCount), nameof(WatchedText), nameof(SelectionText),
+                 })
+            OnPropertyChanged(name);
     }
 }

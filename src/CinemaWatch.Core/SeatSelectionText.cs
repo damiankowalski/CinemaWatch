@@ -1,11 +1,12 @@
 using System.Globalization;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.Core;
 
 /// <summary>Human readable description of the watched seats in one row, e.g. row "9": "10–14, 20".</summary>
 public sealed record RowSelection(string Row, string Text, bool IsWholeRow, int Count);
 
-/// <summary>Polish descriptions of a seat selection (used in the summary and in notifications).</summary>
+/// <summary>Descriptions of a seat selection in the current language (summary, notifications).</summary>
 public static class SeatSelectionText
 {
     /// <summary>Describes the selection row by row, ordered from the screen to the back.</summary>
@@ -26,13 +27,13 @@ public static class SeatSelectionText
 
             var parts = new List<string>();
             if (isWholeRow)
-                parts.Add("cały rząd");
+                parts.Add(T("cały rząd", "whole row"));
             else if (selected.Any(s => !s.IsWheelchair))
                 parts.Add(CompressLabels(selected.Where(s => !s.IsWheelchair).Select(s => s.Label)));
 
             var wheelchair = selected.Where(s => s.IsWheelchair).Select(s => s.Label).OrderBy(l => l, StringComparer.Ordinal).ToList();
             if (wheelchair.Count > 0)
-                parts.Add($"{string.Join(", ", wheelchair)} (dla osób na wózku)");
+                parts.Add($"{string.Join(", ", wheelchair)} {T("(dla osób na wózku)", "(wheelchair spaces)")}");
 
             result.Add(new RowSelection(row.First().Row, string.Join(" + ", parts), isWholeRow, selected.Count));
         }

@@ -349,7 +349,42 @@ TestRunner.Add("Seat plan cache: second process reuses the hall layout from disk
     }
 });
 
+TestRunner.Add("Localization: language detection, plurals, translated Core texts", () =>
+{
+    Assert.Equal(AppLanguage.Polish, Localizer.Detect(System.Globalization.CultureInfo.GetCultureInfo("pl-PL")));
+    Assert.Equal(AppLanguage.English, Localizer.Detect(System.Globalization.CultureInfo.GetCultureInfo("en-US")));
+    Assert.Equal(AppLanguage.English, Localizer.Detect(System.Globalization.CultureInfo.GetCultureInfo("de-DE")));
+    Assert.Equal(AppLanguage.English, Localizer.Parse("EN"));
+    Assert.Equal(null, Localizer.Parse("xx"));
+    Assert.True(System.Text.RegularExpressions.Regex.IsMatch(AppInfo.Version, @"^\d+\.\d+\.\d+$"));
+
+    var plan = CinemaCityParser.ParseSeatPlan(Fixture("seatplan-13-1.json"));
+    var profile = SampleProfile();
+    var seats = plan.Seats.Where(s => s.Key is "1_18_4" or "1_19_4").ToList();
+    try
+    {
+        Localizer.SetLanguage(AppLanguage.Polish);
+        Assert.Equal("5 seansów", Localizer.Count(5, "seans", "seanse", "seansów", "screening", "screenings"));
+        Assert.Equal("22 seanse", Localizer.Count(22, "seans", "seanse", "seansów", "screening", "screenings"));
+
+        Localizer.SetLanguage(AppLanguage.English);
+        Assert.Equal("1 screening", Localizer.Count(1, "seans", "seanse", "seansów", "screening", "screenings"));
+        Assert.Equal("5 screenings", Localizer.Count(5, "seans", "seanse", "seansów", "screening", "screenings"));
+        var n = NotificationBuilder.Build(profile, [(profile.Screenings[0], seats)]);
+        Assert.Equal("Seats available: Diuna: Część trzecia", n.Title);
+        Assert.Equal("Wed 16 Dec, 16:00 · row 4: 18, 19", n.Lines.Single());
+        Assert.True(ToastXml.Build(n).Contains("content=\"Buy ticket\""));
+        Assert.Equal("whole row", SeatSelectionText.Describe(plan, plan.SeatsInRow("8").Where(s => !s.IsWheelchair).Select(s => s.Key).ToHashSet()).Single().Text);
+        Assert.True(ErrorMessages.Describe(new CinemaCityException(HttpStatusCode.NotFound, "/x")).StartsWith("Cinema City could not find"));
+    }
+    finally
+    {
+        Localizer.SetLanguage(AppLanguage.Polish);
+    }
+});
+
 ViewModelTests.Register();
+ViewModelTests.RegisterLanguageTests();
 
 return await TestRunner.RunAsync();
 

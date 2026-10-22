@@ -3,13 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <StackPanel MaxWidth="680" HorizontalAlignment="Left">
-            <TextBlock Text="Kino i termin" Style="{StaticResource PageTitleText}" />
-            <TextBlock Text="Wybierz dzień albo zakres dni, w których chcesz szukać seansów."
+            <TextBlock Text="{Binding DatesTitle, Source={StaticResource T}}" Style="{StaticResource PageTitleText}" />
+            <TextBlock Text="{Binding DatesIntro, Source={StaticResource T}}"
                        Style="{StaticResource CaptionText}" Margin="0,4,0,16" />
 
             <Border Style="{StaticResource Card}">
                 <StackPanel>
-                    <TextBlock Text="Kino" Style="{StaticResource SectionHeaderText}" />
+                    <TextBlock Text="{Binding Cinema, Source={StaticResource T}}" Style="{StaticResource SectionHeaderText}" />
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -19,27 +19,27 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0">
-                            <TextBlock Text="Miasto" Style="{StaticResource FieldLabelText}" />
-                            <ComboBox ItemsSource="{Binding Cities}" SelectedIndex="0" IsEnabled="False" />
+                            <TextBlock Text="{Binding City, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
+                            <ComboBox ItemsSource="{Binding Cities}" DisplayMemberPath="Name" SelectedIndex="0" IsEnabled="False" />
                         </StackPanel>
                         <StackPanel Grid.Column="2">
-                            <TextBlock Text="Kino" Style="{StaticResource FieldLabelText}" />
-                            <ComboBox ItemsSource="{Binding Cinemas}" SelectedIndex="0" IsEnabled="False" />
+                            <TextBlock Text="{Binding Cinema, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
+                            <ComboBox ItemsSource="{Binding Cinemas}" DisplayMemberPath="Name" SelectedIndex="0" IsEnabled="False" />
                         </StackPanel>
                         <StackPanel Grid.Column="4">
-                            <TextBlock Text="Technologia" Style="{StaticResource FieldLabelText}" />
-                            <ComboBox ItemsSource="{Binding Technologies}" SelectedIndex="0" IsEnabled="False" />
+                            <TextBlock Text="{Binding Technology, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
+                            <ComboBox ItemsSource="{Binding Technologies}" DisplayMemberPath="Name" SelectedIndex="0" IsEnabled="False" />
                         </StackPanel>
                     </Grid>
-                    <TextBlock Text="Wybór miasta, kina i technologii pojawi się w kolejnej wersji."
+                    <TextBlock Text="{Binding LocationLater, Source={StaticResource T}}"
                                Style="{StaticResource CaptionText}" Margin="0,10,0,0" />
                 </StackPanel>
             </Border>
 
             <Border Style="{StaticResource Card}" Margin="0,12,0,0">
                 <StackPanel>
-                    <TextBlock Text="Termin" Style="{StaticResource SectionHeaderText}" />
-                    <CheckBox Content="Zakres dat" IsChecked="{Binding IsRange}" Margin="0,0,0,12" />
+                    <TextBlock Text="{Binding Dates, Source={StaticResource T}}" Style="{StaticResource SectionHeaderText}" />
+                    <CheckBox Content="{Binding DateRange, Source={StaticResource T}}" IsChecked="{Binding IsRange}" Margin="0,0,0,12" />
                     <Grid HorizontalAlignment="Left">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="240" />
@@ -52,7 +52,7 @@
                         </StackPanel>
                         <StackPanel Grid.Column="2"
                                     Visibility="{Binding IsRange, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock Text="Do" Style="{StaticResource FieldLabelText}" />
+                            <TextBlock Text="{Binding DateTo, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
                             <DatePicker SelectedDate="{Binding DateTo, Mode=TwoWay}" SelectedDateFormat="Long" />
                         </StackPanel>
                     </Grid>

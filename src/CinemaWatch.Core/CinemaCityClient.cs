@@ -32,14 +32,10 @@ public sealed class CinemaCityClient : IDisposable
         _http = new HttpClient(handler, disposeHandler) { Timeout = TimeSpan.FromSeconds(30) };
         // The ticketing API expects a client-generated id, like the browser sends.
         _http.DefaultRequestHeaders.Add("uuid", Guid.NewGuid().ToString());
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"Mozilla/5.0 (Windows NT 10.0; Win64; x64) CinemaWatch/{AppVersion}");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"Mozilla/5.0 (Windows NT 10.0; Win64; x64) CinemaWatch/{AppInfo.Version}");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
         _http.DefaultRequestHeaders.AcceptLanguage.ParseAdd("pl-PL");
     }
-
-    /// <summary>"1.0.0" - the version of this library (set at build time).</summary>
-    public static string AppVersion { get; } =
-        typeof(CinemaCityClient).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "1.0.0";
 
     public async Task<DayRepertoire> GetRepertoireAsync(string cinemaId, DateOnly date, CancellationToken cancellationToken = default)
     {

@@ -1,10 +1,14 @@
 using System.Text.Json;
 using CinemaWatch.Core;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.ViewModels;
 
-/// <summary>Wizard shell: step navigation, busy state, errors, and opening / starting profiles.</summary>
-public sealed class MainViewModel : ObservableObject
+/// <summary>Language choice in the drop-down (names are shown in their own language).</summary>
+public sealed record LanguageOption(AppLanguage Language, string Name);
+
+/// <summary>Wizard shell: step navigation, busy state, errors, language, and opening / starting profiles.</summary>
+public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private const int DatesIndex = 0;
     private const int ScreeningsIndex = 1;
@@ -18,20 +22,24 @@ public sealed class MainViewModel : ObservableObject
     private readonly ITaskScheduler _scheduler;
     private readonly AppEnvironment _environment;
     private readonly Func<DateTime> _clock;
+    private readonly Action? _languageChanged;
 
     private int _stepIndex;
     private object _currentPage;
     private bool _isBusy;
-    private string? _statusText;
-    private string? _errorText;
+    // Messages are stored as factories, so they re-render when the language changes.
+    private Func<string?>? _statusText;
+    private Func<string?>? _errorText;
     private CancellationTokenSource? _loadCts;
 
+    /// <param name="languageChanged">Called after the user switched the language (the app saves it and updates WPF).</param>
     public MainViewModel(
         CinemaCityClient client,
         IUserInteraction ui,
         ITaskScheduler scheduler,
         AppEnvironment environment,
-        Func<DateTime>? clock = null)
+        Func<DateTime>? clock = null,
+        Action? languageChanged = null)
     {
         _client = client;
         _seatService = new SeatAvailabilityService(client, environment.CacheDirectory);
@@ -39,6 +47,7 @@ public sealed class MainViewModel : ObservableObject
         _scheduler = scheduler;
         _environment = environment;
         _clock = clock ?? (() => DateTime.Now);
+        _languageChanged = languageChanged;
 
         DatesStep = new DatesStepViewModel();
         ScreeningsStep = new ScreeningsStepViewModel();
@@ -47,10 +56,10 @@ public sealed class MainViewModel : ObservableObject
 
         Steps =
         [
-            new StepItem(1, "Kino i termin"),
-            new StepItem(2, "Film i seanse"),
-            new StepItem(3, "Miejsca"),
-            new StepItem(4, "Podsumowanie"),
+            new StepItem(1, "Kino i termin", "Cinema and dates"),
+            new StepItem(2, "Film i seanse", "Film and screenings"),
+            new StepItem(3, "Miejsca", "Seats"),
+            new StepItem(4, "Podsumowanie", "Summary"),
         ];
 
         NextCommand = new AsyncRelayCommand(GoNextAsync, () => !IsBusy && _stepIndex < SummaryIndex);
@@ -60,6 +69,7 @@ public sealed class MainViewModel : ObservableObject
 
         _currentPage = DatesStep;
         UpdateSteps();
+        Localizer.LanguageChanged += OnLanguageChanged;
     }
 
     public DatesStepViewModel DatesStep { get; }
@@ -73,6 +83,25 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand BackCommand { get; }
     public RelayCommand NewProfileCommand { get; }
     public AsyncRelayCommand OpenProfileCommand { get; }
+
+    /// <summary>"CinemaWatch 1.0.0"</summary>
+    public string WindowTitle => $"CinemaWatch {AppInfo.Version}";
+
+    public IReadOnlyList<LanguageOption> Languages { get; } =
+    [
+        new LanguageOption(AppLanguage.Polish, "Polski"),
+        new LanguageOption(AppLanguage.English, "English"),
+    ];
+
+    public LanguageOption SelectedLanguage
+    {
+        get => Languages.First(l => l.Language == Localizer.Language);
+        set
+        {
+            if (value is not null)
+                Localizer.SetLanguage(value.Language); // refresh happens in OnLanguageChanged
+        }
+    }
 
     public int StepIndex => _stepIndex;
 
@@ -92,27 +121,50 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    public string? StatusText
-    {
-        get => _statusText;
-        private set => SetProperty(ref _statusText, value);
-    }
+    public string? StatusText => _statusText?.Invoke();
 
-    public string? ErrorText
-    {
-        get => _errorText;
-        private set
-        {
-            if (SetProperty(ref _errorText, value))
-                OnPropertyChanged(nameof(HasError));
-        }
-    }
+    public string? ErrorText => _errorText?.Invoke();
 
     public bool HasError => !string.IsNullOrEmpty(ErrorText);
 
     public bool CanGoBack => _stepIndex > DatesIndex;
 
     public bool IsLastStep => _stepIndex == SummaryIndex;
+
+    public void Dispose()
+    {
+        Localizer.LanguageChanged -= OnLanguageChanged;
+        _loadCts?.Dispose();
+    }
+
+    // ------------------------------------------------------------------ language
+
+    private void OnLanguageChanged(object? sender, EventArgs e)
+    {
+        foreach (var step in Steps) step.RefreshTexts();
+        DatesStep.RefreshTexts();
+        ScreeningsStep.RefreshTexts();
+        SeatsStep.RefreshTexts();
+        SummaryStep.RefreshTexts();
+        OnPropertyChanged(nameof(SelectedLanguage));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(ErrorText));
+        OnPropertyChanged(nameof(HasError));
+        _languageChanged?.Invoke();
+    }
+
+    private void SetStatus(Func<string?>? text)
+    {
+        _statusText = text;
+        OnPropertyChanged(nameof(StatusText));
+    }
+
+    private void SetError(Func<string?>? text)
+    {
+        _errorText = text;
+        OnPropertyChanged(nameof(ErrorText));
+        OnPropertyChanged(nameof(HasError));
+    }
 
     // ------------------------------------------------------------------ profile
 
@@ -149,10 +201,10 @@ public sealed class MainViewModel : ObservableObject
     private string DefaultProfileName()
     {
         var dates = DatesStep.GetDates();
-        var film = ScreeningsStep.SelectedFilm?.Name ?? "Profil";
+        var film = ScreeningsStep.SelectedFilm?.Name ?? T("Profil", "Profile");
         if (dates.Count == 0) return film;
-        var from = dates[0].ToString("d.MM", Formatting.Polish);
-        var to = dates[^1].ToString("d.MM", Formatting.Polish);
+        var from = Formatting.ShortDate(dates[0]);
+        var to = Formatting.ShortDate(dates[^1]);
         return dates.Count == 1 ? $"{film} {from}" : $"{film} {from}–{to}";
     }
 
@@ -163,8 +215,8 @@ public sealed class MainViewModel : ObservableObject
         ScreeningsStep.Load([], ScreeningFilter.ImaxWithoutDubbing, _clock());
         SeatsStep.Reset();
         SummaryStep.Reset();
-        ErrorText = null;
-        StatusText = null;
+        SetError(null);
+        SetStatus(null);
         GoTo(DatesIndex);
     }
 
@@ -180,9 +232,11 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
         {
-            ErrorText = ex is JsonException
-                ? $"Nie udało się otworzyć profilu: plik {Path.GetFileName(path)} nie jest poprawnym profilem CinemaWatch."
-                : $"Nie udało się otworzyć profilu: {ex.Message}";
+            var file = Path.GetFileName(path);
+            SetError(ex is JsonException
+                ? () => T($"Nie udało się otworzyć profilu: plik {file} nie jest poprawnym profilem CinemaWatch.",
+                          $"Could not open the profile: {file} is not a valid CinemaWatch profile.")
+                : () => T($"Nie udało się otworzyć profilu: {ex.Message}", $"Could not open the profile: {ex.Message}"));
             return;
         }
 
@@ -195,8 +249,8 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            ErrorText = $"Nie udało się otworzyć profilu: {ErrorMessages.Describe(ex)}";
-            StatusText = null;
+            SetError(() => T("Nie udało się otworzyć profilu: ", "Could not open the profile: ") + ErrorMessages.Describe(ex));
+            SetStatus(null);
         }
         finally
         {
@@ -230,7 +284,7 @@ public sealed class MainViewModel : ObservableObject
         var missing = ScreeningsStep.SelectScreenings(profile.FilmId, profile.Screenings.Select(s => s.Id));
         if (ScreeningsStep.SelectedCount == 0)
         {
-            ErrorText = "W repertuarze nie ma już seansów z tego profilu.";
+            SetError(() => T("W repertuarze nie ma już seansów z tego profilu.", "The repertoire no longer has any screenings from this profile."));
             return;
         }
 
@@ -241,33 +295,44 @@ public sealed class MainViewModel : ObservableObject
         SummaryStep.SetProfile(path, profile.Name, profile.IntervalMinutes);
         if (!LeaveSeatsStep()) return;
 
-        if (missing > 0)
-            StatusText = $"Otwarto profil. Pominięto {Formatting.Count(missing, "seans", "seanse", "seansów")}, których nie ma już w repertuarze.";
-        else
-            StatusText = $"Otwarto profil: {profile.Name}";
+        var name = profile.Name;
+        SetStatus(missing > 0
+            ? () => T("Otwarto profil. Pominięto ", "Profile opened. Skipped ")
+                    + Count(missing, "seans", "seanse", "seansów", "screening", "screenings")
+                    + T(", których nie ma już w repertuarze.", " no longer in the repertoire.")
+            : () => T($"Otwarto profil: {name}", $"Profile opened: {name}"));
     }
 
     /// <summary>An opened profile has only past screenings: offer to remove its scheduled task.</summary>
     private async Task RetireExpiredProfileAsync(string path)
     {
-        ErrorText = "Wszystkie seanse z tego profilu już się odbyły.";
+        SetError(() => T("Wszystkie seanse z tego profilu już się odbyły.", "All screenings of this profile are over."));
         var taskName = SchtasksScheduler.TaskNameFor(path);
         if (!await _scheduler.ExistsAsync(taskName)) return;
 
-        if (!_ui.Confirm("Profil nieaktualny",
-                $"Wszystkie seanse z tego profilu już się odbyły, a w Harmonogramie nadal jest zadanie {taskName}.\n\nUsunąć je?"))
+        if (!_ui.Confirm(T("Profil nieaktualny", "Outdated profile"),
+                T($"Wszystkie seanse z tego profilu już się odbyły, a w Harmonogramie nadal jest zadanie {taskName}.\n\nUsunąć je?",
+                  $"All screenings of this profile are over, but Task Scheduler still has the task {taskName}.\n\nRemove it?")))
             return;
 
         var result = await _scheduler.DeleteAsync(taskName);
-        ErrorText = result.Success ? null : result.Message;
-        StatusText = result.Success ? $"{result.Message} Profil był nieaktualny." : null;
+        var message = result.Message;
+        if (result.Success)
+        {
+            SetError(null);
+            SetStatus(() => message + T(" Profil był nieaktualny.", " The profile was outdated."));
+        }
+        else
+        {
+            SetError(() => message);
+        }
     }
 
     // ------------------------------------------------------------------ navigation
 
     private async Task GoNextAsync()
     {
-        ErrorText = null;
+        SetError(null);
         try
         {
             switch (_stepIndex)
@@ -289,8 +354,8 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            ErrorText = ErrorMessages.Describe(ex);
-            StatusText = null;
+            SetError(() => ErrorMessages.Describe(ex));
+            SetStatus(null);
         }
         finally
         {
@@ -300,16 +365,18 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task<bool> LeaveDatesStepAsync()
     {
-        var validationError = DatesStep.Validate(_clock());
-        if (validationError is not null)
+        var today = _clock();
+        if (DatesStep.Validate(today) is not null)
         {
-            ErrorText = validationError;
+            // Re-evaluated on language change, and disappears once the input is fixed.
+            SetError(() => DatesStep.Validate(today));
             return false;
         }
 
         var dates = DatesStep.GetDates();
         IsBusy = true;
-        StatusText = $"Pobieranie repertuaru ({Formatting.Count(dates.Count, "dzień", "dni", "dni")})…";
+        SetStatus(() => T("Pobieranie repertuaru (", "Loading the repertoire (")
+                        + Count(dates.Count, "dzień", "dni", "dni", "day", "days") + ")…");
         var cancellationToken = StartLoad();
 
         var results = await LoadRepertoireAsync(DatesStep.Cinema.Id, dates, cancellationToken);
@@ -322,10 +389,11 @@ public sealed class MainViewModel : ObservableObject
             ScreeningFilter.ImaxWithoutDubbing,
             _clock());
 
-        StatusText = failures.Count == 0
+        SetStatus(failures.Count == 0
             ? null
-            : $"Nie udało się pobrać repertuaru dla {Formatting.Count(failures.Count, "dnia", "dni", "dni")}: "
-              + string.Join(", ", failures.Select(f => f.Date.ToString("d.MM", Formatting.Polish)));
+            : () => T("Nie udało się pobrać repertuaru dla ", "Could not load the repertoire for ")
+                    + Count(failures.Count, "dnia", "dni", "dni", "day", "days") + ": "
+                    + string.Join(", ", failures.Select(f => Formatting.ShortDate(f.Date))));
         GoTo(ScreeningsIndex);
         return true;
     }
@@ -335,29 +403,28 @@ public sealed class MainViewModel : ObservableObject
         var selected = ScreeningsStep.GetSelectedScreenings();
         if (selected.Count == 0)
         {
-            ErrorText = "Zaznacz co najmniej jeden seans.";
+            SetError(() => T("Zaznacz co najmniej jeden seans.", "Select at least one screening."));
             return false;
         }
 
         GoTo(SeatsIndex);
         IsBusy = true;
-        StatusText = "Pobieranie układu sali i zajętości miejsc…";
+        SetStatus(() => T("Pobieranie układu sali i zajętości miejsc…", "Loading the hall layout and seat occupancy…"));
         await SeatsStep.LoadAsync(_seatService, selected, StartLoad());
-        StatusText = SeatsStep.Summary;
+        SetStatus(() => SeatsStep.Summary);
         return true;
     }
 
     private bool LeaveSeatsStep()
     {
-        var error = SeatsStep.Validate();
-        if (error is not null)
+        if (SeatsStep.Validate() is not null)
         {
-            ErrorText = error;
+            SetError(() => SeatsStep.Validate());
             return false;
         }
 
         SummaryStep.Load(SeatsStep.Items, SeatsStep.MinAdjacent, DefaultProfileName());
-        StatusText = null;
+        SetStatus(null);
         GoTo(SummaryIndex);
         return true;
     }
@@ -366,8 +433,8 @@ public sealed class MainViewModel : ObservableObject
     {
         if (!CanGoBack) return;
         _loadCts?.Cancel();
-        ErrorText = null;
-        StatusText = null;
+        SetError(null);
+        SetStatus(null);
         GoTo(_stepIndex - 1);
     }
 

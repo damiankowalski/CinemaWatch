@@ -1,12 +1,11 @@
-## CinemaWatch 1.0.0
+## CinemaWatch 1.1.0
 
-First public release.
-
-- Wizard: date or date range → film and IMAX screenings → interactive hall map → summary.
-- Watch whole rows or single seats (taken ones too), optional "N seats next to each other".
-- Profiles you can save, reopen and check on demand.
-- Background checks via Windows Task Scheduler with Windows notifications; clicking one opens the booking page.
-- Scheduled tasks remove themselves after the last screening of a profile.
+- **English user interface.** The app follows the Windows display language (Polish → Polish, anything else →
+  English) and can be switched at any time from the drop-down in the top-right corner - no restart needed.
+  The choice is remembered and also used for background notifications.
+- **Compact summary.** Screenings in the summary are collapsed by default (date, hall, counts); the arrow on
+  the right expands the selected rows and seats. Results of *Check now* stay visible in both states.
+- **Version in the title bar** (e.g. "CinemaWatch 1.1.0").
 
 ### Download
 

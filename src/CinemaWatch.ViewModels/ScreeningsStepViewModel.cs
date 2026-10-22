@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 using CinemaWatch.Core;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.ViewModels;
 
@@ -38,13 +39,16 @@ public sealed class ScreeningsStepViewModel : ObservableObject
     public bool HasScreenings => Days.Count > 0;
 
     public string EmptyText => HasFilms
-        ? "Ten film nie ma seansów w wybranym terminie."
-        : "W wybranym terminie nie ma seansów IMAX z napisami. Seanse z dubbingiem są pomijane.";
+        ? T("Ten film nie ma seansów w wybranym terminie.", "This film has no screenings on the selected dates.")
+        : T("W wybranym terminie nie ma seansów IMAX z napisami. Seanse z dubbingiem są pomijane.",
+            "There are no subtitled IMAX screenings on the selected dates. Dubbed screenings are skipped.");
 
     public int SelectedCount => AllOptions.Count(o => o.IsChecked);
     public int TotalCount => AllOptions.Count();
 
-    public string SelectionSummary => TotalCount == 0 ? "" : $"Zaznaczono {SelectedCount} z {TotalCount}";
+    public string SelectionSummary => TotalCount == 0
+        ? ""
+        : T($"Zaznaczono {SelectedCount} z {TotalCount}", $"{SelectedCount} of {TotalCount} selected");
 
     private IEnumerable<ScreeningOption> AllOptions => Days.SelectMany(d => d.Screenings);
 
@@ -62,7 +66,7 @@ public sealed class ScreeningsStepViewModel : ObservableObject
         var options = Matching(days.SelectMany(d => d.Screenings))
             .GroupBy(s => s.FilmId)
             .Select(g => new FilmOption(g.Key, names.GetValueOrDefault(g.Key, g.Key), g.Count()))
-            .OrderBy(f => f.Name, StringComparer.Create(Formatting.Polish, ignoreCase: true))
+            .OrderBy(f => f.Name, StringComparer.Create(Formatting.Culture, ignoreCase: true))
             .ToList();
 
         _selectedFilm = null;
@@ -90,6 +94,14 @@ public sealed class ScreeningsStepViewModel : ObservableObject
 
     public IReadOnlyList<Screening> GetSelectedScreenings() =>
         AllOptions.Where(o => o.IsChecked).Select(o => o.Screening).OrderBy(s => s.StartsAt).ToList();
+
+    public void RefreshTexts()
+    {
+        foreach (var film in Films) film.RefreshTexts();
+        foreach (var day in Days) day.RefreshTexts();
+        OnPropertyChanged(nameof(EmptyText));
+        OnPropertyChanged(nameof(SelectionSummary));
+    }
 
     private IEnumerable<Screening> Matching(IEnumerable<Screening> screenings) =>
         screenings.Where(s => _filter.Matches(s) && s.StartsAt > _now);
@@ -129,16 +141,29 @@ public sealed class ScreeningsStepViewModel : ObservableObject
     }
 }
 
-public sealed record FilmOption(string FilmId, string Name, int ScreeningCount)
+public sealed class FilmOption(string filmId, string name, int screeningCount) : ObservableObject
 {
-    public string DisplayName => $"{Name} ({Formatting.Count(ScreeningCount, "seans", "seanse", "seansów")})";
+    public string FilmId { get; } = filmId;
+    public string Name { get; } = name;
+    public int ScreeningCount { get; } = screeningCount;
+
+    public string DisplayName => $"{Name} ({Count(ScreeningCount, "seans", "seanse", "seansów", "screening", "screenings")})";
+
+    public void RefreshTexts() => OnPropertyChanged(nameof(DisplayName));
 }
 
-public sealed class DayGroup(DateOnly date, IReadOnlyList<ScreeningOption> screenings)
+public sealed class DayGroup(DateOnly date, IReadOnlyList<ScreeningOption> screenings) : ObservableObject
 {
     public DateOnly Date { get; } = date;
-    public string Header { get; } = Formatting.DayHeader(date);
+    public string Header => Formatting.DayHeader(Date);
     public IReadOnlyList<ScreeningOption> Screenings { get; } = screenings;
+
+    public void RefreshTexts()
+    {
+        OnPropertyChanged(nameof(Header));
+        foreach (var option in Screenings)
+            option.RefreshTexts();
+    }
 }
 
 public sealed class ScreeningOption(Screening screening, Action onChanged) : ObservableObject
@@ -161,4 +186,10 @@ public sealed class ScreeningOption(Screening screening, Action onChanged) : Obs
     public string DetailText => Formatting.Languages(Screening);
     public string AvailabilityText => Formatting.Availability(Screening);
     public bool IsNearlySoldOut => Formatting.IsNearlySoldOut(Screening);
+
+    public void RefreshTexts()
+    {
+        OnPropertyChanged(nameof(DetailText));
+        OnPropertyChanged(nameof(AvailabilityText));
+    }
 }

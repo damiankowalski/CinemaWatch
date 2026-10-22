@@ -1,14 +1,24 @@
 using System.Collections.ObjectModel;
 using CinemaWatch.Core;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.ViewModels;
 
 /// <summary>
-/// Step 4: what will be watched, plus the profile actions: check now, save, copy the command line and
-/// add to / remove from Task Scheduler.
+/// Step 4: what will be watched (one collapsible card per screening), plus the profile actions:
+/// check now, save, copy the command line and add to / remove from Task Scheduler.
 /// </summary>
 public sealed class SummaryStepViewModel : ObservableObject
 {
+    private enum ScheduleState
+    {
+        Unknown,
+        NotSaved,
+        Scheduled,
+        NotScheduled,
+        QueryFailed,
+    }
+
     private readonly SeatAvailabilityService _service;
     private readonly IUserInteraction _ui;
     private readonly ITaskScheduler _scheduler;
@@ -16,17 +26,17 @@ public sealed class SummaryStepViewModel : ObservableObject
     private readonly Func<WatchProfile> _buildProfile;
     private readonly Func<DateTime> _clock;
 
-    private string _conditionText = "";
-    private string? _skippedText;
+    private int _minAdjacent = 1;
+    private int _skipped;
     private string _profileName = "";
     private string? _profilePath;
     private int _intervalMinutes = 10;
     private bool _isBusy;
-    private string? _actionText;
+    private Func<string>? _actionText;
     private bool _actionIsError;
-    private string? _lastCheckText;
-    private bool _isScheduled;
-    private string _scheduleStatusText = "";
+    private ProfileCheckResult? _lastCheck;
+    private ScheduleState _scheduleState = ScheduleState.Unknown;
+    private string? _scheduleError;
 
     public SummaryStepViewModel(
         SeatAvailabilityService service,
@@ -60,23 +70,18 @@ public sealed class SummaryStepViewModel : ObservableObject
 
     public IReadOnlyList<int> IntervalOptions { get; } = [5, 10, 15, 30, 60];
 
-    public string ConditionText
-    {
-        get => _conditionText;
-        private set => SetProperty(ref _conditionText, value);
-    }
+    public string ConditionText => _minAdjacent == 1
+        ? T("Powiadomienie: gdy zwolni się którekolwiek z zaznaczonych miejsc.",
+            "Notification: when any of the selected seats becomes free.")
+        : T($"Powiadomienie: gdy wśród zaznaczonych zwolni się blok co najmniej {_minAdjacent} sąsiednich miejsc.",
+            $"Notification: when at least {_minAdjacent} selected seats next to each other become free.");
 
-    public string? SkippedText
-    {
-        get => _skippedText;
-        private set
-        {
-            if (SetProperty(ref _skippedText, value))
-                OnPropertyChanged(nameof(HasSkipped));
-        }
-    }
+    public string? SkippedText => _skipped == 0
+        ? null
+        : T("Pominięto ", "Skipped ") + Count(_skipped, "seans", "seanse", "seansów", "screening", "screenings")
+          + T(" bez zaznaczonych miejsc.", " without selected seats.");
 
-    public bool HasSkipped => SkippedText is not null;
+    public bool HasSkipped => _skipped > 0;
 
     public string ProfileName
     {
@@ -94,7 +99,7 @@ public sealed class SummaryStepViewModel : ObservableObject
         }
     }
 
-    public string ProfilePathText => ProfilePath ?? "Profil nie jest jeszcze zapisany.";
+    public string ProfilePathText => ProfilePath ?? T("Profil nie jest jeszcze zapisany.", "The profile has not been saved yet.");
 
     public int IntervalMinutes
     {
@@ -112,11 +117,7 @@ public sealed class SummaryStepViewModel : ObservableObject
         }
     }
 
-    public string? ActionText
-    {
-        get => _actionText;
-        private set => SetProperty(ref _actionText, value);
-    }
+    public string? ActionText => _actionText?.Invoke();
 
     public bool ActionIsError
     {
@@ -126,30 +127,43 @@ public sealed class SummaryStepViewModel : ObservableObject
 
     public string? LastCheckText
     {
-        get => _lastCheckText;
-        private set => SetProperty(ref _lastCheckText, value);
-    }
-
-    public bool IsScheduled
-    {
-        get => _isScheduled;
-        private set
+        get
         {
-            if (SetProperty(ref _isScheduled, value))
-                UnscheduleCommand.NotifyCanExecuteChanged();
+            if (_lastCheck is null) return null;
+            var time = _lastCheck.CheckedAt.ToString("HH:mm:ss", Formatting.Culture);
+            var withSeats = _lastCheck.Screenings.Count(s => s.Available.Count > 0);
+            return withSeats == 0
+                ? T($"Sprawdzono o {time}. Brak wolnych miejsc z zaznaczenia.", $"Checked at {time}. None of the selected seats are free.")
+                : T($"Sprawdzono o {time}. Wolne miejsca z zaznaczenia: ", $"Checked at {time}. Selected seats free in ")
+                  + Count(withSeats, "seans", "seanse", "seansów", "screening", "screenings") + ".";
         }
     }
 
+    public bool IsScheduled => _scheduleState == ScheduleState.Scheduled;
+
     public string ScheduleStatusText
     {
-        get => _scheduleStatusText;
-        private set => SetProperty(ref _scheduleStatusText, value);
+        get
+        {
+            var task = ProfilePath is null ? "" : SchtasksScheduler.TaskNameFor(ProfilePath);
+            return _scheduleState switch
+            {
+                ScheduleState.NotSaved => T("Harmonogram: najpierw zapisz profil.", "Task Scheduler: save the profile first."),
+                ScheduleState.Scheduled => T($"Harmonogram: zadanie {task} jest aktywne.", $"Task Scheduler: task {task} is active."),
+                ScheduleState.NotScheduled => T("Harmonogram: brak zadania dla tego profilu.", "Task Scheduler: no task for this profile."),
+                ScheduleState.QueryFailed => T($"Harmonogram: nie udało się sprawdzić ({_scheduleError}).", $"Task Scheduler: could not check ({_scheduleError})."),
+                _ => "",
+            };
+        }
     }
 
-    public string HintText =>
+    public string HintText => T(
         "Profil zapisuje wybrane seanse i miejsca. Harmonogram zadań uruchamia CinemaWatch bez okna co wybrany czas " +
         "i pokazuje powiadomienie Windows, gdy zwolni się miejsce z Twojego zaznaczenia (działa, gdy jesteś zalogowany). " +
-        "Po ostatnim seansie z profilu zadanie usuwa się samo.";
+        "Po ostatnim seansie z profilu zadanie usuwa się samo.",
+        "A profile stores the selected screenings and seats. Task Scheduler runs CinemaWatch without a window at the " +
+        "chosen interval and shows a Windows notification when one of your selected seats becomes free (while you are " +
+        "signed in). After the profile's last screening the task removes itself.");
 
     // ------------------------------------------------------------------ loading
 
@@ -159,29 +173,24 @@ public sealed class SummaryStepViewModel : ObservableObject
         foreach (var item in items.Where(i => i.Map is not null && i.WatchedCount > 0))
         {
             var map = item.Map!;
-            var available = SeatMatcher.FindAvailable(map.Seats, map.WatchedKeys, minAdjacent).Count;
             Items.Add(new SummaryItem(
-                screening: item.Screening,
-                rows: SeatSelectionText.Describe(map.Seats.Plan, map.WatchedKeys)
-                    .Select(r => new SummaryRow($"Rząd {r.Row}", r.Text))
-                    .ToList(),
-                countsText: $"{Formatting.Count(map.WatchedCount, "miejsce", "miejsca", "miejsc")} · teraz wolnych: {available}",
-                ui: _ui));
+                item.Screening,
+                map.Seats.Plan,
+                new HashSet<string>(map.WatchedKeys, StringComparer.Ordinal),
+                SeatMatcher.FindAvailable(map.Seats, map.WatchedKeys, minAdjacent).Count,
+                _ui));
         }
 
-        ConditionText = minAdjacent == 1
-            ? "Powiadomienie: gdy zwolni się którekolwiek z zaznaczonych miejsc."
-            : $"Powiadomienie: gdy wśród zaznaczonych zwolni się blok co najmniej {minAdjacent} sąsiednich miejsc.";
-
-        var skipped = items.Count(i => i.Map is null || i.WatchedCount == 0);
-        SkippedText = skipped == 0
-            ? null
-            : $"Pominięto {Formatting.Count(skipped, "seans", "seanse", "seansów")} bez zaznaczonych miejsc.";
-
+        _minAdjacent = minAdjacent;
+        _skipped = items.Count(i => i.Map is null || i.WatchedCount == 0);
         if (string.IsNullOrWhiteSpace(ProfileName))
             ProfileName = defaultProfileName;
-        ActionText = null;
-        LastCheckText = null;
+        SetAction(null);
+        _lastCheck = null;
+        OnPropertyChanged(nameof(ConditionText));
+        OnPropertyChanged(nameof(SkippedText));
+        OnPropertyChanged(nameof(HasSkipped));
+        OnPropertyChanged(nameof(LastCheckText));
         RefreshCommands();
         _ = RefreshScheduleStatusAsync();
     }
@@ -200,11 +209,26 @@ public sealed class SummaryStepViewModel : ObservableObject
         ProfilePath = null;
         ProfileName = "";
         IntervalMinutes = 10;
-        ActionText = null;
-        LastCheckText = null;
-        IsScheduled = false;
-        ScheduleStatusText = "";
+        SetAction(null);
+        _lastCheck = null;
+        _skipped = 0;
+        SetScheduleState(ScheduleState.Unknown);
+        OnPropertyChanged(nameof(LastCheckText));
+        OnPropertyChanged(nameof(SkippedText));
+        OnPropertyChanged(nameof(HasSkipped));
         RefreshCommands();
+    }
+
+    public void RefreshTexts()
+    {
+        foreach (var item in Items)
+            item.RefreshTexts();
+        foreach (var name in new[]
+                 {
+                     nameof(ConditionText), nameof(SkippedText), nameof(ProfilePathText), nameof(ActionText),
+                     nameof(LastCheckText), nameof(ScheduleStatusText), nameof(HintText),
+                 })
+            OnPropertyChanged(name);
     }
 
     // ------------------------------------------------------------------ actions
@@ -212,15 +236,14 @@ public sealed class SummaryStepViewModel : ObservableObject
     private async Task RunAsync(Func<Task> action)
     {
         IsBusy = true;
-        ActionText = null;
-        ActionIsError = false;
+        SetAction(null);
         try
         {
             await action();
         }
         catch (Exception ex)
         {
-            ReportError(ErrorMessages.Describe(ex));
+            ReportError(() => ErrorMessages.Describe(ex));
         }
         finally
         {
@@ -233,11 +256,8 @@ public sealed class SummaryStepViewModel : ObservableObject
         var result = await ProfileChecker.CheckAsync(_buildProfile(), _service, _clock());
         foreach (var check in result.Screenings)
             Items.FirstOrDefault(i => i.ScreeningId == check.Screening.Id)?.SetCheck(check);
-
-        var withSeats = result.Screenings.Count(s => s.Available.Count > 0);
-        LastCheckText = $"Sprawdzono o {result.CheckedAt:HH:mm:ss}. " + (withSeats == 0
-            ? "Brak wolnych miejsc z zaznaczenia."
-            : $"Wolne miejsca z zaznaczenia: {Formatting.Count(withSeats, "seans", "seanse", "seansów")}.");
+        _lastCheck = result;
+        OnPropertyChanged(nameof(LastCheckText));
     }
 
     private Task SaveAsync()
@@ -245,7 +265,7 @@ public sealed class SummaryStepViewModel : ObservableObject
         var path = _ui.PickProfileToSave(InitialDirectory(), SuggestedFileName());
         if (path is null) return Task.CompletedTask;
         Save(path);
-        ActionText = $"Zapisano profil: {path}";
+        SetAction(() => T($"Zapisano profil: {path}", $"Profile saved: {path}"));
         return RefreshScheduleStatusAsync();
     }
 
@@ -254,7 +274,7 @@ public sealed class SummaryStepViewModel : ObservableObject
         var path = EnsureSaved();
         if (path is null || _environment.ExePath is null) return Task.CompletedTask;
         _ui.CopyText(SchtasksScheduler.BuildTaskCommand(_environment.ExePath, path));
-        ActionText = "Skopiowano polecenie do schowka.";
+        SetAction(() => T("Skopiowano polecenie do schowka.", "Command copied to the clipboard."));
         return Task.CompletedTask;
     }
 
@@ -264,25 +284,26 @@ public sealed class SummaryStepViewModel : ObservableObject
         if (path is null) return;
         if (_environment.ExePath is null)
         {
-            ReportError("Nie można ustalić ścieżki do CinemaWatch.exe.");
+            ReportError(() => T("Nie można ustalić ścieżki do CinemaWatch.exe.", "Cannot determine the path of CinemaWatch.exe."));
             return;
         }
 
         var taskName = SchtasksScheduler.TaskNameFor(path);
+        var command = SchtasksScheduler.BuildTaskCommand(_environment.ExePath, path);
         var message =
-            $"Zadanie: {taskName}\n" +
-            $"Uruchamianie: co {IntervalMinutes} min, gdy jesteś zalogowany\n" +
-            $"Polecenie: {SchtasksScheduler.BuildTaskCommand(_environment.ExePath, path)}\n\n" +
+            T($"Zadanie: {taskName}\nUruchamianie: co {IntervalMinutes} min, gdy jesteś zalogowany\nPolecenie: {command}\n\n",
+              $"Task: {taskName}\nRuns: every {IntervalMinutes} min while you are signed in\nCommand: {command}\n\n") +
             (_environment.IsBuildOutput
-                ? "Uwaga: aplikacja działa z folderu kompilacji (bin). Po przebudowaniu projektu ścieżka może się zmienić. " +
-                  "Zalecane: zbuduj .\\publish.ps1 i dodaj zadanie z artifacts\\CinemaWatch.exe.\n\n"
+                ? T("Uwaga: aplikacja działa z folderu kompilacji (bin). Po przebudowaniu projektu ścieżka może się zmienić. " +
+                    "Zalecane: zbuduj .\\publish.ps1 i dodaj zadanie z artifacts\\CinemaWatch.exe.\n\n",
+                    "Note: the app runs from a build folder (bin). The path may change after a rebuild. " +
+                    "Recommended: build with .\\publish.ps1 and add the task from artifacts\\CinemaWatch.exe.\n\n")
                 : "") +
-            "Utworzyć zadanie?";
-        if (!_ui.Confirm("Dodać do Harmonogramu zadań?", message)) return;
+            T("Utworzyć zadanie?", "Create the task?");
+        if (!_ui.Confirm(T("Dodać do Harmonogramu zadań?", "Add to Task Scheduler?"), message)) return;
 
         var result = await _scheduler.RegisterAsync(taskName, _environment.ExePath, path, IntervalMinutes);
-        if (result.Success) ActionText = result.Message;
-        else ReportError(result.Message);
+        ShowResult(result);
         await RefreshScheduleStatusAsync();
     }
 
@@ -290,11 +311,11 @@ public sealed class SummaryStepViewModel : ObservableObject
     {
         if (ProfilePath is null) return;
         var taskName = SchtasksScheduler.TaskNameFor(ProfilePath);
-        if (!_ui.Confirm("Usunąć z Harmonogramu zadań?", $"Zadanie {taskName} zostanie usunięte. Plik profilu zostaje.")) return;
+        if (!_ui.Confirm(T("Usunąć z Harmonogramu zadań?", "Remove from Task Scheduler?"),
+                T($"Zadanie {taskName} zostanie usunięte. Plik profilu zostaje.", $"Task {taskName} will be removed. The profile file stays.")))
+            return;
 
-        var result = await _scheduler.DeleteAsync(taskName);
-        if (result.Success) ActionText = result.Message;
-        else ReportError(result.Message);
+        ShowResult(await _scheduler.DeleteAsync(taskName));
         await RefreshScheduleStatusAsync();
     }
 
@@ -319,34 +340,56 @@ public sealed class SummaryStepViewModel : ObservableObject
     {
         if (ProfilePath is null)
         {
-            IsScheduled = false;
-            ScheduleStatusText = "Harmonogram: najpierw zapisz profil.";
+            SetScheduleState(ScheduleState.NotSaved);
             return;
         }
 
-        var taskName = SchtasksScheduler.TaskNameFor(ProfilePath);
         try
         {
-            IsScheduled = await _scheduler.ExistsAsync(taskName);
-            ScheduleStatusText = IsScheduled ? $"Harmonogram: zadanie {taskName} jest aktywne." : "Harmonogram: brak zadania dla tego profilu.";
+            var exists = await _scheduler.ExistsAsync(SchtasksScheduler.TaskNameFor(ProfilePath));
+            SetScheduleState(exists ? ScheduleState.Scheduled : ScheduleState.NotScheduled);
         }
         catch (Exception ex)
         {
-            IsScheduled = false;
-            ScheduleStatusText = $"Harmonogram: nie udało się sprawdzić ({ex.Message}).";
+            _scheduleError = ex.Message;
+            SetScheduleState(ScheduleState.QueryFailed);
         }
+    }
+
+    private void SetScheduleState(ScheduleState state)
+    {
+        _scheduleState = state;
+        OnPropertyChanged(nameof(IsScheduled));
+        OnPropertyChanged(nameof(ScheduleStatusText));
+        UnscheduleCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Scheduler results come already translated; they stay in the language they were produced in.</summary>
+    private void ShowResult(SchedulerResult result)
+    {
+        var message = result.Message;
+        if (result.Success) SetAction(() => message);
+        else ReportError(() => message);
     }
 
     private string InitialDirectory() =>
         ProfilePath is not null ? Path.GetDirectoryName(ProfilePath)! : _environment.ProfilesDirectory;
 
     private string SuggestedFileName() =>
-        ProfileStore.ToFileName(string.IsNullOrWhiteSpace(ProfileName) ? "profil" : ProfileName) + ProfileStore.FileExtension;
+        ProfileStore.ToFileName(string.IsNullOrWhiteSpace(ProfileName) ? T("profil", "profile") : ProfileName) + ProfileStore.FileExtension;
 
-    private void ReportError(string message)
+    private void SetAction(Func<string>? text)
     {
-        ActionText = message;
+        _actionText = text;
+        ActionIsError = false;
+        OnPropertyChanged(nameof(ActionText));
+    }
+
+    private void ReportError(Func<string> text)
+    {
+        _actionText = text;
         ActionIsError = true;
+        OnPropertyChanged(nameof(ActionText));
     }
 
     private void RefreshCommands()
@@ -359,59 +402,74 @@ public sealed class SummaryStepViewModel : ObservableObject
     }
 }
 
-/// <summary>One watched screening in the summary, with the result of the last "check now".</summary>
+/// <summary>
+/// One watched screening in the summary. Collapsed by default (date, hall, counts); expanding shows the
+/// selected seats row by row. The result of the last "check now" is visible in both states.
+/// </summary>
 public sealed class SummaryItem : ObservableObject
 {
-    private string? _resultText;
-    private bool _isMatch;
+    private readonly Screening _screening;
+    private readonly SeatPlan _plan;
+    private readonly IReadOnlySet<string> _watched;
+    private readonly int _availableAtLoad;
+    private ScreeningCheck? _check;
+    private bool _isExpanded;
 
-    public SummaryItem(Screening screening, IReadOnlyList<SummaryRow> rows, string countsText, IUserInteraction ui)
+    public SummaryItem(Screening screening, SeatPlan plan, IReadOnlySet<string> watched, int availableAtLoad, IUserInteraction ui)
     {
-        ScreeningId = screening.Id;
-        Title = $"{Formatting.DayHeader(DateOnly.FromDateTime(screening.StartsAt))}, {Formatting.Time(screening.StartsAt)}";
-        Subtitle = $"{screening.Auditorium} · {Formatting.Languages(screening)}";
-        Rows = rows;
-        CountsText = countsText;
-        BookingLink = screening.BookingLink;
+        _screening = screening;
+        _plan = plan;
+        _watched = watched;
+        _availableAtLoad = availableAtLoad;
         BuyCommand = new RelayCommand(() => ui.OpenUrl(BookingLink), () => !string.IsNullOrWhiteSpace(BookingLink));
+        ToggleExpandedCommand = new RelayCommand(() => IsExpanded = !IsExpanded);
     }
 
-    public string ScreeningId { get; }
-    public string Title { get; }
-    public string Subtitle { get; }
-    public IReadOnlyList<SummaryRow> Rows { get; }
-    public string CountsText { get; }
-    public string BookingLink { get; }
+    public string ScreeningId => _screening.Id;
+    public string BookingLink => _screening.BookingLink;
     public RelayCommand BuyCommand { get; }
+    public RelayCommand ToggleExpandedCommand { get; }
 
-    public string? ResultText
+    public bool IsExpanded
     {
-        get => _resultText;
-        private set
-        {
-            if (SetProperty(ref _resultText, value))
-                OnPropertyChanged(nameof(HasResult));
-        }
+        get => _isExpanded;
+        set => SetProperty(ref _isExpanded, value);
     }
 
-    public bool HasResult => ResultText is not null;
+    public string Title => $"{Formatting.DayHeader(DateOnly.FromDateTime(_screening.StartsAt))}, {Formatting.Time(_screening.StartsAt)}";
+    public string Subtitle => $"{_screening.Auditorium} · {Formatting.Languages(_screening)}";
 
-    public bool IsMatch
+    public string CountsText =>
+        Count(_watched.Count, "miejsce", "miejsca", "miejsc", "seat", "seats") + " · " + T("teraz wolnych", "free now") + $": {_availableAtLoad}";
+
+    public IReadOnlyList<SummaryRow> Rows => SeatSelectionText.Describe(_plan, _watched)
+        .Select(r => new SummaryRow($"{T("Rząd", "Row")} {r.Row}", r.Text))
+        .ToList();
+
+    public string? ResultText => _check switch
     {
-        get => _isMatch;
-        private set => SetProperty(ref _isMatch, value);
-    }
+        null => null,
+        { IsPast: true } => T("Seans już się odbył.", "The screening is over."),
+        { Error: not null } c => $"{T("Błąd", "Error")}: {c.Error}",
+        { Available.Count: > 0 } c => $"{T("Wolne teraz", "Free now")}: {NotificationBuilder.DescribeSeats(c.Available)}",
+        _ => T("Brak wolnych miejsc z zaznaczenia.", "None of the selected seats are free."),
+    };
+
+    public bool HasResult => _check is not null;
+    public bool IsMatch => _check is { Available.Count: > 0 };
 
     public void SetCheck(ScreeningCheck check)
     {
-        IsMatch = check.Available.Count > 0;
-        ResultText = check switch
-        {
-            { IsPast: true } => "Seans już się odbył.",
-            { Error: not null } => $"Błąd: {check.Error}",
-            _ when IsMatch => $"Wolne teraz: {NotificationBuilder.DescribeSeats(check.Available)}",
-            _ => "Brak wolnych miejsc z zaznaczenia.",
-        };
+        _check = check;
+        OnPropertyChanged(nameof(ResultText));
+        OnPropertyChanged(nameof(HasResult));
+        OnPropertyChanged(nameof(IsMatch));
+    }
+
+    public void RefreshTexts()
+    {
+        foreach (var name in new[] { nameof(Title), nameof(Subtitle), nameof(CountsText), nameof(Rows), nameof(ResultText) })
+            OnPropertyChanged(name);
     }
 }
 

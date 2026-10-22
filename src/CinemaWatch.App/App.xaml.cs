@@ -13,23 +13,26 @@ namespace CinemaWatch;
 ///  - no arguments: the wizard window;
 ///  - <c>--profile "path"</c>: no window, one check, Windows notification about newly free seats, exit
 ///    (this is what Task Scheduler runs). Exit codes: 0 ok, 1 profile error, 2 all screenings failed, 3 crash.
+/// The UI language is the one saved in settings, otherwise Polish for a Polish Windows display language and
+/// English for any other.
 /// </summary>
 public partial class App : Application
 {
+    private readonly AppSettings _settings;
     private CinemaCityClient? _client;
+    private MainViewModel? _viewModel;
     private bool _headless;
 
     public App()
     {
-        // Polish UI (DatePicker format, day names). Must run before any window is created.
-        var polish = Formatting.Polish;
-        CultureInfo.DefaultThreadCurrentCulture = polish;
-        CultureInfo.DefaultThreadCurrentUICulture = polish;
-        CultureInfo.CurrentCulture = polish;
-        CultureInfo.CurrentUICulture = polish;
+        _settings = AppSettings.Load();
+        Localizer.SetLanguage(Localizer.Parse(_settings.Language) ?? Localizer.Detect(CultureInfo.CurrentUICulture));
+        ApplyCulture();
+
+        // Must run before any window is created (also covers popups such as the DatePicker calendar).
         FrameworkElement.LanguageProperty.OverrideMetadata(
             typeof(FrameworkElement),
-            new FrameworkPropertyMetadata(XmlLanguage.GetLanguage(polish.IetfLanguageTag)));
+            new FrameworkPropertyMetadata(XmlLanguage.GetLanguage(Localizer.Culture.IetfLanguageTag)));
 
         DispatcherUnhandledException += OnDispatcherUnhandledException;
     }
@@ -47,21 +50,45 @@ public partial class App : Application
             return;
         }
 
+        // Translated UI texts, bound in XAML as {Binding Key, Source={StaticResource T}}.
+        Resources["T"] = UiText.Instance;
+
         _client = new CinemaCityClient();
-        var viewModel = new MainViewModel(
+        _viewModel = new MainViewModel(
             _client,
             new WpfUserInteraction(),
             new SchtasksScheduler(),
-            new AppEnvironment(Environment.ProcessPath, AppPaths.ProfilesDirectory(Environment.ProcessPath), AppPaths.CacheDirectory));
-        var window = new MainWindow { DataContext = viewModel };
+            new AppEnvironment(Environment.ProcessPath, AppPaths.ProfilesDirectory(Environment.ProcessPath), AppPaths.CacheDirectory),
+            languageChanged: OnLanguageChanged);
+        var window = new MainWindow { DataContext = _viewModel };
         MainWindow = window;
         window.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _viewModel?.Dispose();
         _client?.Dispose();
         base.OnExit(e);
+    }
+
+    /// <summary>The user picked a language in the window: remember it and switch WPF formatting.</summary>
+    private void OnLanguageChanged()
+    {
+        ApplyCulture();
+        if (MainWindow is not null)
+            MainWindow.Language = XmlLanguage.GetLanguage(Localizer.Culture.IetfLanguageTag);
+        _settings.Language = Localizer.Code;
+        _settings.Save();
+    }
+
+    private static void ApplyCulture()
+    {
+        var culture = Localizer.Culture;
+        CultureInfo.DefaultThreadCurrentCulture = culture;
+        CultureInfo.DefaultThreadCurrentUICulture = culture;
+        CultureInfo.CurrentCulture = culture;
+        CultureInfo.CurrentUICulture = culture;
     }
 
     private static async Task<int> RunHeadlessAsync(string profilePath)
@@ -79,7 +106,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            log.Write($"BŁĄD: {ex}");
+            log.Write($"ERROR: {ex}");
             return 3;
         }
     }
@@ -89,10 +116,10 @@ public partial class App : Application
         e.Handled = true;
         if (_headless)
         {
-            new FileLog(AppPaths.LogFile).Write($"BŁĄD: {e.Exception}");
+            new FileLog(AppPaths.LogFile).Write($"ERROR: {e.Exception}");
             Shutdown(3);
             return;
         }
-        MessageBox.Show(e.Exception.Message, "CinemaWatch - nieoczekiwany błąd", MessageBoxButton.OK, MessageBoxImage.Error);
+        MessageBox.Show(e.Exception.Message, UiText.Instance.UnexpectedError, MessageBoxButton.OK, MessageBoxImage.Error);
     }
 }

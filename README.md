@@ -31,7 +31,7 @@ and tickets are returned. Catching them means refreshing the seat map over and o
 actually buy, and the app checks them in the background. When one of them becomes free, you get a Windows
 notification - one click takes you straight to the booking page.
 
-It is a small Windows desktop app (WPF, .NET 10) with a Polish user interface. For now it supports
+It is a small Windows desktop app (WPF, .NET 10) with a Polish and English user interface. For now it supports
 **Cinema City Sadyba (Warsaw), IMAX**, subtitled screenings.
 
 > Na skrócie po polsku: CinemaWatch monitoruje wybrane miejsca na wyprzedane seanse IMAX w Cinema City Sadyba
@@ -50,6 +50,7 @@ It is a small Windows desktop app (WPF, .NET 10) with a Polish user interface. F
 - **Background checks** through Windows Task Scheduler - no app running in the background, no window.
 - **Smart notifications** - only for seats that became free since the last check; clicking opens the booking page.
 - **Cleans up after itself** - a scheduled task removes itself after the last screening of its profile.
+- **Polish and English** - follows the Windows display language, switchable at any time (top-right corner).
 - Light and dark mode (Windows 11 Fluent design).
 
 CinemaWatch only *reads* public seat information. It never logs in, never creates a cart and never reserves or
@@ -83,16 +84,16 @@ The exe is not code-signed, so Windows SmartScreen may show a warning on first s
 
 ## Usage
 
-1. **Kino i termin** - choose a date or a date range (up to 31 days).
-2. **Film i seanse** - pick the film and tick the screenings. Sold-out ones can be ticked too - those are the
-   ones worth watching.
-3. **Miejsca** - mark rows and seats on the hall map of each screening.
-4. **Podsumowanie** - *Sprawdź teraz* checks immediately; save the profile and *Dodaj do Harmonogramu* to keep
-   watching in the background.
+1. **Cinema and dates** (*Kino i termin*) - choose a date or a date range (up to 31 days).
+2. **Film and screenings** (*Film i seanse*) - pick the film and tick the screenings. Sold-out ones can be ticked
+   too - those are the ones worth watching.
+3. **Seats** (*Miejsca*) - mark rows and seats on the hall map of each screening.
+4. **Summary** (*Podsumowanie*) - *Check now* checks immediately; save the profile and *Add to Task Scheduler*
+   to keep watching in the background.
 
 ### Stopping and cleaning up
 
-- Open the profile → *Usuń z Harmonogramu*. From then on there are no notifications.
+- Open the profile → *Remove from Task Scheduler* (*Usuń z Harmonogramu*). From then on there are no notifications.
 - After the last screening the task removes itself; opening an outdated profile also offers to remove its task.
 - Without the app: `schtasks /Delete /TN "\CinemaWatch\<profile name>" /F`.
 - All data written by the app lives in `%LOCALAPPDATA%\CinemaWatch` (safe to delete) plus your profile files.
@@ -109,6 +110,7 @@ Each run is logged to `%LOCALAPPDATA%\CinemaWatch\Logs\cinemawatch.log`.
 
 | Data | Location |
 | --- | --- |
+| Settings (language) | `%LOCALAPPDATA%\CinemaWatch\settings.json` |
 | Profiles | `Profiles\` next to the exe (if writable), otherwise `%LOCALAPPDATA%\CinemaWatch\Profiles` - or anywhere you choose |
 | Notification state | `%LOCALAPPDATA%\CinemaWatch\State\` |
 | Hall layout cache | `%LOCALAPPDATA%\CinemaWatch\Cache\` (refreshed weekly) |

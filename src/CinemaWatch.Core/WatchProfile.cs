@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.Core;
 
@@ -51,11 +52,13 @@ public static class ProfileStore
     public static WatchProfile Load(string path)
     {
         var profile = JsonSerializer.Deserialize<WatchProfile>(File.ReadAllText(path), Options)
-            ?? throw new InvalidDataException("Plik profilu jest pusty.");
+            ?? throw new InvalidDataException(T("Plik profilu jest pusty.", "The profile file is empty."));
         if (profile.Version > WatchProfile.CurrentVersion)
-            throw new InvalidDataException($"Profil zapisano w nowszej wersji aplikacji (wersja {profile.Version}).");
+            throw new InvalidDataException(T(
+                $"Profil zapisano w nowszej wersji aplikacji (wersja {profile.Version}).",
+                $"The profile was saved by a newer version of the app (version {profile.Version})."));
         if (string.IsNullOrWhiteSpace(profile.CinemaId) || profile.Screenings.Count == 0)
-            throw new InvalidDataException("Profil nie zawiera kina albo seansów.");
+            throw new InvalidDataException(T("Profil nie zawiera kina albo seansów.", "The profile has no cinema or screenings."));
         return profile;
     }
 
@@ -84,6 +87,6 @@ public static class ProfileStore
     {
         var invalid = Path.GetInvalidFileNameChars().Concat(['<', '>', ':', '"', '/', '\\', '|', '?', '*']).ToHashSet();
         var cleaned = new string(name.Where(c => !invalid.Contains(c) && !char.IsControl(c)).ToArray()).Trim().TrimEnd('.');
-        return string.IsNullOrWhiteSpace(cleaned) ? "profil" : cleaned;
+        return string.IsNullOrWhiteSpace(cleaned) ? T("profil", "profile") : cleaned;
     }
 }
