@@ -63,6 +63,9 @@ public partial class App : Application
         var window = new MainWindow { DataContext = _viewModel };
         MainWindow = window;
         window.Show();
+
+        // Restore tabs from the profiles folder (each tab loads when it is first shown).
+        await _viewModel.InitializeAsync();
     }
 
     protected override void OnExit(ExitEventArgs e)

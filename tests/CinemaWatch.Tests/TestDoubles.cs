@@ -31,7 +31,7 @@ internal sealed class AnyScreeningHandler : HttpMessageHandler
 
 internal sealed class FakeUi : IUserInteraction
 {
-    public string? OpenPath { get; set; }
+    public List<string> OpenPaths { get; } = [];
     public string? SavePath { get; set; }
     public bool ConfirmAnswer { get; set; } = true;
     public List<string> Confirms { get; } = [];
@@ -39,7 +39,7 @@ internal sealed class FakeUi : IUserInteraction
     public string? Opened { get; private set; }
     public string? LastSaveSuggestion { get; private set; }
 
-    public string? PickProfileToOpen(string initialDirectory) => OpenPath;
+    public IReadOnlyList<string> PickProfilesToOpen(string initialDirectory) => OpenPaths.ToList();
 
     public string? PickProfileToSave(string initialDirectory, string fileName)
     {

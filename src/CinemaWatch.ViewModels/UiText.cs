@@ -64,7 +64,7 @@ public sealed class UiText : ObservableObject
     public string Profile => T("Profil", "Profile");
     public string Name => T("Nazwa", "Name");
     public string File => T("Plik", "File");
-    public string CheckNow => T("Sprawdź teraz", "Check now");
+    public string CheckNow => T("Sprawdź ten profil", "Check this profile");
     public string SaveProfile => T("Zapisz profil…", "Save profile…");
     public string CopyCommand => T("Kopiuj polecenie", "Copy command");
     public string CopyCommandToolTip => T("Kopiuje do schowka polecenie uruchamiające sprawdzenie tego profilu bez okna",
@@ -81,4 +81,7 @@ public sealed class UiText : ObservableObject
     public string OpenProfileDialogTitle => T("Otwórz profil CinemaWatch", "Open CinemaWatch profile");
     public string SaveProfileDialogTitle => T("Zapisz profil CinemaWatch", "Save CinemaWatch profile");
     public string UnexpectedError => T("CinemaWatch - nieoczekiwany błąd", "CinemaWatch - unexpected error");
+    public string UnsavedOnExitTitle => T("Niezapisane zmiany", "Unsaved changes");
+    public string UnsavedOnExit => T("Niektóre profile mają niezapisane zmiany. Zamknąć aplikację mimo to?",
+        "Some profiles have unsaved changes. Close the app anyway?");
 }

@@ -24,10 +24,16 @@ public sealed class SeatsStepViewModel : ObservableObject
 
     public ObservableCollection<ScreeningSeatsItem> Items { get; } = [];
 
+    /// <summary>Raised when the watched seats of any screening change.</summary>
+    public event EventHandler? SelectionChanged;
+
     public RelayCommand ApplyToAllCommand { get; }
     public RelayCommand ClearCommand { get; }
 
-    public IReadOnlyList<int> AdjacentOptions { get; } = [1, 2, 3, 4, 5, 6];
+    private static readonly IReadOnlyList<int> AdjacentChoices = [1, 2, 3, 4, 5, 6];
+
+    /// <summary>Shared by all tabs (see <see cref="DatesStepViewModel.Cities"/>).</summary>
+    public IReadOnlyList<int> AdjacentOptions => AdjacentChoices;
 
     public string HintText => T(
         "Kliknij numer rzędu, aby zaznaczyć cały rząd. Kliknij miejsce, aby je dodać lub usunąć - także zajęte.",
@@ -38,6 +44,8 @@ public sealed class SeatsStepViewModel : ObservableObject
         get => _selectedItem;
         set
         {
+            // Ignore the null WPF pushes while the view switches to another profile tab.
+            if (value is null && Items.Count > 0) return;
             if (!SetProperty(ref _selectedItem, value)) return;
             SetActionText(null);
             RefreshCommands();
@@ -135,6 +143,7 @@ public sealed class SeatsStepViewModel : ObservableObject
         _selections[item.Screening.Id] = new HashSet<string>(item.Map.WatchedKeys, StringComparer.Ordinal);
         item.UpdateSelection();
         SetActionText(null);
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ApplyToAll()

@@ -1,4 +1,4 @@
-using System.Text.Json;
+using System.Collections.ObjectModel;
 using CinemaWatch.Core;
 using static CinemaWatch.Core.Localizer;
 
@@ -7,41 +7,17 @@ namespace CinemaWatch.ViewModels;
 /// <summary>Language choice in the drop-down (names are shown in their own language).</summary>
 public sealed record LanguageOption(AppLanguage Language, string Name);
 
-/// <summary>Wizard shell: step navigation, busy state, errors, language, and opening / starting profiles.</summary>
+/// <summary>
+/// Main window: profile tabs (each tab is a full wizard), opening / closing profiles, "check all", language.
+/// At start-up the tabs are restored from the profiles folder (profiles whose screenings are all over are skipped).
+/// </summary>
 public sealed class MainViewModel : ObservableObject, IDisposable
 {
-    private const int DatesIndex = 0;
-    private const int ScreeningsIndex = 1;
-    private const int SeatsIndex = 2;
-    private const int SummaryIndex = 3;
-    private const int MaxParallelRequests = 3;
-
-    /// <summary>Loaded repertoire / seat data younger than this is reused when navigating forward again.</summary>
-    private static readonly TimeSpan ReuseLoadedDataFor = TimeSpan.FromMinutes(5);
-
-    private readonly CinemaCityClient _client;
-    private readonly SeatAvailabilityService _seatService;
-    private readonly IUserInteraction _ui;
-    private readonly ITaskScheduler _scheduler;
-    private readonly AppEnvironment _environment;
-    private readonly Func<DateTime> _clock;
+    private readonly SessionServices _services;
     private readonly Action? _languageChanged;
-
-    private int _stepIndex;
-    private object _currentPage;
-    private bool _isBusy;
-    // Messages are stored as factories, so they re-render when the language changes.
-    private Func<string?>? _statusText;
-    private Func<string?>? _errorText;
-    private CancellationTokenSource? _loadCts;
-
-    // Step navigation: the furthest step visited, and what the loaded data of steps 2 and 3 was built from.
-    private int _furthestVisited;
-    private int _navigationVersion;
-    private string? _repertoireKey;
-    private DateTime _repertoireLoadedAt;
-    private string? _seatsKey;
-    private DateTime _seatsLoadedAt;
+    private ProfileSessionViewModel? _selectedSession;
+    private bool _isCheckingAll;
+    private Func<string>? _checkAllText;
 
     /// <param name="languageChanged">Called after the user switched the language (the app saves it and updates WPF).</param>
     public MainViewModel(
@@ -52,51 +28,49 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         Func<DateTime>? clock = null,
         Action? languageChanged = null)
     {
-        _client = client;
-        _seatService = new SeatAvailabilityService(client, environment.CacheDirectory);
-        _ui = ui;
-        _scheduler = scheduler;
-        _environment = environment;
-        _clock = clock ?? (() => DateTime.Now);
+        _services = new SessionServices(
+            client,
+            new SeatAvailabilityService(client, environment.CacheDirectory),
+            ui,
+            scheduler,
+            environment,
+            clock ?? (() => DateTime.Now));
         _languageChanged = languageChanged;
 
-        DatesStep = new DatesStepViewModel();
-        ScreeningsStep = new ScreeningsStepViewModel();
-        SeatsStep = new SeatsStepViewModel();
-        SummaryStep = new SummaryStepViewModel(_seatService, ui, scheduler, environment, BuildProfile, _clock);
+        NewProfileCommand = new RelayCommand(() => SelectedSession = AddSession(new ProfileSessionViewModel(_services, closeRequested: Close)));
+        OpenProfileCommand = new AsyncRelayCommand(OpenProfilesAsync);
+        CheckAllCommand = new AsyncRelayCommand(CheckAllAsync, () => !_isCheckingAll);
 
-        Steps =
-        [
-            new StepItem(1, "Kino i termin", "Cinema and dates", NavigateToAsync),
-            new StepItem(2, "Film i seanse", "Film and screenings", NavigateToAsync),
-            new StepItem(3, "Miejsca", "Seats", NavigateToAsync),
-            new StepItem(4, "Podsumowanie", "Summary", NavigateToAsync),
-        ];
-
-        NextCommand = new AsyncRelayCommand(() => NavigateToAsync(_stepIndex + 1), () => !IsBusy && _stepIndex < SummaryIndex);
-        BackCommand = new RelayCommand(GoBack, () => CanGoBack);
-        NewProfileCommand = new RelayCommand(StartNewProfile, () => !IsBusy);
-        OpenProfileCommand = new AsyncRelayCommand(OpenProfileAsync, () => !IsBusy);
-
-        _currentPage = DatesStep;
-        UpdateSteps();
+        Sessions.CollectionChanged += (_, _) => OnPropertyChanged(nameof(CheckAllLabel));
+        SelectedSession = AddSession(new ProfileSessionViewModel(_services, closeRequested: Close));
         Localizer.LanguageChanged += OnLanguageChanged;
     }
 
-    public DatesStepViewModel DatesStep { get; }
-    public ScreeningsStepViewModel ScreeningsStep { get; }
-    public SeatsStepViewModel SeatsStep { get; }
-    public SummaryStepViewModel SummaryStep { get; }
+    public ObservableCollection<ProfileSessionViewModel> Sessions { get; } = [];
 
-    public IReadOnlyList<StepItem> Steps { get; }
+    /// <summary>The visible tab. Showing a tab opened from a file loads it (once).</summary>
+    public ProfileSessionViewModel? SelectedSession
+    {
+        get => _selectedSession;
+        set
+        {
+            if (!SetProperty(ref _selectedSession, value) || value is null) return;
+            _ = value.EnsureLoadedAsync();
+        }
+    }
 
-    public AsyncRelayCommand NextCommand { get; }
-    public RelayCommand BackCommand { get; }
     public RelayCommand NewProfileCommand { get; }
     public AsyncRelayCommand OpenProfileCommand { get; }
+    public AsyncRelayCommand CheckAllCommand { get; }
 
-    /// <summary>"CinemaWatch 1.0.0"</summary>
+    /// <summary>"CinemaWatch 1.3.0"</summary>
     public string WindowTitle => $"CinemaWatch {AppInfo.Version}";
+
+    public string CheckAllLabel => T($"Sprawdź wszystkie ({Sessions.Count})", $"Check all ({Sessions.Count})");
+
+    public string? CheckAllText => _checkAllText?.Invoke();
+
+    public bool HasUnsavedChanges => Sessions.Any(s => s.IsDirty);
 
     public IReadOnlyList<LanguageOption> Languages { get; } =
     [
@@ -114,454 +88,198 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public int StepIndex => _stepIndex;
-
-    public object CurrentPage
+    /// <summary>
+    /// Restores tabs from the profiles folder: every readable profile with at least one upcoming screening
+    /// gets a tab (loaded when first shown). With none, the window keeps one empty "new profile" tab.
+    /// </summary>
+    public Task InitializeAsync()
     {
-        get => _currentPage;
-        private set => SetProperty(ref _currentPage, value);
-    }
+        var directory = _services.Environment.ProfilesDirectory;
+        if (!Directory.Exists(directory)) return Task.CompletedTask;
 
-    public bool IsBusy
-    {
-        get => _isBusy;
-        private set
+        var now = _services.Clock();
+        var restored = new List<ProfileSessionViewModel>();
+        foreach (var path in Directory.EnumerateFiles(directory, "*" + ProfileStore.FileExtension).Order(StringComparer.OrdinalIgnoreCase))
         {
-            if (SetProperty(ref _isBusy, value))
-                RefreshCommands();
+            try
+            {
+                var profile = ProfileStore.Load(path);
+                if (profile.Screenings.Any(s => s.StartsAt > now))
+                    restored.Add(new ProfileSessionViewModel(_services, path, profile, Close));
+            }
+            catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                // Not a usable profile - skip it.
+            }
         }
+        if (restored.Count == 0) return Task.CompletedTask;
+
+        // Replace the initial empty tab if the user has not touched it yet.
+        var initial = Sessions.Count == 1 && !Sessions[0].IsDirty && Sessions[0].FilePath is null ? Sessions[0] : null;
+        foreach (var session in restored)
+            AddSession(session);
+        SelectedSession = restored[0];
+        if (initial is not null)
+            RemoveSession(initial);
+        return SelectedSession.EnsureLoadedAsync();
     }
-
-    public string? StatusText => _statusText?.Invoke();
-
-    public string? ErrorText => _errorText?.Invoke();
-
-    public bool HasError => !string.IsNullOrEmpty(ErrorText);
-
-    public bool CanGoBack => _stepIndex > DatesIndex;
-
-    public bool IsLastStep => _stepIndex == SummaryIndex;
 
     public void Dispose()
     {
         Localizer.LanguageChanged -= OnLanguageChanged;
-        _loadCts?.Dispose();
+        foreach (var session in Sessions)
+            session.Dispose();
+    }
+
+    // ------------------------------------------------------------------ tabs
+
+    private async Task OpenProfilesAsync()
+    {
+        var paths = _services.Ui.PickProfilesToOpen(SelectedSession?.FilePath is { } current
+            ? Path.GetDirectoryName(current)!
+            : _services.Environment.ProfilesDirectory);
+        ProfileSessionViewModel? first = null;
+        var toLoad = new List<ProfileSessionViewModel>();
+
+        foreach (var path in paths)
+        {
+            // Already open: just switch to that tab.
+            var existing = Sessions.FirstOrDefault(s => s.FilePath is not null && SamePath(s.FilePath, path));
+            if (existing is not null)
+            {
+                first ??= existing;
+                continue;
+            }
+
+            ProfileSessionViewModel session;
+            try
+            {
+                session = new ProfileSessionViewModel(_services, path, ProfileStore.Load(path), Close);
+            }
+            catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                // Show the problem in a tab of its own, with the usual message.
+                session = new ProfileSessionViewModel(_services, closeRequested: Close);
+                await session.OpenAsync(path);
+            }
+            AddSession(session);
+            toLoad.Add(session);
+            first ??= session;
+        }
+
+        // An untouched empty tab is replaced by the opened profiles.
+        if (first is not null && SelectedSession is { FilePath: null, IsDirty: false, StepIndex: 0 } empty && Sessions.Count > 1
+            && !toLoad.Contains(empty))
+            RemoveSession(empty);
+
+        if (first is not null)
+        {
+            SelectedSession = first;
+            await first.EnsureLoadedAsync();
+        }
+    }
+
+    private void Close(ProfileSessionViewModel session)
+    {
+        if (session.IsDirty && !_services.Ui.Confirm(
+                T("Niezapisane zmiany", "Unsaved changes"),
+                T($"Profil „{session.Title}” ma niezapisane zmiany. Zamknąć go mimo to?",
+                  $"The profile \"{session.Title}\" has unsaved changes. Close it anyway?")))
+            return;
+
+        var index = Sessions.IndexOf(session);
+        RemoveSession(session);
+        if (Sessions.Count == 0)
+            AddSession(new ProfileSessionViewModel(_services, closeRequested: Close));
+        if (ReferenceEquals(SelectedSession, session) || SelectedSession is null)
+            SelectedSession = Sessions[Math.Clamp(index, 0, Sessions.Count - 1)];
+    }
+
+    private ProfileSessionViewModel AddSession(ProfileSessionViewModel session)
+    {
+        Sessions.Add(session);
+        return session;
+    }
+
+    private void RemoveSession(ProfileSessionViewModel session)
+    {
+        Sessions.Remove(session);
+        session.Dispose();
+    }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+
+    // ------------------------------------------------------------------ check all
+
+    /// <summary>
+    /// Checks every tab that has selected seats - opened tabs with their current state, others from their file.
+    /// Profiles are checked one after another, and a screening watched in several profiles is fetched only once.
+    /// </summary>
+    private async Task CheckAllAsync()
+    {
+        var targets = Sessions
+            .Select(s => (Session: s, Profile: s.GetProfileForCheck()))
+            .Where(t => t.Profile is { Screenings.Count: > 0 })
+            .ToList();
+        if (targets.Count == 0)
+        {
+            SetCheckAllText(() => T("Żaden profil nie ma jeszcze zaznaczonych miejsc.", "No profile has selected seats yet."));
+            return;
+        }
+
+        _isCheckingAll = true;
+        CheckAllCommand.NotifyCanExecuteChanged();
+        SetCheckAllText(() => T("Sprawdzanie wszystkich profili…", "Checking all profiles…"));
+        try
+        {
+            var fetched = new Dictionary<string, Task<ScreeningSeats>>(StringComparer.Ordinal);
+            Task<ScreeningSeats> Fetch(string id, CancellationToken ct)
+            {
+                if (!fetched.TryGetValue(id, out var task))
+                    fetched[id] = task = _services.SeatService.GetScreeningSeatsAsync(id, ct);
+                return task;
+            }
+
+            var withSeats = 0;
+            DateTime checkedAt = default;
+            foreach (var (session, profile) in targets)
+            {
+                var result = await ProfileChecker.CheckAsync(profile!, Fetch, _services.Clock());
+                session.ApplyCheckResult(result);
+                checkedAt = result.CheckedAt;
+                if (result.HasMatches) withSeats++;
+            }
+
+            var count = targets.Count;
+            var time = checkedAt.ToString("HH:mm:ss", Formatting.Culture);
+            SetCheckAllText(() =>
+                T($"Sprawdzono o {time}: ", $"Checked at {time}: ")
+                + Count(count, "profil", "profile", "profili", "profile", "profiles")
+                + (withSeats == 0
+                    ? T(", brak wolnych miejsc.", ", no free seats.")
+                    : T($", wolne miejsca w {withSeats}.", $", free seats in {withSeats}.")));
+        }
+        finally
+        {
+            _isCheckingAll = false;
+            CheckAllCommand.NotifyCanExecuteChanged();
+        }
+    }
+
+    private void SetCheckAllText(Func<string>? text)
+    {
+        _checkAllText = text;
+        OnPropertyChanged(nameof(CheckAllText));
     }
 
     // ------------------------------------------------------------------ language
 
     private void OnLanguageChanged(object? sender, EventArgs e)
     {
-        foreach (var step in Steps) step.RefreshTexts();
-        DatesStep.RefreshTexts();
-        ScreeningsStep.RefreshTexts();
-        SeatsStep.RefreshTexts();
-        SummaryStep.RefreshTexts();
         OnPropertyChanged(nameof(SelectedLanguage));
-        OnPropertyChanged(nameof(StatusText));
-        OnPropertyChanged(nameof(ErrorText));
-        OnPropertyChanged(nameof(HasError));
+        OnPropertyChanged(nameof(CheckAllLabel));
+        OnPropertyChanged(nameof(CheckAllText));
         _languageChanged?.Invoke();
     }
-
-    private void SetStatus(Func<string?>? text)
-    {
-        _statusText = text;
-        OnPropertyChanged(nameof(StatusText));
-    }
-
-    private void SetError(Func<string?>? text)
-    {
-        _errorText = text;
-        OnPropertyChanged(nameof(ErrorText));
-        OnPropertyChanged(nameof(HasError));
-    }
-
-    // ------------------------------------------------------------------ profile
-
-    /// <summary>Builds a profile from the current wizard state.</summary>
-    public WatchProfile BuildProfile()
-    {
-        var dates = DatesStep.GetDates();
-        var film = ScreeningsStep.SelectedFilm;
-        return new WatchProfile
-        {
-            Name = string.IsNullOrWhiteSpace(SummaryStep.ProfileName) ? DefaultProfileName() : SummaryStep.ProfileName.Trim(),
-            CinemaId = DatesStep.Cinema.Id,
-            CinemaName = DatesStep.Cinema.Name,
-            FilmId = film?.FilmId ?? "",
-            FilmName = film?.Name ?? "",
-            DateFrom = dates.Count > 0 ? dates[0] : DateOnly.FromDateTime(_clock()),
-            DateTo = dates.Count > 0 ? dates[^1] : DateOnly.FromDateTime(_clock()),
-            MinAdjacent = SeatsStep.MinAdjacent,
-            IntervalMinutes = SummaryStep.IntervalMinutes,
-            Screenings = SeatsStep.Items
-                .Where(i => i.Map is not null && i.WatchedCount > 0)
-                .Select(i => new WatchedScreening
-                {
-                    Id = i.Screening.Id,
-                    StartsAt = i.Screening.StartsAt,
-                    Auditorium = i.Screening.Auditorium,
-                    BookingLink = i.Screening.BookingLink,
-                    SeatKeys = i.Map!.WatchedKeys.OrderBy(k => k, StringComparer.Ordinal).ToList(),
-                })
-                .ToList(),
-        };
-    }
-
-    private string DefaultProfileName()
-    {
-        var dates = DatesStep.GetDates();
-        var film = ScreeningsStep.SelectedFilm?.Name ?? T("Profil", "Profile");
-        if (dates.Count == 0) return film;
-        var from = Formatting.ShortDate(dates[0]);
-        var to = Formatting.ShortDate(dates[^1]);
-        return dates.Count == 1 ? $"{film} {from}" : $"{film} {from}–{to}";
-    }
-
-    private void StartNewProfile()
-    {
-        _loadCts?.Cancel();
-        DatesStep.Reset();
-        ScreeningsStep.Load([], ScreeningFilter.ImaxWithoutDubbing, _clock());
-        SeatsStep.Reset();
-        SummaryStep.Reset();
-        SetError(null);
-        SetStatus(null);
-        _furthestVisited = DatesIndex;
-        _repertoireKey = null;
-        _seatsKey = null;
-        _navigationVersion++;
-        GoTo(DatesIndex);
-    }
-
-    private async Task OpenProfileAsync()
-    {
-        var path = _ui.PickProfileToOpen(_environment.ProfilesDirectory);
-        if (path is null) return;
-
-        WatchProfile profile;
-        try
-        {
-            profile = ProfileStore.Load(path);
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException or UnauthorizedAccessException)
-        {
-            var file = Path.GetFileName(path);
-            SetError(ex is JsonException
-                ? () => T($"Nie udało się otworzyć profilu: plik {file} nie jest poprawnym profilem CinemaWatch.",
-                          $"Could not open the profile: {file} is not a valid CinemaWatch profile.")
-                : () => T($"Nie udało się otworzyć profilu: {ex.Message}", $"Could not open the profile: {ex.Message}"));
-            return;
-        }
-
-        try
-        {
-            await ReplayProfileAsync(profile, path);
-        }
-        catch (OperationCanceledException) when (_loadCts?.IsCancellationRequested == true)
-        {
-        }
-        catch (Exception ex)
-        {
-            SetError(() => T("Nie udało się otworzyć profilu: ", "Could not open the profile: ") + ErrorMessages.Describe(ex));
-            SetStatus(null);
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    /// <summary>
-    /// Opens a profile by replaying the wizard with its data: fresh repertoire, fresh occupancy, the saved seat
-    /// selection - and ends on the summary. Every step stays editable afterwards.
-    /// </summary>
-    private async Task ReplayProfileAsync(WatchProfile profile, string path)
-    {
-        StartNewProfile();
-        var now = _clock();
-        if (profile.Screenings.All(s => s.StartsAt <= now))
-        {
-            await RetireExpiredProfileAsync(path);
-            return;
-        }
-
-        var from = profile.DateFrom.ToDateTime(TimeOnly.MinValue);
-        if (from < now.Date) from = now.Date;
-        var to = profile.DateTo.ToDateTime(TimeOnly.MinValue);
-        DatesStep.DateFrom = from;
-        DatesStep.IsRange = to > from;
-        if (to > from) DatesStep.DateTo = to;
-
-        if (!await LeaveDatesStepAsync()) return;
-
-        var missing = ScreeningsStep.SelectScreenings(profile.FilmId, profile.Screenings.Select(s => s.Id));
-        if (ScreeningsStep.SelectedCount == 0)
-        {
-            SetError(() => T("W repertuarze nie ma już seansów z tego profilu.", "The repertoire no longer has any screenings from this profile."));
-            return;
-        }
-
-        SeatsStep.MinAdjacent = profile.MinAdjacent;
-        SeatsStep.SetSelections(profile.Screenings.Select(s => (s.Id, (IEnumerable<string>)s.SeatKeys)));
-        if (!await LeaveScreeningsStepAsync()) return;
-
-        SummaryStep.SetProfile(path, profile.Name, profile.IntervalMinutes);
-        if (!LeaveSeatsStep()) return;
-
-        var name = profile.Name;
-        SetStatus(missing > 0
-            ? () => T("Otwarto profil. Pominięto ", "Profile opened. Skipped ")
-                    + Count(missing, "seans", "seanse", "seansów", "screening", "screenings")
-                    + T(", których nie ma już w repertuarze.", " no longer in the repertoire.")
-            : () => T($"Otwarto profil: {name}", $"Profile opened: {name}"));
-    }
-
-    /// <summary>An opened profile has only past screenings: offer to remove its scheduled task.</summary>
-    private async Task RetireExpiredProfileAsync(string path)
-    {
-        SetError(() => T("Wszystkie seanse z tego profilu już się odbyły.", "All screenings of this profile are over."));
-        var taskName = SchtasksScheduler.TaskNameFor(path);
-        if (!await _scheduler.ExistsAsync(taskName)) return;
-
-        if (!_ui.Confirm(T("Profil nieaktualny", "Outdated profile"),
-                T($"Wszystkie seanse z tego profilu już się odbyły, a w Harmonogramie nadal jest zadanie {taskName}.\n\nUsunąć je?",
-                  $"All screenings of this profile are over, but Task Scheduler still has the task {taskName}.\n\nRemove it?")))
-            return;
-
-        var result = await _scheduler.DeleteAsync(taskName);
-        var message = result.Message;
-        if (result.Success)
-        {
-            SetError(null);
-            SetStatus(() => message + T(" Profil był nieaktualny.", " The profile was outdated."));
-        }
-        else
-        {
-            SetError(() => message);
-        }
-    }
-
-    // ------------------------------------------------------------------ navigation
-
-    /// <summary>
-    /// Opens a step. Backwards is immediate. Forwards runs each step's checks and loading in turn (exactly like
-    /// pressing "Next" repeatedly) and stops at the first step that needs the user's input. Data that is still
-    /// valid - same dates, same screenings, loaded less than 5 minutes ago - is reused, so revisiting a step is instant.
-    /// </summary>
-    private async Task NavigateToAsync(int target)
-    {
-        if (target < DatesIndex || target > SummaryIndex || target == _stepIndex) return;
-        if (target < _stepIndex)
-        {
-            GoBackTo(target);
-            return;
-        }
-        if (IsBusy || (target > _furthestVisited && target != _stepIndex + 1)) return;
-
-        var navigation = ++_navigationVersion;
-        SetError(null);
-        try
-        {
-            while (_stepIndex < target && navigation == _navigationVersion)
-            {
-                var advanced = _stepIndex switch
-                {
-                    DatesIndex => await LeaveDatesStepAsync(),
-                    ScreeningsIndex => await LeaveScreeningsStepAsync(),
-                    SeatsIndex => LeaveSeatsStep(),
-                    _ => false,
-                };
-                if (!advanced) break;
-            }
-        }
-        catch (OperationCanceledException) when (_loadCts?.IsCancellationRequested == true)
-        {
-            // User went back while loading.
-        }
-        catch (Exception ex)
-        {
-            SetError(() => ErrorMessages.Describe(ex));
-            SetStatus(null);
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    private async Task<bool> LeaveDatesStepAsync()
-    {
-        var today = _clock();
-        if (DatesStep.Validate(today) is not null)
-        {
-            // Re-evaluated on language change, and disappears once the input is fixed.
-            SetError(() => DatesStep.Validate(today));
-            return false;
-        }
-
-        var dates = DatesStep.GetDates();
-        var key = string.Join(",", dates);
-        if (key == _repertoireKey && IsFresh(_repertoireLoadedAt))
-        {
-            SetStatus(null);
-            GoTo(ScreeningsIndex);
-            return true;
-        }
-
-        IsBusy = true;
-        SetStatus(() => T("Pobieranie repertuaru (", "Loading the repertoire (")
-                        + Count(dates.Count, "dzień", "dni", "dni", "day", "days") + ")…");
-        var cancellationToken = StartLoad();
-
-        var results = await LoadRepertoireAsync(DatesStep.Cinema.Id, dates, cancellationToken);
-        var failures = results.Where(r => r.Error is not null).ToList();
-        if (failures.Count == results.Count)
-            throw failures[0].Error!;
-
-        ScreeningsStep.Load(
-            results.Where(r => r.Day is not null).Select(r => r.Day!).ToList(),
-            ScreeningFilter.ImaxWithoutDubbing,
-            _clock());
-        _repertoireKey = failures.Count == 0 ? key : null; // partial results are reloaded next time
-        _repertoireLoadedAt = _clock();
-        _seatsKey = null;
-
-        SetStatus(failures.Count == 0
-            ? null
-            : () => T("Nie udało się pobrać repertuaru dla ", "Could not load the repertoire for ")
-                    + Count(failures.Count, "dnia", "dni", "dni", "day", "days") + ": "
-                    + string.Join(", ", failures.Select(f => Formatting.ShortDate(f.Date))));
-        GoTo(ScreeningsIndex);
-        return true;
-    }
-
-    private async Task<bool> LeaveScreeningsStepAsync()
-    {
-        var selected = ScreeningsStep.GetSelectedScreenings();
-        if (selected.Count == 0)
-        {
-            SetError(() => T("Zaznacz co najmniej jeden seans.", "Select at least one screening."));
-            return false;
-        }
-
-        var key = string.Join(",", selected.Select(s => s.Id));
-        if (key == _seatsKey && IsFresh(_seatsLoadedAt))
-        {
-            SetStatus(null);
-            GoTo(SeatsIndex);
-            return true;
-        }
-
-        GoTo(SeatsIndex);
-        IsBusy = true;
-        SetStatus(() => T("Pobieranie układu sali i zajętości miejsc…", "Loading the hall layout and seat occupancy…"));
-        var allLoaded = await SeatsStep.LoadAsync(_seatService, selected, StartLoad());
-        _seatsKey = allLoaded ? key : null;
-        _seatsLoadedAt = _clock();
-        SetStatus(() => SeatsStep.Summary);
-        return true;
-    }
-
-    private bool LeaveSeatsStep()
-    {
-        if (SeatsStep.Validate() is not null)
-        {
-            SetError(() => SeatsStep.Validate());
-            return false;
-        }
-
-        SummaryStep.Load(SeatsStep.Items, SeatsStep.MinAdjacent, DefaultProfileName());
-        SetStatus(null);
-        GoTo(SummaryIndex);
-        return true;
-    }
-
-    private void GoBack()
-    {
-        if (CanGoBack)
-            GoBackTo(_stepIndex - 1);
-    }
-
-    /// <summary>Going back never reloads anything; a load in progress is cancelled.</summary>
-    private void GoBackTo(int index)
-    {
-        _navigationVersion++;
-        _loadCts?.Cancel();
-        SetError(null);
-        SetStatus(null);
-        GoTo(index);
-    }
-
-    private bool IsFresh(DateTime loadedAt) => _clock() - loadedAt < ReuseLoadedDataFor;
-
-    private void GoTo(int index)
-    {
-        _stepIndex = index;
-        _furthestVisited = Math.Max(_furthestVisited, index);
-        CurrentPage = index switch
-        {
-            DatesIndex => DatesStep,
-            ScreeningsIndex => ScreeningsStep,
-            SeatsIndex => SeatsStep,
-            _ => SummaryStep,
-        };
-        UpdateSteps();
-        OnPropertyChanged(nameof(StepIndex));
-        OnPropertyChanged(nameof(CanGoBack));
-        OnPropertyChanged(nameof(IsLastStep));
-        RefreshCommands();
-    }
-
-    private CancellationToken StartLoad()
-    {
-        _loadCts?.Cancel();
-        _loadCts?.Dispose();
-        _loadCts = new CancellationTokenSource();
-        return _loadCts.Token;
-    }
-
-    private async Task<IReadOnlyList<RepertoireResult>> LoadRepertoireAsync(
-        string cinemaId, IReadOnlyList<DateOnly> dates, CancellationToken cancellationToken)
-    {
-        using var gate = new SemaphoreSlim(MaxParallelRequests);
-        var tasks = dates.Select(async date =>
-        {
-            await gate.WaitAsync(cancellationToken);
-            try
-            {
-                return new RepertoireResult(date, await _client.GetRepertoireAsync(cinemaId, date, cancellationToken), null);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                return new RepertoireResult(date, null, ex);
-            }
-            finally
-            {
-                gate.Release();
-            }
-        });
-        return await Task.WhenAll(tasks);
-    }
-
-    private void UpdateSteps()
-    {
-        for (var i = 0; i < Steps.Count; i++)
-        {
-            Steps[i].IsCurrent = i == _stepIndex;
-            Steps[i].IsDone = i < _stepIndex;
-            Steps[i].IsReachable = i <= _furthestVisited || i == _stepIndex + 1;
-        }
-    }
-
-    private void RefreshCommands()
-    {
-        NextCommand.NotifyCanExecuteChanged();
-        BackCommand.NotifyCanExecuteChanged();
-        NewProfileCommand.NotifyCanExecuteChanged();
-        OpenProfileCommand.NotifyCanExecuteChanged();
-    }
-
-    private sealed record RepertoireResult(DateOnly Date, DayRepertoire? Day, Exception? Error);
 }

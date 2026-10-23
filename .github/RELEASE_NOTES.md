@@ -1,13 +1,19 @@
-## CinemaWatch 1.2.0
+## CinemaWatch 1.3.0
 
-- **Clickable steps.** The step indicator at the top is now navigation: click any step you have already visited
-  (or the next one) to jump straight to it.
-  - Going back is instant; nothing is reloaded.
-  - Going forward runs the same checks and loading as *Next*, step by step, and stops at the first step that
-    needs your input (for example when no screening is selected).
-  - Data that has not changed - same dates, same screenings, loaded less than 5 minutes ago - is reused, so
-    jumping back and forth costs no extra requests to Cinema City.
-- Ticked screenings stay ticked when you change the dates (for example when widening the date range).
+- **Profile tabs.** Several profiles can be open at once, each in its own tab above the steps - with its own
+  wizard, selection and messages.
+  - *Open profiles…* accepts several files at once; a profile that is already open just gets focus.
+  - At start-up the tabs are restored from the profiles folder. Profiles whose screenings are all over are skipped.
+    A tab loads its data when you first open it.
+  - A dot on the tab marks unsaved changes; closing such a tab (or the app) asks first.
+- **Check all.** Next to *Check this profile*, *Check all (N)* checks every open profile, one after another.
+  A screening watched in several profiles is fetched only once. Each tab shows a badge with the number of free
+  watched seats, and opening a tab later shows the results on its cards.
+- Fixed: the city, cinema and technology fields in step 1 could show up empty (they are still fixed to
+  Warsaw / Cinema City Sadyba / IMAX - choosing them comes with the all-IMAX version). Switching tabs also can no
+  longer reset the chosen film or the active screening map.
+- Pre-release builds: tags such as `v1.4.0-beta.1` are published as pre-releases (never "Latest"),
+  and CI also runs on `feature/*` branches.
 
 ### Download
 

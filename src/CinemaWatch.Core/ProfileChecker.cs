@@ -17,8 +17,16 @@ public sealed record ProfileCheckResult(DateTime CheckedAt, IReadOnlyList<Screen
 /// <summary>Checks a profile against the current seat status (used by "Sprawdź teraz" and by --profile).</summary>
 public static class ProfileChecker
 {
+    public static Task<ProfileCheckResult> CheckAsync(
+        WatchProfile profile, SeatAvailabilityService service, DateTime now, CancellationToken cancellationToken = default) =>
+        CheckAsync(profile, service.GetScreeningSeatsAsync, now, cancellationToken);
+
+    /// <summary>Checks with a custom loader (e.g. shared between several profiles so each screening is fetched once).</summary>
     public static async Task<ProfileCheckResult> CheckAsync(
-        WatchProfile profile, SeatAvailabilityService service, DateTime now, CancellationToken cancellationToken = default)
+        WatchProfile profile,
+        Func<string, CancellationToken, Task<ScreeningSeats>> loadSeats,
+        DateTime now,
+        CancellationToken cancellationToken = default)
     {
         var checks = new List<ScreeningCheck>();
         foreach (var screening in profile.Screenings.OrderBy(s => s.StartsAt))
@@ -31,7 +39,7 @@ public static class ProfileChecker
 
             try
             {
-                var seats = await service.GetScreeningSeatsAsync(screening.Id, cancellationToken).ConfigureAwait(false);
+                var seats = await loadSeats(screening.Id, cancellationToken).ConfigureAwait(false);
                 var watched = new HashSet<string>(screening.SeatKeys, StringComparer.Ordinal);
                 var available = SeatMatcher.FindAvailable(seats, watched, profile.MinAdjacent);
                 checks.Add(new ScreeningCheck(screening, seats, available, null, IsPast: false));

@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using System.Windows;
 using CinemaWatch.Core;
+using CinemaWatch.ViewModels;
 
 namespace CinemaWatch;
 
@@ -13,7 +14,19 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         RestorePlacement();
-        Closing += (_, _) => SavePlacement();
+        Closing += OnClosing;
+    }
+
+    private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (DataContext is MainViewModel { HasUnsavedChanges: true } &&
+            MessageBox.Show(this, UiText.Instance.UnsavedOnExit, UiText.Instance.UnsavedOnExitTitle,
+                MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            e.Cancel = true;
+            return;
+        }
+        SavePlacement();
     }
 
     /// <summary>Reopens the window with the size, position and maximized state it had when closed.</summary>

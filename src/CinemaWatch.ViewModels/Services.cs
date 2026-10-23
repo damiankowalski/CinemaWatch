@@ -3,7 +3,8 @@ namespace CinemaWatch.ViewModels;
 /// <summary>Dialogs and shell actions, implemented by the WPF app (and by fakes in tests).</summary>
 public interface IUserInteraction
 {
-    string? PickProfileToOpen(string initialDirectory);
+    /// <summary>Returns the chosen files (several can be selected); empty when cancelled.</summary>
+    IReadOnlyList<string> PickProfilesToOpen(string initialDirectory);
     string? PickProfileToSave(string initialDirectory, string fileName);
     bool Confirm(string title, string message);
     void CopyText(string text);

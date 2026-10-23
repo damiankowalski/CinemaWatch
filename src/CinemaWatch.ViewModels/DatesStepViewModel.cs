@@ -12,17 +12,20 @@ public sealed class DatesStepViewModel : ObservableObject
     private DateTime? _dateTo;
     private bool _isRange;
 
-    public DatesStepViewModel()
-    {
-        Cities = [new ChoiceOption("Warszawa", "Warsaw")];
-        Cinemas = [new ChoiceOption(Locations.Sadyba.Name, Locations.Sadyba.Name)];
-        Technologies = [new ChoiceOption(Locations.ImaxTechnology, Locations.ImaxTechnology)];
-    }
-
     // Fixed for now; the lists are ready for city / cinema / technology selection later.
-    public IReadOnlyList<ChoiceOption> Cities { get; }
-    public IReadOnlyList<ChoiceOption> Cinemas { get; }
-    public IReadOnlyList<ChoiceOption> Technologies { get; }
+    // The lists are shared by all profile tabs: the view of step 1 is reused when switching tabs, and a
+    // different list instance per tab would make WPF drop the shown selection.
+    private static readonly IReadOnlyList<ChoiceOption> CityOptions = [new ChoiceOption("Warszawa", "Warsaw")];
+    private static readonly IReadOnlyList<ChoiceOption> CinemaOptions = [new ChoiceOption(Locations.Sadyba.Name, Locations.Sadyba.Name)];
+    private static readonly IReadOnlyList<ChoiceOption> TechnologyOptions = [new ChoiceOption(Locations.ImaxTechnology, Locations.ImaxTechnology)];
+
+    public IReadOnlyList<ChoiceOption> Cities => CityOptions;
+    public IReadOnlyList<ChoiceOption> Cinemas => CinemaOptions;
+    public IReadOnlyList<ChoiceOption> Technologies => TechnologyOptions;
+
+    public ChoiceOption SelectedCity => CityOptions[0];
+    public ChoiceOption SelectedCinema => CinemaOptions[0];
+    public ChoiceOption SelectedTechnology => TechnologyOptions[0];
 
     public Cinema Cinema => Locations.Sadyba;
 

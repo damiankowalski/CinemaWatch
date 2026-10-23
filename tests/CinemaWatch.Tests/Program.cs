@@ -356,7 +356,7 @@ TestRunner.Add("Localization: language detection, plurals, translated Core texts
     Assert.Equal(AppLanguage.English, Localizer.Detect(System.Globalization.CultureInfo.GetCultureInfo("de-DE")));
     Assert.Equal(AppLanguage.English, Localizer.Parse("EN"));
     Assert.Equal(null, Localizer.Parse("xx"));
-    Assert.True(System.Text.RegularExpressions.Regex.IsMatch(AppInfo.Version, @"^\d+\.\d+\.\d+$"));
+    Assert.True(System.Text.RegularExpressions.Regex.IsMatch(AppInfo.Version, @"^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$"));
 
     var plan = CinemaCityParser.ParseSeatPlan(Fixture("seatplan-13-1.json"));
     var profile = SampleProfile();
@@ -386,6 +386,8 @@ TestRunner.Add("Localization: language detection, plurals, translated Core texts
 ViewModelTests.Register();
 ViewModelTests.RegisterLanguageTests();
 ViewModelTests.RegisterNavigationTests();
+ViewModelTests.RegisterTabTests();
+ViewModelTests.RegisterTabSwitchTests();
 
 return await TestRunner.RunAsync();
 

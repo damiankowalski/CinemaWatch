@@ -20,15 +20,15 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0">
                             <TextBlock Text="{Binding City, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
-                            <ComboBox ItemsSource="{Binding Cities}" DisplayMemberPath="Name" SelectedIndex="0" IsEnabled="False" />
+                            <ComboBox ItemsSource="{Binding Cities}" SelectedItem="{Binding SelectedCity, Mode=OneWay}" DisplayMemberPath="Name" IsEnabled="False" />
                         </StackPanel>
                         <StackPanel Grid.Column="2">
                             <TextBlock Text="{Binding Cinema, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
-                            <ComboBox ItemsSource="{Binding Cinemas}" DisplayMemberPath="Name" SelectedIndex="0" IsEnabled="False" />
+                            <ComboBox ItemsSource="{Binding Cinemas}" SelectedItem="{Binding SelectedCinema, Mode=OneWay}" DisplayMemberPath="Name" IsEnabled="False" />
                         </StackPanel>
                         <StackPanel Grid.Column="4">
                             <TextBlock Text="{Binding Technology, Source={StaticResource T}}" Style="{StaticResource FieldLabelText}" />
-                            <ComboBox ItemsSource="{Binding Technologies}" DisplayMemberPath="Name" SelectedIndex="0" IsEnabled="False" />
+                            <ComboBox ItemsSource="{Binding Technologies}" SelectedItem="{Binding SelectedTechnology, Mode=OneWay}" DisplayMemberPath="Name" IsEnabled="False" />
                         </StackPanel>
                     </Grid>
                     <TextBlock Text="{Binding LocationLater, Source={StaticResource T}}"

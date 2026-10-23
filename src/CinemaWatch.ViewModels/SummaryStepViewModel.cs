@@ -25,6 +25,8 @@ public sealed class SummaryStepViewModel : ObservableObject
     private readonly AppEnvironment _environment;
     private readonly Func<WatchProfile> _buildProfile;
     private readonly Func<DateTime> _clock;
+    private readonly Action<ProfileCheckResult>? _onChecked;
+    private readonly Action<string>? _onSaved;
 
     private int _minAdjacent = 1;
     private int _skipped;
@@ -44,8 +46,12 @@ public sealed class SummaryStepViewModel : ObservableObject
         ITaskScheduler scheduler,
         AppEnvironment environment,
         Func<WatchProfile> buildProfile,
-        Func<DateTime> clock)
+        Func<DateTime> clock,
+        Action<ProfileCheckResult>? onChecked = null,
+        Action<string>? onSaved = null)
     {
+        _onChecked = onChecked;
+        _onSaved = onSaved;
         _service = service;
         _ui = ui;
         _scheduler = scheduler;
@@ -68,7 +74,10 @@ public sealed class SummaryStepViewModel : ObservableObject
     public AsyncRelayCommand ScheduleCommand { get; }
     public AsyncRelayCommand UnscheduleCommand { get; }
 
-    public IReadOnlyList<int> IntervalOptions { get; } = [5, 10, 15, 30, 60];
+    private static readonly IReadOnlyList<int> IntervalChoices = [5, 10, 15, 30, 60];
+
+    /// <summary>Shared by all tabs (see <see cref="DatesStepViewModel.Cities"/>).</summary>
+    public IReadOnlyList<int> IntervalOptions => IntervalChoices;
 
     public string ConditionText => _minAdjacent == 1
         ? T("Powiadomienie: gdy zwolni się którekolwiek z zaznaczonych miejsc.",
@@ -254,6 +263,13 @@ public sealed class SummaryStepViewModel : ObservableObject
     private async Task CheckNowAsync()
     {
         var result = await ProfileChecker.CheckAsync(_buildProfile(), _service, _clock());
+        if (_onChecked is not null) _onChecked(result); // the tab updates its badge and calls ShowCheckResult
+        else ShowCheckResult(result);
+    }
+
+    /// <summary>Shows a check result (from "check now" or "check all") on the cards.</summary>
+    public void ShowCheckResult(ProfileCheckResult result)
+    {
         foreach (var check in result.Screenings)
             Items.FirstOrDefault(i => i.ScreeningId == check.Screening.Id)?.SetCheck(check);
         _lastCheck = result;
@@ -334,6 +350,7 @@ public sealed class SummaryStepViewModel : ObservableObject
         ProfileStore.Save(path, profile);
         ProfilePath = path;
         ProfileName = profile.Name;
+        _onSaved?.Invoke(path);
     }
 
     private async Task RefreshScheduleStatusAsync()

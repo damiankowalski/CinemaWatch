@@ -12,7 +12,7 @@ internal sealed class WpfUserInteraction : IUserInteraction
 
     private static Window? Owner => Application.Current?.MainWindow;
 
-    public string? PickProfileToOpen(string initialDirectory)
+    public IReadOnlyList<string> PickProfilesToOpen(string initialDirectory)
     {
         var dialog = new OpenFileDialog
         {
@@ -20,9 +20,10 @@ internal sealed class WpfUserInteraction : IUserInteraction
             Filter = UiText.Instance.ProfileFileFilter,
             InitialDirectory = initialDirectory,
             CheckFileExists = true,
+            Multiselect = true,
         };
         var ok = Owner is null ? dialog.ShowDialog() : dialog.ShowDialog(Owner);
-        return ok == true ? dialog.FileName : null;
+        return ok == true ? dialog.FileNames : [];
     }
 
     public string? PickProfileToSave(string initialDirectory, string fileName)
