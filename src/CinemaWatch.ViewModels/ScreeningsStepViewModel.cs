@@ -30,6 +30,9 @@ public sealed class ScreeningsStepViewModel : ObservableObject
         get => _selectedFilm;
         set
         {
+            // WPF pushes null while the view switches to another profile tab; a film list never goes back to
+            // "no film" on its own, so that null is ignored (it would wipe the ticked screenings).
+            if (value is null && Films.Count > 0) return;
             if (SetProperty(ref _selectedFilm, value))
                 RebuildDays();
         }

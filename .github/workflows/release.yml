@@ -1,6 +1,7 @@
 name: Release
 
-# Push a tag like v1.0.0 to build CinemaWatch.exe and publish it as a GitHub release.
+# Push a tag like v1.3.0 to build CinemaWatch.exe and publish it as a GitHub release.
+# Tags with a suffix (v1.4.0-beta.1) become pre-releases: never marked "Latest".
 on:
   push:
     tags: ['v*']
@@ -32,7 +33,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME `
-            artifacts/CinemaWatch.exe artifacts/CinemaWatch.exe.sha256 `
-            --title "CinemaWatch $env:GITHUB_REF_NAME" `
-            --notes-file .github/RELEASE_NOTES.md
+          $releaseArgs = @(
+            $env:GITHUB_REF_NAME,
+            'artifacts/CinemaWatch.exe', 'artifacts/CinemaWatch.exe.sha256',
+            '--title', "CinemaWatch $env:GITHUB_REF_NAME",
+            '--notes-file', '.github/RELEASE_NOTES.md'
+          )
+          if ($env:GITHUB_REF_NAME -like '*-*') { $releaseArgs += '--prerelease' }
+          gh release create @releaseArgs

@@ -136,6 +136,14 @@
                     <TextBlock Text="{Binding LastCheckText}" Style="{StaticResource CaptionText}" Margin="0,6,0,0"
                                Visibility="{Binding LastCheckText, Converter={StaticResource EmptyToCollapsed}}" />
 
+                    <!-- All profile tabs (window level) -->
+                    <Button Content="{Binding DataContext.CheckAllLabel, RelativeSource={RelativeSource AncestorType=Window}}"
+                            Command="{Binding DataContext.CheckAllCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                            HorizontalAlignment="Stretch" Margin="0,8,0,0" />
+                    <TextBlock Text="{Binding DataContext.CheckAllText, RelativeSource={RelativeSource AncestorType=Window}}"
+                               Style="{StaticResource CaptionText}" Margin="0,6,0,0"
+                               Visibility="{Binding DataContext.CheckAllText, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource EmptyToCollapsed}}" />
+
                     <UniformGrid Columns="2" Margin="0,12,0,0">
                         <Button Content="{Binding SaveProfile, Source={StaticResource T}}" Command="{Binding SaveCommand}"
                                 Margin="0,0,4,0" HorizontalAlignment="Stretch" />

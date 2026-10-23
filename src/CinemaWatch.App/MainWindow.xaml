@@ -28,6 +28,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -48,8 +49,87 @@
             </StackPanel>
         </Grid>
 
+        <!-- Profile tabs (each tab is a full wizard) -->
+        <Border Grid.Row="1" Margin="0,16,0,0" BorderThickness="0,0,0,1"
+                BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+            <ListBox ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession, Mode=TwoWay}"
+                     Background="Transparent" BorderThickness="0" Padding="0"
+                     ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollBarVisibility="Disabled">
+                <ListBox.Resources>
+                    <Style x:Key="TabCloseButtonStyle" TargetType="Button">
+                        <Setter Property="Cursor" Value="Hand" />
+                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Back" Background="Transparent" CornerRadius="4" Width="22" Height="22">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Back" Property="Background" Value="{StaticResource NeutralBackgroundBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.Resources>
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                        <Setter Property="Cursor" Value="Hand" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ListBoxItem">
+                                    <Border x:Name="Back" Background="Transparent" BorderThickness="0,0,0,2" BorderBrush="Transparent"
+                                            CornerRadius="6,6,0,0" Padding="12,7,6,7" Margin="0,0,2,0">
+                                        <ContentPresenter VerticalAlignment="Center" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Back" Property="Background" Value="{StaticResource NeutralBackgroundBrush}" />
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Back" Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+                                            <Setter TargetName="Back" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE8B2;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="13"
+                                       VerticalAlignment="Center" Margin="0,0,8,0" Opacity="0.7" />
+                            <TextBlock Text="{Binding Title}" VerticalAlignment="Center" MaxWidth="240" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="●" Margin="6,0,0,0" VerticalAlignment="Center" FontSize="10"
+                                       Foreground="{DynamicResource AccentFillColorDefaultBrush}" ToolTip="{Binding DirtyToolTip}"
+                                       Visibility="{Binding IsDirty, Converter={StaticResource BoolToVisibility}}" />
+                            <Border Margin="8,0,0,0" Padding="7,1" CornerRadius="9" BorderThickness="1" VerticalAlignment="Center"
+                                    Background="{StaticResource MatchBackgroundBrush}" BorderBrush="{StaticResource MatchBorderBrush}"
+                                    Visibility="{Binding HasBadge, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="{Binding BadgeText}" FontSize="11" />
+                            </Border>
+                            <Button Content="&#xE711;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="10" Margin="8,0,0,0"
+                                    Command="{Binding CloseCommand}" ToolTip="{Binding CloseToolTip}"
+                                    Style="{StaticResource TabCloseButtonStyle}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ListBox.ItemTemplate>
+            </ListBox>
+        </Border>
+
         <!-- Step indicator: each step is clickable (visited steps and the next one) -->
-        <ItemsControl Grid.Row="1" Margin="-8,16,0,16" ItemsSource="{Binding Steps}" Focusable="False">
+        <ItemsControl Grid.Row="2" Margin="-8,14,0,14" ItemsSource="{Binding SelectedSession.Steps}" Focusable="False">
             <ItemsControl.Resources>
                 <Style x:Key="StepButtonStyle" TargetType="Button">
                     <Setter Property="Cursor" Value="Hand" />
@@ -120,16 +200,16 @@
         </ItemsControl>
 
         <!-- Current page -->
-        <ContentControl Grid.Row="2" Content="{Binding CurrentPage}" Focusable="False" />
+        <ContentControl Grid.Row="3" Content="{Binding SelectedSession.CurrentPage}" Focusable="False" />
 
         <!-- Error -->
-        <Border Grid.Row="3" Margin="0,12,0,0" Style="{StaticResource ErrorBar}"
-                Visibility="{Binding HasError, Converter={StaticResource BoolToVisibility}}">
-            <TextBlock Text="{Binding ErrorText}" TextWrapping="Wrap" />
+        <Border Grid.Row="4" Margin="0,12,0,0" Style="{StaticResource ErrorBar}"
+                Visibility="{Binding SelectedSession.HasError, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}">
+            <TextBlock Text="{Binding SelectedSession.ErrorText}" TextWrapping="Wrap" />
         </Border>
 
         <!-- Footer -->
-        <Grid Grid.Row="4" Margin="0,16,0,0">
+        <Grid Grid.Row="5" Margin="0,16,0,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -138,18 +218,18 @@
             <DockPanel VerticalAlignment="Center" Margin="0,0,16,0" LastChildFill="True">
                 <ProgressBar DockPanel.Dock="Left" Width="120" IsIndeterminate="True" Margin="0,0,12,0"
                              VerticalAlignment="Center"
-                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVisibility}}" />
-                <TextBlock Text="{Binding StatusText}" Style="{StaticResource CaptionText}" TextWrapping="NoWrap"
+                             Visibility="{Binding SelectedSession.IsBusy, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}" />
+                <TextBlock Text="{Binding SelectedSession.StatusText}" Style="{StaticResource CaptionText}" TextWrapping="NoWrap"
                            VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                           ToolTip="{Binding StatusText}" />
+                           ToolTip="{Binding SelectedSession.StatusText}" />
             </DockPanel>
 
             <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button Content="{Binding Back, Source={StaticResource T}}" MinWidth="120" Margin="0,0,8,0" Command="{Binding BackCommand}"
-                        Visibility="{Binding CanGoBack, Converter={StaticResource BoolToVisibility}}" />
-                <Button Content="{Binding Next, Source={StaticResource T}}" MinWidth="120" Command="{Binding NextCommand}" IsDefault="True"
+                <Button Content="{Binding Back, Source={StaticResource T}}" MinWidth="120" Margin="0,0,8,0" Command="{Binding SelectedSession.BackCommand}"
+                        Visibility="{Binding SelectedSession.CanGoBack, Converter={StaticResource BoolToVisibility}, FallbackValue=Collapsed}" />
+                <Button Content="{Binding Next, Source={StaticResource T}}" MinWidth="120" Command="{Binding SelectedSession.NextCommand}" IsDefault="True"
                         Style="{DynamicResource AccentButtonStyle}"
-                        Visibility="{Binding IsLastStep, Converter={StaticResource InverseBoolToVisibility}}" />
+                        Visibility="{Binding SelectedSession.IsLastStep, Converter={StaticResource InverseBoolToVisibility}}" />
             </StackPanel>
         </Grid>
     </Grid>

@@ -105,7 +105,21 @@ public sealed class AppSettings
 /// <summary>Application version shown in the title bar and sent in the User-Agent.</summary>
 public static class AppInfo
 {
-    /// <summary>"1.0.0" - set at build time (Directory.Build.props or <c>publish.ps1 -Version</c>).</summary>
-    public static string Version { get; } =
-        typeof(AppInfo).Assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "1.0.0";
+    /// <summary>
+    /// "1.3.0" or a pre-release such as "1.4.0-beta.1" - set at build time (Directory.Build.props or
+    /// <c>publish.ps1 -Version</c>). Build metadata after "+" (commit hash) is dropped.
+    /// </summary>
+    public static string Version { get; } = ReadVersion();
+
+    private static string ReadVersion()
+    {
+        var assembly = typeof(AppInfo).Assembly;
+        var informational = assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(informational))
+            return informational.Split('+')[0];
+        return assembly.GetName().Version is { } v ? $"{v.Major}.{v.Minor}.{v.Build}" : "1.0.0";
+    }
 }

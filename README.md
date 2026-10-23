@@ -48,6 +48,8 @@ It is a small Windows desktop app (WPF, .NET 10) with a Polish and English user 
   - Copy a selection to every screening in the same hall with one click.
 - **Profiles** - save your setup to a readable `.cinemawatch.json` file, reopen it later (with fresh data)
   or check it on demand.
+- **Profile tabs** - several profiles open side by side, restored at start-up from the profiles folder;
+  *Check all* checks every tab at once (each screening is fetched only once).
 - **Background checks** through Windows Task Scheduler - no app running in the background, no window.
 - **Smart notifications** - only for seats that became free since the last check; clicking opens the booking page.
 - **Cleans up after itself** - a scheduled task removes itself after the last screening of its profile.
@@ -89,8 +91,8 @@ The exe is not code-signed, so Windows SmartScreen may show a warning on first s
 2. **Film and screenings** (*Film i seanse*) - pick the film and tick the screenings. Sold-out ones can be ticked
    too - those are the ones worth watching.
 3. **Seats** (*Miejsca*) - mark rows and seats on the hall map of each screening.
-4. **Summary** (*Podsumowanie*) - *Check now* checks immediately; save the profile and *Add to Task Scheduler*
-   to keep watching in the background.
+4. **Summary** (*Podsumowanie*) - *Check this profile* checks immediately (*Check all* checks every tab);
+   save the profile and *Add to Task Scheduler* to keep watching in the background.
 
 Click any step in the indicator at the top to jump back (or forward to a step you have already visited).
 
@@ -141,8 +143,9 @@ dotnet run --project src\CinemaWatch.App       # start the app
 .\publish.ps1 -Version 1.0.0                   # single-file exe + checksum in .\artifacts
 ```
 
-Releases are built by GitHub Actions: pushing a tag such as `v1.0.1` runs the tests, publishes the exe and
-creates the release.
+Releases are built by GitHub Actions: pushing a tag such as `v1.3.0` runs the tests, publishes the exe and
+creates the release. Tags with a suffix (`v1.4.0-beta.1`) become pre-releases. Larger changes are developed on
+`feature/*` branches (CI runs there too) and merged through a pull request.
 
 ### Project structure
 

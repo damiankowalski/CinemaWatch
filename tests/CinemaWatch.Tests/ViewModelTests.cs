@@ -17,7 +17,7 @@ internal static class ViewModelTests
         {
             // FixtureHttpHandler knows only 16.12 and screening 1765592 -> 15.12 and 19:15 return 404.
             using var client = new CinemaCityClient(new FixtureHttpHandler());
-            var vm = new MainViewModel(client, new FakeUi(), new FakeScheduler(), Environment, () => Now);
+            var vm = NewSession(client, new FakeUi(), new FakeScheduler());
 
             vm.DatesStep.DateFrom = new DateTime(2026, 10, 1);
             await vm.NextCommand.ExecuteAsync();
@@ -157,12 +157,8 @@ internal static class ViewModelTests
                 await summary.UnscheduleCommand.ExecuteAsync();
                 Assert.True(!summary.IsScheduled);
 
-                vm.NewProfileCommand.Execute(null);
-                Assert.Equal(0, vm.StepIndex);
-                Assert.Equal(null, summary.ProfilePath);
-
-                ui.OpenPath = path;
-                await vm.OpenProfileCommand.ExecuteAsync();
+                // Opening the file again replays the whole wizard from scratch.
+                await vm.OpenAsync(path);
                 Assert.Equal(3, vm.StepIndex);
                 Assert.Equal("Otwarto profil: Diuna IMAX", vm.StatusText);
                 Assert.Equal(path, summary.ProfilePath);
@@ -171,22 +167,21 @@ internal static class ViewModelTests
                 Assert.Equal(31, vm.SeatsStep.Items[0].WatchedCount);
                 Assert.Equal(1, vm.SeatsStep.Items[1].WatchedCount);
 
-                var later = new MainViewModel(client, ui, scheduler, Environment, () => new DateTime(2026, 12, 17, 10, 0, 0));
-                await later.OpenProfileCommand.ExecuteAsync();
+                var later = NewSession(client, ui, scheduler, () => new DateTime(2026, 12, 17, 10, 0, 0));
+                await later.OpenAsync(path);
                 Assert.Equal("Wszystkie seanse z tego profilu już się odbyły.", later.ErrorText);
 
                 // Expired profile that is still scheduled: the app offers to remove the task.
                 await scheduler.RegisterAsync(SchtasksScheduler.TaskNameFor(path), "CinemaWatch.exe", path, 10);
                 ui.Confirms.Clear();
-                await later.OpenProfileCommand.ExecuteAsync();
+                await later.OpenAsync(path);
                 Assert.True(ui.Confirms.Single().StartsWith("Profil nieaktualny"));
                 Assert.True(!scheduler.Tasks.ContainsKey(SchtasksScheduler.TaskNameFor(path)));
                 Assert.True(later.StatusText!.Contains("Profil był nieaktualny"));
 
                 var bad = Path.Combine(directory, "bad" + ProfileStore.FileExtension);
                 File.WriteAllText(bad, "{ nope");
-                ui.OpenPath = bad;
-                await vm.OpenProfileCommand.ExecuteAsync();
+                await vm.OpenAsync(bad);
                 Assert.True(vm.ErrorText!.Contains("nie jest poprawnym profilem"));
             }
             finally
@@ -202,7 +197,7 @@ internal static class ViewModelTests
         {
             var http = new AnyScreeningHandler();
             using var client = new CinemaCityClient(http);
-            var vm = new MainViewModel(client, new FakeUi(), new FakeScheduler(), Environment, () => Now);
+            var vm = NewSession(client, new FakeUi(), new FakeScheduler());
             var steps = vm.Steps;
 
             // Fresh wizard: only the next step can be opened.
@@ -256,10 +251,131 @@ internal static class ViewModelTests
             Assert.Equal(1, vm.StepIndex);
             Assert.Equal("Zaznacz co najmniej jeden seans.", vm.ErrorText);
 
-            // A new profile resets what can be clicked.
-            vm.NewProfileCommand.Execute(null);
-            Assert.SequenceEqual([true, true, false, false], steps.Select(s => s.IsReachable));
             vm.Dispose();
+        });
+    }
+
+    public static void RegisterTabTests()
+    {
+        TestRunner.Add("Tabs: restore from the profiles folder, lazy loading, check all (shared requests), unsaved changes, open and close", async () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), $"cw-tabs-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var plan = CinemaCityParser.ParseSeatPlan(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "seatplan-13-1.json")));
+                var row4 = plan.SeatsInRow("4").Select(s => s.Key).ToList();
+                var row9 = plan.SeatsInRow("9").Select(s => s.Key).ToList();
+                WatchProfile Profile(string name, params (string Id, int Hour, int Minute, List<string> Seats)[] screenings) => new()
+                {
+                    Name = name, CinemaId = "1060", CinemaName = "Cinema City Sadyba", FilmId = "8105s2r", FilmName = "Diuna: Część trzecia",
+                    DateFrom = new DateOnly(2026, 12, 16), DateTo = new DateOnly(2026, 12, 16),
+                    Screenings = screenings.Select(x => new WatchedScreening
+                    {
+                        Id = x.Id, StartsAt = new DateTime(2026, 12, 16, x.Hour, x.Minute, 0), Auditorium = "IMAX BNP Paribas",
+                        BookingLink = $"https://tickets.cinema-city.pl/api/order/{x.Id}?lang=pl", SeatKeys = x.Seats,
+                    }).ToList(),
+                };
+                var pathA = Path.Combine(directory, "A Diuna 16.00" + ProfileStore.FileExtension);
+                var pathB = Path.Combine(directory, "B Diuna wieczór" + ProfileStore.FileExtension);
+                ProfileStore.Save(pathA, Profile("A Diuna 16:00", ("1765592", 16, 0, row4)));
+                ProfileStore.Save(pathB, Profile("B Diuna wieczór", ("1765592", 16, 0, row9), ("1765688", 22, 30, row9)));
+                var expired = Profile("C stary", ("1765592", 16, 0, row4));
+                expired.Screenings[0].StartsAt = new DateTime(2026, 10, 1, 16, 0, 0);
+                ProfileStore.Save(Path.Combine(directory, "C stary" + ProfileStore.FileExtension), expired);
+                File.WriteAllText(Path.Combine(directory, "D zepsuty" + ProfileStore.FileExtension), "{ nope");
+
+                var http = new AnyScreeningHandler();
+                using var client = new CinemaCityClient(http);
+                var ui = new FakeUi();
+                var shell = new MainViewModel(client, ui, new FakeScheduler(), Environment with { ProfilesDirectory = directory }, () => Now);
+
+                // Start-up: A and B restored (expired C and broken D skipped), the empty start tab replaced.
+                await shell.InitializeAsync();
+                Assert.SequenceEqual(["A Diuna 16:00", "B Diuna wieczór"], shell.Sessions.Select(s => s.Title));
+                var (a, b) = (shell.Sessions[0], shell.Sessions[1]);
+                Assert.True(ReferenceEquals(a, shell.SelectedSession) && a.IsLoaded && a.StepIndex == 3 && !a.IsDirty);
+                Assert.True(!b.IsLoaded);
+                Assert.Equal("Sprawdź wszystkie (2)", shell.CheckAllLabel);
+
+                // Check all: B is checked from its file; screening 1765592 (in both profiles) is fetched once.
+                var before = http.RequestCount;
+                await shell.CheckAllCommand.ExecuteAsync();
+                Assert.Equal(before + 4, http.RequestCount); // 2 unique screenings x (details + free seats)
+                Assert.Equal("29 wolnych", a.BadgeText);
+                Assert.True(b.HasBadge);
+                Assert.True(shell.CheckAllText!.Contains("2 profile") && shell.CheckAllText.Contains("wolne miejsca w 2"));
+                Assert.True(a.SummaryStep.Items[0].IsMatch);
+
+                // Opening B loads it and shows the earlier result on its cards.
+                shell.SelectedSession = b;
+                await b.EnsureLoadedAsync();
+                Assert.True(b.IsLoaded && b.StepIndex == 3 && b.SummaryStep.Items.All(i => i.HasResult));
+                Assert.True(b.HasBadge);
+
+                // Unsaved changes: closing asks first.
+                a.SeatsStep.Items[0].Map!.SeatViews.First(v => !v.IsWatched).IsWatched = true;
+                Assert.True(a.IsDirty);
+                ui.ConfirmAnswer = false;
+                a.CloseCommand.Execute(null);
+                Assert.Equal(2, shell.Sessions.Count);
+                ui.ConfirmAnswer = true;
+                a.CloseCommand.Execute(null);
+                Assert.SequenceEqual(["B Diuna wieczór"], shell.Sessions.Select(s => s.Title));
+                Assert.Equal(2, ui.Confirms.Count); // asked on both close attempts
+
+                // Open several files: an open one just gets focus, a new one gets its own (lazy) tab.
+                ui.OpenPaths.AddRange([pathB, pathA]);
+                await shell.OpenProfileCommand.ExecuteAsync();
+                Assert.Equal(2, shell.Sessions.Count);
+                Assert.True(ReferenceEquals(b, shell.SelectedSession));
+                Assert.True(!shell.Sessions[1].IsLoaded);
+
+                // New tab, renamed via the summary name; closing the last tab leaves an empty one.
+                shell.NewProfileCommand.Execute(null);
+                Assert.Equal("Nowy profil", shell.SelectedSession!.Title);
+                foreach (var session in shell.Sessions.ToList())
+                    session.CloseCommand.Execute(null);
+                Assert.Equal(1, shell.Sessions.Count);
+                Assert.Equal("Nowy profil", shell.Sessions[0].Title);
+                shell.Dispose();
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        });
+    }
+
+    public static void RegisterTabSwitchTests()
+    {
+        TestRunner.Add("Tab switching: shared choice lists, and nulls pushed by WPF while switching are ignored", async () =>
+        {
+            using var client = new CinemaCityClient(new AnyScreeningHandler());
+            var first = await DriveToSeatsStepAsync(NewSession(client, new FakeUi(), new FakeScheduler()));
+            var second = NewSession(client, new FakeUi(), new FakeScheduler());
+
+            // Step 1 of every tab shows the same list instances, so a reused view keeps its selection.
+            Assert.True(ReferenceEquals(first.DatesStep.Cities, second.DatesStep.Cities));
+            Assert.True(ReferenceEquals(first.DatesStep.SelectedCity, second.DatesStep.SelectedCity));
+            Assert.Equal("Warszawa", second.DatesStep.SelectedCity.Name);
+            Assert.Equal("Cinema City Sadyba", second.DatesStep.SelectedCinema.Name);
+            Assert.Equal("IMAX", second.DatesStep.SelectedTechnology.Name);
+            Assert.True(ReferenceEquals(first.SeatsStep.AdjacentOptions, second.SeatsStep.AdjacentOptions));
+            Assert.True(ReferenceEquals(first.SummaryStep.IntervalOptions, second.SummaryStep.IntervalOptions));
+
+            // A null from the view must not wipe the chosen film (and with it the ticked screenings) ...
+            var film = first.ScreeningsStep.SelectedFilm;
+            first.ScreeningsStep.SelectedFilm = null;
+            Assert.True(ReferenceEquals(film, first.ScreeningsStep.SelectedFilm));
+            Assert.Equal(2, first.ScreeningsStep.SelectedCount);
+
+            // ... nor hide the hall map of the active screening.
+            var item = first.SeatsStep.SelectedItem;
+            first.SeatsStep.SelectedItem = null;
+            Assert.True(item is not null && ReferenceEquals(item, first.SeatsStep.SelectedItem));
+            first.Dispose();
+            second.Dispose();
         });
     }
 
@@ -270,10 +386,11 @@ internal static class ViewModelTests
             using var client = new CinemaCityClient(new AnyScreeningHandler());
             var refreshes = 0;
             var uiChanges = 0;
-            var vm = await OpenSeatsStepAsync(client, new FakeUi(), new FakeScheduler(), () => refreshes++);
+            var shell = new MainViewModel(client, new FakeUi(), new FakeScheduler(), Environment, () => Now, () => refreshes++);
+            var vm = await DriveToSeatsStepAsync(shell.SelectedSession!);
             try
             {
-                Assert.Equal($"CinemaWatch {AppInfo.Version}", vm.WindowTitle);
+                Assert.Equal($"CinemaWatch {AppInfo.Version}", shell.WindowTitle);
                 vm.SeatsStep.Items[0].Map!.RowLabels.First(l => l.Label == "8").ToggleCommand.Execute(null);
                 await vm.NextCommand.ExecuteAsync();
                 var card = vm.SummaryStep.Items[0];
@@ -283,13 +400,14 @@ internal static class ViewModelTests
                 Assert.Equal("Rząd 8", card.Rows.Single().Row);
 
                 UiText.Instance.PropertyChanged += OnUiChanged;
-                vm.SelectedLanguage = vm.Languages.Single(l => l.Language == AppLanguage.English);
+                shell.SelectedLanguage = shell.Languages.Single(l => l.Language == AppLanguage.English);
                 UiText.Instance.PropertyChanged -= OnUiChanged;
 
                 Assert.Equal(1, refreshes);
                 Assert.True(uiChanges >= 1);
                 Assert.Equal("Next", UiText.Instance.Next);
-                Assert.Equal("English", vm.SelectedLanguage.Name);
+                Assert.Equal("English", shell.SelectedLanguage.Name);
+                Assert.Equal("Check all (1)", shell.CheckAllLabel);
                 Assert.Equal("Cinema and dates", vm.Steps[0].Title);
                 Assert.Equal("Diuna: Część trzecia (4 screenings)", vm.ScreeningsStep.SelectedFilm!.DisplayName);
                 Assert.Equal("Wednesday, 16 December 2026", vm.ScreeningsStep.Days[0].Header);
@@ -307,24 +425,30 @@ internal static class ViewModelTests
                 vm.SeatsStep.Items[0].Map!.Clear();
                 await vm.NextCommand.ExecuteAsync();
                 Assert.Equal("Select at least one row or seat.", vm.ErrorText);
-                vm.SelectedLanguage = vm.Languages.Single(l => l.Language == AppLanguage.Polish);
+                shell.SelectedLanguage = shell.Languages.Single(l => l.Language == AppLanguage.Polish);
                 Assert.Equal("Zaznacz co najmniej jeden rząd albo jedno miejsce.", vm.ErrorText);
                 Assert.Equal(2, refreshes);
             }
             finally
             {
                 Localizer.SetLanguage(AppLanguage.Polish);
-                vm.Dispose();
+                shell.Dispose();
             }
 
             void OnUiChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => uiChanges++;
         });
     }
 
-    /// <summary>Wizard on 16.12 with the 16:00 and 22:30 screenings selected, ending on the hall maps.</summary>    /// <summary>Wizard on 16.12 with the 16:00 and 22:30 screenings selected, ending on the hall maps.</summary>
-    private static async Task<MainViewModel> OpenSeatsStepAsync(CinemaCityClient client, FakeUi ui, FakeScheduler scheduler, Action? languageChanged = null)
+    /// <summary>A profile tab with the shared test services.</summary>
+    private static ProfileSessionViewModel NewSession(CinemaCityClient client, FakeUi ui, FakeScheduler scheduler, Func<DateTime>? clock = null) =>
+        new(new SessionServices(client, new SeatAvailabilityService(client), ui, scheduler, Environment, clock ?? (() => Now)));
+
+    /// <summary>Wizard on 16.12 with the 16:00 and 22:30 screenings selected, ending on the hall maps.</summary>
+    private static Task<ProfileSessionViewModel> OpenSeatsStepAsync(CinemaCityClient client, FakeUi ui, FakeScheduler scheduler) =>
+        DriveToSeatsStepAsync(NewSession(client, ui, scheduler));
+
+    private static async Task<ProfileSessionViewModel> DriveToSeatsStepAsync(ProfileSessionViewModel vm)
     {
-        var vm = new MainViewModel(client, ui, scheduler, Environment, () => Now, languageChanged);
         vm.DatesStep.DateFrom = new DateTime(2026, 12, 16);
         await vm.NextCommand.ExecuteAsync();
         vm.ScreeningsStep.Days[0].Screenings.Single(o => o.TimeText == "16:00").IsChecked = true;
