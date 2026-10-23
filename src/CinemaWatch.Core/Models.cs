@@ -1,8 +1,5 @@
 namespace CinemaWatch.Core;
 
-/// <summary>A cinema location (e.g. Cinema City Sadyba).</summary>
-public sealed record Cinema(string Id, string Name, string City);
-
 /// <summary>A film listed in the repertoire.</summary>
 public sealed record Film(string Id, string Name, int LengthMinutes, string? Link);
 

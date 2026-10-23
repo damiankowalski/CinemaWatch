@@ -22,7 +22,7 @@ public static class NotificationBuilder
         var ordered = matches.OrderBy(m => m.Screening.StartsAt).ToList();
         var lines = ordered
             .Take(MaxScreeningLines)
-            .Select(m => $"{m.Screening.StartsAt.ToString(T("ddd d.MM, HH:mm", "ddd d MMM, HH:mm"), Culture)} · {DescribeSeats(m.Seats)}")
+            .Select(m => CityPrefix(m.Screening) + $"{m.Screening.StartsAt.ToString(T("ddd d.MM, HH:mm", "ddd d MMM, HH:mm"), Culture)} · {DescribeSeats(m.Seats)}")
             .ToList();
         var rest = ordered.Count - MaxScreeningLines;
         if (rest > 0)
@@ -31,6 +31,14 @@ public static class NotificationBuilder
         var film = string.IsNullOrWhiteSpace(profile.FilmName) ? profile.Name : profile.FilmName;
         var url = ordered.Select(m => m.Screening.BookingLink).FirstOrDefault(l => !string.IsNullOrWhiteSpace(l));
         return new AvailabilityNotification($"{T("Wolne miejsca", "Seats available")}: {film}", lines, url);
+    }
+
+    /// <summary>"Kraków · " for screenings that know their cinema (profiles from 1.4 on).</summary>
+    private static string CityPrefix(WatchedScreening screening)
+    {
+        var cinema = Locations.FindCinema(screening.CinemaId);
+        var city = cinema?.DisplayCity ?? screening.City;
+        return string.IsNullOrWhiteSpace(city) ? "" : $"{city} · ";
     }
 
     /// <summary>"rząd 8: 12, 13 · rząd 9: 5" / "row 8: 12, 13 · row 9: 5"</summary>

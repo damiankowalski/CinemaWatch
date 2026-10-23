@@ -3,31 +3,81 @@ using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.ViewModels;
 
-/// <summary>Step 1: cinema (fixed for now) and a single date or a date range.</summary>
+/// <summary>Step 1: city (one IMAX cinema per city, or all of them) and a single date or a date range.</summary>
 public sealed class DatesStepViewModel : ObservableObject
 {
-    public const int MaxRangeDays = 31;
+    /// <summary>Key of the "all cities" choice (other keys are cinema ids).</summary>
+    public const string AllCinemasKey = "all";
 
+    public const int MaxRangeDaysOneCinema = 31;
+
+    /// <summary>All six cinemas cost six repertoire requests per day, hence the shorter range.</summary>
+    public const int MaxRangeDaysAllCinemas = 14;
+
+    // The lists are shared by all profile tabs: the view of step 1 is reused when switching tabs, and a
+    // different list instance per tab would make WPF drop the shown selection.
+    private static readonly IReadOnlyList<ChoiceOption> CityOptions =
+        Locations.ImaxCinemas
+            .Select(c => new ChoiceOption(c.Id, c.City, c.CityEnglish ?? c.City))
+            .Append(new ChoiceOption(AllCinemasKey, "Wszystkie miasta", "All cities"))
+            .ToList();
+
+    private static readonly IReadOnlyList<ChoiceOption> CinemaOptions =
+        Locations.ImaxCinemas
+            .Select(c => new ChoiceOption(c.Id, c.Name, c.Name))
+            .Append(new ChoiceOption(AllCinemasKey,
+                $"Wszystkie kina IMAX ({Locations.ImaxCinemas.Count})", $"All IMAX cinemas ({Locations.ImaxCinemas.Count})"))
+            .ToList();
+
+    private static readonly IReadOnlyList<ChoiceOption> TechnologyOptions =
+        [new ChoiceOption(Locations.ImaxTechnology, Locations.ImaxTechnology, Locations.ImaxTechnology)];
+
+    private ChoiceOption _selectedCity;
     private DateTime? _dateFrom = DateTime.Today;
     private DateTime? _dateTo;
     private bool _isRange;
 
-    // Fixed for now; the lists are ready for city / cinema / technology selection later.
-    // The lists are shared by all profile tabs: the view of step 1 is reused when switching tabs, and a
-    // different list instance per tab would make WPF drop the shown selection.
-    private static readonly IReadOnlyList<ChoiceOption> CityOptions = [new ChoiceOption("Warszawa", "Warsaw")];
-    private static readonly IReadOnlyList<ChoiceOption> CinemaOptions = [new ChoiceOption(Locations.Sadyba.Name, Locations.Sadyba.Name)];
-    private static readonly IReadOnlyList<ChoiceOption> TechnologyOptions = [new ChoiceOption(Locations.ImaxTechnology, Locations.ImaxTechnology)];
+    /// <param name="cinemaKey">Initially selected cinema id or <see cref="AllCinemasKey"/> (e.g. the last choice).</param>
+    public DatesStepViewModel(string? cinemaKey = null)
+    {
+        _selectedCity = FindOption(cinemaKey) ?? FindOption(Locations.Sadyba.Id)!;
+    }
+
+    /// <summary>Raised when the user picks another city.</summary>
+    public event EventHandler? CinemaSelectionChanged;
 
     public IReadOnlyList<ChoiceOption> Cities => CityOptions;
     public IReadOnlyList<ChoiceOption> Cinemas => CinemaOptions;
     public IReadOnlyList<ChoiceOption> Technologies => TechnologyOptions;
 
-    public ChoiceOption SelectedCity => CityOptions[0];
-    public ChoiceOption SelectedCinema => CinemaOptions[0];
+    public ChoiceOption SelectedCity
+    {
+        get => _selectedCity;
+        set
+        {
+            // WPF pushes null while the view switches to another profile tab - ignore it.
+            if (value is null || !SetProperty(ref _selectedCity, value)) return;
+            OnPropertyChanged(nameof(SelectedCinema));
+            OnPropertyChanged(nameof(IsAllCinemas));
+            OnPropertyChanged(nameof(RangeHint));
+            CinemaSelectionChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>The cinema shown for the chosen city ("All IMAX cinemas" for all cities).</summary>
+    public ChoiceOption SelectedCinema => CinemaOptions.First(o => o.Key == _selectedCity.Key);
+
     public ChoiceOption SelectedTechnology => TechnologyOptions[0];
 
-    public Cinema Cinema => Locations.Sadyba;
+    public bool IsAllCinemas => _selectedCity.Key == AllCinemasKey;
+
+    /// <summary>Cinema id or <see cref="AllCinemasKey"/>.</summary>
+    public string CinemaKey => _selectedCity.Key;
+
+    /// <summary>Cinemas whose repertoire is searched.</summary>
+    public IReadOnlyList<Cinema> SelectedCinemas => IsAllCinemas
+        ? Locations.ImaxCinemas
+        : [Locations.FindCinema(_selectedCity.Key) ?? Locations.Sadyba];
 
     public DateTime? DateFrom
     {
@@ -60,7 +110,19 @@ public sealed class DatesStepViewModel : ObservableObject
 
     public string DateFromLabel => IsRange ? T("Od", "From") : T("Data", "Date");
 
-    public string RangeHint => T($"Zakres może obejmować maksymalnie {MaxRangeDays} dni.", $"The range can cover at most {MaxRangeDays} days.");
+    public int MaxRangeDays => IsAllCinemas ? MaxRangeDaysAllCinemas : MaxRangeDaysOneCinema;
+
+    public string RangeHint => IsAllCinemas
+        ? T($"Dla wszystkich miast zakres może obejmować maksymalnie {MaxRangeDays} dni.",
+            $"For all cities the range can cover at most {MaxRangeDays} days.")
+        : T($"Zakres może obejmować maksymalnie {MaxRangeDays} dni.", $"The range can cover at most {MaxRangeDays} days.");
+
+    /// <summary>Selects a cinema (or all) by key, e.g. when a profile is opened. Unknown keys are ignored.</summary>
+    public void SelectCinema(string key)
+    {
+        if (FindOption(key) is { } option)
+            SelectedCity = option;
+    }
 
     public void Reset()
     {
@@ -105,11 +167,14 @@ public sealed class DatesStepViewModel : ObservableObject
         OnPropertyChanged(nameof(DateFromLabel));
         OnPropertyChanged(nameof(RangeHint));
     }
+
+    private static ChoiceOption? FindOption(string? key) => CityOptions.FirstOrDefault(o => o.Key == key);
 }
 
 /// <summary>An option in a drop-down whose display name depends on the UI language.</summary>
-public sealed class ChoiceOption(string polishName, string englishName) : ObservableObject
+public sealed class ChoiceOption(string key, string polishName, string englishName) : ObservableObject
 {
+    public string Key { get; } = key;
     public string Name => T(polishName, englishName);
 
     public void RefreshTexts() => OnPropertyChanged(nameof(Name));

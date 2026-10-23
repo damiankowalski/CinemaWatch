@@ -30,17 +30,17 @@ public sealed class HallMapViewModel : ObservableObject
         SeatSize = radius * 2;
         var initial = new HashSet<string>(watchedKeys ?? [], StringComparer.Ordinal);
 
-        // Row label anchors (fall back to one seat width beside the row when the plan has none).
+        // Row numbers stand in two straight columns at the left and right edge of the hall, like on the
+        // Cinema City website. (The plan's own label anchors hug each row, which looks ragged in halls with
+        // rows of different widths - e.g. Wrocław, where the last row is a single wheelchair space.)
+        var leftColumn = plan.Seats.Min(s => s.X) - SeatSize;
+        var rightColumn = plan.Seats.Max(s => s.X) + SeatSize;
         var rowInfos = plan.Seats
             .GroupBy(s => (s.Section, s.RowKey))
             .Select(g =>
             {
-                var ordered = g.OrderBy(s => s.Position).ToList();
-                var planRow = plan.Rows.FirstOrDefault(r => r.Key == g.Key.RowKey && r.Label == ordered[0].Row);
-                var y = ordered.Average(s => s.Y);
-                var left = planRow?.LeftLabel ?? new PlanPoint(ordered[0].X - SeatSize, y);
-                var right = planRow?.RightLabel ?? new PlanPoint(ordered[^1].X + SeatSize, y);
-                return (Key: g.Key, Label: ordered[0].Row, Left: left, Right: right);
+                var y = g.Average(s => s.Y);
+                return (Key: g.Key, Label: g.First().Row, Left: new PlanPoint(leftColumn, y), Right: new PlanPoint(rightColumn, y));
             })
             .ToList();
 

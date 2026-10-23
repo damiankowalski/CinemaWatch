@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <Product>CinemaWatch</Product>
-    <Version>1.3.0</Version>
+    <Version>1.4.0-beta.1</Version>
     <Copyright>Copyright © 2026 Damian Kowalski</Copyright>
     <RepositoryUrl>https://github.com/damiankowalski/CinemaWatch</RepositoryUrl>
   </PropertyGroup>

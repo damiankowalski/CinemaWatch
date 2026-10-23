@@ -11,7 +11,8 @@ public sealed record SessionServices(
     IUserInteraction Ui,
     ITaskScheduler Scheduler,
     AppEnvironment Environment,
-    Func<DateTime> Clock);
+    Func<DateTime> Clock,
+    IPreferences? Preferences = null);
 
 /// <summary>
 /// One profile tab: the whole wizard (dates → screenings → seats → summary) for one profile, with its own step
@@ -76,7 +77,12 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
         FilePath = path;
         FileProfile = fileProfile;
 
-        DatesStep = new DatesStepViewModel();
+        DatesStep = new DatesStepViewModel(services.Preferences?.LastCinemaChoice);
+        DatesStep.CinemaSelectionChanged += (_, _) =>
+        {
+            if (services.Preferences is { } preferences && !_suppressDirty)
+                preferences.LastCinemaChoice = DatesStep.CinemaKey; // new tabs start with the last choice
+        };
         ScreeningsStep = new ScreeningsStepViewModel();
         SeatsStep = new SeatsStepViewModel();
         SummaryStep = new SummaryStepViewModel(_seatService, _ui, _scheduler, _environment, BuildProfile, _clock,
@@ -303,11 +309,17 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
     {
         var dates = DatesStep.GetDates();
         var film = ScreeningsStep.SelectedFilm;
+        var cinemas = DatesStep.SelectedCinemas;
+        // Version 1.3 replays a profile with CinemaId only, so prefer the cinema of the first watched screening.
+        var mainCinemaId = SeatsStep.Items.FirstOrDefault(i => i.WatchedCount > 0)?.Screening.CinemaId is { Length: > 0 } watchedCinema
+            ? watchedCinema
+            : cinemas[0].Id;
         return new WatchProfile
         {
             Name = string.IsNullOrWhiteSpace(SummaryStep.ProfileName) ? DefaultProfileName() : SummaryStep.ProfileName.Trim(),
-            CinemaId = DatesStep.Cinema.Id,
-            CinemaName = DatesStep.Cinema.Name,
+            CinemaId = mainCinemaId,
+            CinemaName = DatesStep.SelectedCinema.Name,
+            CinemaIds = cinemas.Select(c => c.Id).ToList(),
             FilmId = film?.FilmId ?? "",
             FilmName = film?.Name ?? "",
             DateFrom = dates.Count > 0 ? dates[0] : DateOnly.FromDateTime(_clock()),
@@ -319,6 +331,8 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
                 .Select(i => new WatchedScreening
                 {
                     Id = i.Screening.Id,
+                    CinemaId = i.Screening.CinemaId,
+                    City = Locations.FindCinema(i.Screening.CinemaId)?.City ?? "",
                     StartsAt = i.Screening.StartsAt,
                     Auditorium = i.Screening.Auditorium,
                     BookingLink = i.Screening.BookingLink,
@@ -332,6 +346,8 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
     {
         var dates = DatesStep.GetDates();
         var film = ScreeningsStep.SelectedFilm?.Name ?? T("Profil", "Profile");
+        if (!DatesStep.IsAllCinemas)
+            film += " " + DatesStep.SelectedCinemas[0].DisplayCity;
         if (dates.Count == 0) return film;
         var from = Formatting.ShortDate(dates[0]);
         var to = Formatting.ShortDate(dates[^1]);
@@ -419,6 +435,10 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
             await RetireExpiredProfileAsync(path);
             return;
         }
+
+        // Cinemas: one city, or all of them (profiles from before 1.4 only have CinemaId).
+        var cinemaIds = profile.CinemaIds.Count > 0 ? profile.CinemaIds : [profile.CinemaId];
+        DatesStep.SelectCinema(cinemaIds.Distinct().Count() > 1 ? DatesStepViewModel.AllCinemasKey : cinemaIds[0]);
 
         var from = profile.DateFrom.ToDateTime(TimeOnly.MinValue);
         if (from < now.Date) from = now.Date;
@@ -538,7 +558,8 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
         }
 
         var dates = DatesStep.GetDates();
-        var key = string.Join(",", dates);
+        var cinemas = DatesStep.SelectedCinemas;
+        var key = DatesStep.CinemaKey + "|" + string.Join(",", dates);
         if (key == _repertoireKey && IsFresh(_repertoireLoadedAt))
         {
             SetStatus(null);
@@ -548,10 +569,11 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
 
         IsBusy = true;
         SetStatus(() => T("Pobieranie repertuaru (", "Loading the repertoire (")
-                        + Count(dates.Count, "dzień", "dni", "dni", "day", "days") + ")…");
+                        + Count(dates.Count, "dzień", "dni", "dni", "day", "days")
+                        + (cinemas.Count > 1 ? T($", kina: {cinemas.Count}", $", cinemas: {cinemas.Count}") : "") + ")…");
         var cancellationToken = StartLoad();
 
-        var results = await LoadRepertoireAsync(DatesStep.Cinema.Id, dates, cancellationToken);
+        var results = await LoadRepertoireAsync(cinemas, dates, cancellationToken);
         var failures = results.Where(r => r.Error is not null).ToList();
         if (failures.Count == results.Count)
             throw failures[0].Error!;
@@ -566,9 +588,10 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
 
         SetStatus(failures.Count == 0
             ? null
-            : () => T("Nie udało się pobrać repertuaru dla ", "Could not load the repertoire for ")
-                    + Count(failures.Count, "dnia", "dni", "dni", "day", "days") + ": "
-                    + string.Join(", ", failures.Select(f => Formatting.ShortDate(f.Date))));
+            : () => T("Nie udało się pobrać repertuaru: ", "Could not load the repertoire: ")
+                    + string.Join(", ", failures.Select(f => cinemas.Count > 1
+                        ? $"{Locations.FindCinema(f.CinemaId)?.DisplayCity} {Formatting.ShortDate(f.Date)}"
+                        : Formatting.ShortDate(f.Date))));
         GoTo(ScreeningsIndex);
         return true;
     }
@@ -658,20 +681,22 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
         return _loadCts.Token;
     }
 
+    /// <summary>One request per cinema and day, at most <see cref="MaxParallelRequests"/> at a time.</summary>
     private async Task<IReadOnlyList<RepertoireResult>> LoadRepertoireAsync(
-        string cinemaId, IReadOnlyList<DateOnly> dates, CancellationToken cancellationToken)
+        IReadOnlyList<Cinema> cinemas, IReadOnlyList<DateOnly> dates, CancellationToken cancellationToken)
     {
         using var gate = new SemaphoreSlim(MaxParallelRequests);
-        var tasks = dates.Select(async date =>
+        var tasks = dates.SelectMany(date => cinemas.Select(cinema => (date, cinema))).Select(async item =>
         {
+            var (date, cinema) = item;
             await gate.WaitAsync(cancellationToken);
             try
             {
-                return new RepertoireResult(date, await _client.GetRepertoireAsync(cinemaId, date, cancellationToken), null);
+                return new RepertoireResult(date, cinema.Id, await _client.GetRepertoireAsync(cinema.Id, date, cancellationToken), null);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
             {
-                return new RepertoireResult(date, null, ex);
+                return new RepertoireResult(date, cinema.Id, null, ex);
             }
             finally
             {
@@ -697,5 +722,5 @@ public sealed class ProfileSessionViewModel : ObservableObject, IDisposable
         BackCommand.NotifyCanExecuteChanged();
     }
 
-    private sealed record RepertoireResult(DateOnly Date, DayRepertoire? Day, Exception? Error);
+    private sealed record RepertoireResult(DateOnly Date, string CinemaId, DayRepertoire? Day, Exception? Error);
 }

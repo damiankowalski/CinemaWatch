@@ -29,6 +29,55 @@ internal sealed class AnyScreeningHandler : HttpMessageHandler
     }
 }
 
+/// <summary>
+/// Several cinemas: repertoire files per cinema and day, one captured screening per cinema
+/// (presentation + free seats), hall layouts by venue. Unknown cinemas / days return 404.
+/// </summary>
+internal sealed class MultiCinemaHandler : HttpMessageHandler
+{
+    private static readonly Dictionary<string, string> PresentationByCinema = new()
+    {
+        ["1060"] = "presentation-1763115.json",
+        ["1064"] = "presentation-1761327.json",
+    };
+
+    public int RequestCount { get; private set; }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        RequestCount++;
+        var uri = request.RequestUri!;
+        var path = uri.AbsolutePath;
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        string? fixture = null;
+
+        var repertoire = System.Text.RegularExpressions.Regex.Match(path, @"in-cinema/(\d+)/at-date/([\d-]+)");
+        if (repertoire.Success)
+            fixture = $"repertoire-{repertoire.Groups[1].Value}-{repertoire.Groups[2].Value}.json";
+        else if (path.Contains("/presentations/"))
+        {
+            var id = path.Split('/').Last();
+            var cinema = Directory.EnumerateFiles(Dir, "repertoire-*.json")
+                .FirstOrDefault(f => File.ReadAllText(f).Contains($"\"id\":\"{id}\""));
+            var cinemaId = cinema is null ? null : Path.GetFileName(cinema).Split('-')[1];
+            fixture = cinemaId is not null && PresentationByCinema.TryGetValue(cinemaId, out var p) ? p : null;
+        }
+        else if (path.EndsWith("/seatplanV2"))
+            fixture = $"seatplan-{query["venueId"]}-{query["seatplanId"]}.json";
+        else if (path.EndsWith("/seats-statusV2"))
+            fixture = $"seats-status-{query["presentationId"]}.json";
+
+        if (fixture is null || !File.Exists(Path.Combine(Dir, fixture)))
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(File.ReadAllText(Path.Combine(Dir, fixture)), Encoding.UTF8, "application/json"),
+        });
+    }
+
+    private static string Dir => Path.Combine(AppContext.BaseDirectory, "Fixtures");
+}
+
 internal sealed class FakeUi : IUserInteraction
 {
     public List<string> OpenPaths { get; } = [];

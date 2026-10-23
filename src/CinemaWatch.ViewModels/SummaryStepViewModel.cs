@@ -454,7 +454,10 @@ public sealed class SummaryItem : ObservableObject
     }
 
     public string Title => $"{Formatting.DayHeader(DateOnly.FromDateTime(_screening.StartsAt))}, {Formatting.Time(_screening.StartsAt)}";
-    public string Subtitle => $"{_screening.Auditorium} · {Formatting.Languages(_screening)}";
+    /// <summary>"Kraków · Sala 10 IMAX · EN · napisy PL"</summary>
+    public string Subtitle => Locations.FindCinema(_screening.CinemaId) is { } cinema
+        ? $"{cinema.DisplayCity} · {_screening.Auditorium} · {Formatting.Languages(_screening)}"
+        : $"{_screening.Auditorium} · {Formatting.Languages(_screening)}";
 
     public string CountsText =>
         Count(_watched.Count, "miejsce", "miejsca", "miejsc", "seat", "seats") + " · " + T("teraz wolnych", "free now") + $": {_availableAtLoad}";

@@ -117,7 +117,7 @@ internal static class ViewModelTests
             await vm.NextCommand.ExecuteAsync();
 
             var summary = vm.SummaryStep;
-            Assert.Equal("Diuna: Część trzecia 16.12", summary.ProfileName);
+            Assert.Equal("Diuna: Część trzecia Warszawa 16.12", summary.ProfileName);
             Assert.True(!summary.UnscheduleCommand.CanExecute(null));
 
             await summary.CheckNowCommand.ExecuteAsync();
@@ -376,6 +376,125 @@ internal static class ViewModelTests
             Assert.True(item is not null && ReferenceEquals(item, first.SeatsStep.SelectedItem));
             first.Dispose();
             second.Dispose();
+        });
+    }
+
+    public static void RegisterAllImaxTests()
+    {
+        TestRunner.Add("All IMAX cinemas: city choice, 14-day limit, grouping by day and city, maps, profile with cinemas", async () =>
+        {
+            var http = new MultiCinemaHandler();
+            using var client = new CinemaCityClient(http);
+            var preferences = new InMemoryPreferences();
+            var ui = new FakeUi();
+            var shell = new MainViewModel(client, ui, new FakeScheduler(), Environment, () => Now, preferences: preferences);
+            var vm = shell.SelectedSession!;
+            var dates = vm.DatesStep;
+
+            Assert.Equal("Warszawa", dates.SelectedCity.Name); // first start: Warsaw
+            Assert.SequenceEqual(["Katowice", "Kraków", "Łódź", "Poznań", "Warszawa", "Wrocław", "Wszystkie miasta"], dates.Cities.Select(c => c.Name));
+
+            dates.SelectedCity = dates.Cities.Last();
+            Assert.Equal("all", preferences.LastCinemaChoice);
+            Assert.Equal("Wszystkie kina IMAX (6)", dates.SelectedCinema.Name);
+
+            dates.DateFrom = new DateTime(2026, 10, 24);
+            dates.IsRange = true;
+            dates.DateTo = new DateTime(2026, 11, 7); // 15 days
+            await vm.NextCommand.ExecuteAsync();
+            Assert.Equal("Dla wszystkich miast zakres może obejmować maksymalnie 14 dni.", vm.ErrorText);
+
+            dates.IsRange = false;
+            await vm.NextCommand.ExecuteAsync();
+            Assert.Equal(1, vm.StepIndex);
+            Assert.True(vm.StatusText!.Contains("Katowice 24.10")); // 4 cinemas have no captured data -> 404
+
+            var screenings = vm.ScreeningsStep;
+            screenings.SelectedFilm = screenings.Films.Single(f => f.Name == "Michael");
+            var day = screenings.Days.Single();
+            Assert.SequenceEqual(["Kraków · Cinema City Zakopianka", "Warszawa · Cinema City Sadyba"], day.Cinemas.Select(c => c.Header));
+            Assert.True(day.Cinemas.All(c => c.ShowHeader));
+            foreach (var cinema in day.Cinemas)
+                cinema.Screenings.Single(o => o.TimeText == "09:20").IsChecked = true;
+
+            await vm.NextCommand.ExecuteAsync();
+            Assert.Equal(2, vm.StepIndex);
+            var (krakow, warsaw) = (vm.SeatsStep.Items[0], vm.SeatsStep.Items[1]);
+            Assert.True(krakow.Title.StartsWith("Kraków · ") && warsaw.Title.StartsWith("Warszawa · "));
+            Assert.Equal(333, krakow.Map!.SeatViews.Count);
+            Assert.Equal(385, warsaw.Map!.SeatViews.Count);
+
+            krakow.Map.RowLabels.First(l => l.Label == "9").ToggleCommand.Execute(null);
+            Assert.Equal(27, krakow.WatchedCount);
+            vm.SeatsStep.ApplyToAllCommand.Execute(null); // different halls: nothing copied
+            Assert.Equal("Brak innych seansów z tą samą salą.", vm.SeatsStep.ActionText);
+            vm.SeatsStep.SelectedItem = warsaw;
+            warsaw.Map.RowLabels.First(l => l.Label == "8").ToggleCommand.Execute(null);
+
+            await vm.NextCommand.ExecuteAsync();
+            Assert.Equal(3, vm.StepIndex);
+            Assert.True(vm.SummaryStep.Items[0].Subtitle.StartsWith("Kraków · Sala 10 IMAX"));
+            Assert.Equal("Michael 24.10", vm.SummaryStep.ProfileName); // no city in the name for all cities
+
+            var profile = vm.BuildProfile();
+            Assert.Equal(6, profile.CinemaIds.Count);
+            Assert.Equal("1064", profile.CinemaId);
+            Assert.SequenceEqual(["Kraków", "Warszawa"], profile.Screenings.Select(s => s.City));
+
+            // Saved and reopened in a new tab: all cities again, selections restored; opening does not change the remembered city.
+            var directory = Path.Combine(Path.GetTempPath(), $"cw-imax-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var path = Path.Combine(directory, "Michael" + ProfileStore.FileExtension);
+                ui.SavePath = path;
+                await vm.SummaryStep.SaveCommand.ExecuteAsync();
+                preferences.LastCinemaChoice = "1064";
+                shell.NewProfileCommand.Execute(null);
+                Assert.Equal("Kraków", shell.SelectedSession!.DatesStep.SelectedCity.Name); // new tab: last choice
+
+                var reopened = shell.SelectedSession!;
+                await reopened.OpenAsync(path);
+                Assert.True(reopened.DatesStep.IsAllCinemas);
+                Assert.Equal(3, reopened.StepIndex);
+                Assert.SequenceEqual([27, 37], reopened.SeatsStep.Items.Select(i => i.WatchedCount));
+                Assert.Equal("1064", preferences.LastCinemaChoice);
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+                shell.Dispose();
+            }
+        });
+
+        TestRunner.Add("Hall maps: row numbers in two straight columns, clear of the seats, in every layout", () =>
+        {
+            foreach (var (plan, presentation) in new[]
+                     {
+                         ("seatplan-13-1.json", "presentation-1765592.json"),
+                         ("seatplan-54-1.json", "presentation-1761327.json"),
+                         ("seatplan-387-1.json", "presentation-1763115.json"),
+                     })
+            {
+                var seats = new ScreeningSeats(
+                    CinemaCityParser.ParsePresentation(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", presentation))),
+                    CinemaCityParser.ParseSeatPlan(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", plan))),
+                    new HashSet<string>());
+                var map = new HallMapViewModel(seats);
+                var lefts = map.RowLabels.Where((_, i) => i % 2 == 0).Select(l => l.Left).Distinct().ToList();
+                var rights = map.RowLabels.Where((_, i) => i % 2 == 1).Select(l => l.Left).Distinct().ToList();
+                Assert.True(lefts.Count == 1 && rights.Count == 1, plan);
+                Assert.True(map.RowLabels.All(l => l.Left >= 0 && l.Left + l.Size <= map.Width), plan);
+                Assert.True(!map.RowLabels.Any(l => map.SeatViews.Any(s => Math.Abs(s.Left - l.Left) < l.Size && Math.Abs(s.Top - l.Top) < l.Size)), plan);
+            }
+
+            // Wrocław's last row is a single wheelchair space: clicking its number selects nothing.
+            var wroclaw = new HallMapViewModel(new ScreeningSeats(
+                CinemaCityParser.ParsePresentation(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "presentation-1763115.json"))),
+                CinemaCityParser.ParseSeatPlan(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "seatplan-387-1.json"))),
+                new HashSet<string>()));
+            wroclaw.RowLabels.First(l => l.Label == "13").ToggleCommand.Execute(null);
+            Assert.Equal(0, wroclaw.WatchedCount);
         });
     }
 

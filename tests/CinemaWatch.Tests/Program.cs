@@ -383,11 +383,34 @@ TestRunner.Add("Localization: language detection, plurals, translated Core texts
     }
 });
 
+TestRunner.Add("IMAX cinemas: six halls; Kraków row keys and aisle; Wrocław row with only a wheelchair space", () =>
+{
+    Assert.Equal(6, Locations.ImaxCinemas.Select(c => c.Id).Distinct().Count());
+    Assert.SequenceEqual(["Katowice", "Kraków", "Łódź", "Poznań", "Warszawa", "Wrocław"], Locations.ImaxCinemas.Select(c => c.City));
+    Assert.Equal("Cinema City Sadyba", Locations.FindCinema("1060")!.Name);
+
+    var krakow = CinemaCityParser.ParseSeatPlan(Fixture("seatplan-54-1.json"));
+    Assert.Equal(333, krakow.Seats.Count);
+    Assert.Equal("1", krakow.Seats.First(s => s.RowKey == "4").Row); // row "1" has the internal key "4"
+    var row9 = krakow.SeatsInRow("9").ToList();
+    var aisle = row9.Where(s => s.Label is "25" or "24").ToList();
+    Assert.SequenceEqual([3, 7], aisle.Select(s => s.Position).Order());
+    var bothFree = new ScreeningSeats(CinemaCityParser.ParsePresentation(Fixture("presentation-1761327.json")), krakow,
+        aisle.Select(s => s.Key).ToHashSet());
+    Assert.Equal(0, SeatMatcher.FindAvailable(bothFree, aisle.Select(s => s.Key).ToHashSet(), 2).Count); // not next to each other
+
+    var wroclaw = CinemaCityParser.ParseSeatPlan(Fixture("seatplan-387-1.json"));
+    var lastRow = wroclaw.SeatsInRow("13").ToList();
+    Assert.True(lastRow.Count == 1 && lastRow[0].IsWheelchair);
+    Assert.Equal("Kraków · ", NotificationBuilder.Build(SampleProfile(), [(new WatchedScreening { CinemaId = "1064", StartsAt = new DateTime(2026, 10, 24, 9, 20, 0) }, row9.Take(1).ToList())]).Lines[0][..9]);
+});
+
 ViewModelTests.Register();
 ViewModelTests.RegisterLanguageTests();
 ViewModelTests.RegisterNavigationTests();
 ViewModelTests.RegisterTabTests();
 ViewModelTests.RegisterTabSwitchTests();
+ViewModelTests.RegisterAllImaxTests();
 
 return await TestRunner.RunAsync();
 
