@@ -61,6 +61,29 @@ dubbing.
 CinemaWatch only *reads* public seat information. It never logs in, never creates a cart and never reserves or
 buys anything - buying stays with you.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/step1-cinema-and-dates.png" alt="Step 1: city and dates"></td>
+    <td width="50%"><img src="docs/images/step2-film-and-screenings.png" alt="Step 2: film and screenings, grouped by day"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>1. City and dates</b> - one IMAX city or all of them, a day or a date range</td>
+    <td align="center"><b>2. Film and screenings</b> - sold-out screenings can be ticked too</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/seat-map.png" alt="Step 3: hall map with watched rows"></td>
+    <td width="50%"><img src="docs/images/step4-summary.png" alt="Step 4: summary with check results and Task Scheduler"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>3. Seats</b> - watch whole rows or single seats on the live hall map</td>
+    <td align="center"><b>4. Summary</b> - check now, save the profile, add it to Task Scheduler</td>
+  </tr>
+</table>
+
+Several profiles can be open side by side in tabs; the interface is available in Polish and English.
+
 ## How it works
 
 ```mermaid
