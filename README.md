@@ -147,8 +147,9 @@ dotnet run --project src\CinemaWatch.App       # start the app
 ```
 
 Releases are built by GitHub Actions: pushing a tag such as `v1.3.0` runs the tests, publishes the exe and
-creates the release. Tags with a suffix (`v1.4.0-beta.1`) become pre-releases. Larger changes are developed on
-`feature/*` branches (CI runs there too) and merged through a pull request.
+creates the release. Tags with a suffix (`v1.4.0-beta.1`) become draft pre-releases, visible only to the
+maintainers until published. Larger changes are developed on `feature/*` branches (CI runs there too), tested as a
+beta and merged through a pull request.
 
 ### Project structure
 

@@ -1,7 +1,4 @@
-## CinemaWatch 1.4.0 beta 1
-
-> **Pre-release.** For testing the new cinemas - the stable version is still 1.3.0.
-> Profiles saved by this beta can still be opened and checked by version 1.3.0.
+## CinemaWatch 1.4.0
 
 - **All Cinema City IMAX cinemas in Poland:** Katowice (Punkt 44), Kraków (Zakopianka), Łódź (Manufaktura),
   Poznań (Plaza), Warszawa (Sadyba) and Wrocław (Wroclavia).
@@ -13,6 +10,8 @@
 - Hall maps: row numbers now stand in two straight columns at the edges of the hall, like on the Cinema City
   website - neater in halls with rows of different widths (e.g. Kraków, Wrocław).
 - Wording: screenings are filtered as "IMAX without dubbing" (Polish films in IMAX have no subtitles).
+- Profiles saved by 1.4.0 can still be opened and checked by version 1.3.0.
+- Beta tags (e.g. `v1.5.0-beta.1`) now create draft releases, visible only to the maintainers until published.
 
 ### Download
 
