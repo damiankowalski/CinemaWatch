@@ -11,6 +11,19 @@ public interface IUserInteraction
     void OpenUrl(string url);
 }
 
+/// <summary>Small remembered choices (stored in the app settings file).</summary>
+public interface IPreferences
+{
+    /// <summary>Last city choice in step 1: a cinema id or "all".</summary>
+    string? LastCinemaChoice { get; set; }
+}
+
+/// <summary>Preferences kept in memory only (tests, or when nothing should be saved).</summary>
+public sealed class InMemoryPreferences : IPreferences
+{
+    public string? LastCinemaChoice { get; set; }
+}
+
 /// <summary>Facts about the running app needed by the view models.</summary>
 /// <param name="ExePath">Full path of CinemaWatch.exe (used in scheduled tasks and the copied command line).</param>
 /// <param name="ProfilesDirectory">Default folder for profile dialogs.</param>

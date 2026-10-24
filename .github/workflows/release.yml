@@ -1,7 +1,8 @@
 name: Release
 
 # Push a tag like v1.3.0 to build CinemaWatch.exe and publish it as a GitHub release.
-# Tags with a suffix (v1.4.0-beta.1) become pre-releases: never marked "Latest".
+# Tags with a suffix (v1.4.0-beta.1) become draft pre-releases: visible only to people with write access to the
+# repository until someone clicks "Publish release", and never marked "Latest".
 on:
   push:
     tags: ['v*']
@@ -39,5 +40,5 @@ jobs:
             '--title', "CinemaWatch $env:GITHUB_REF_NAME",
             '--notes-file', '.github/RELEASE_NOTES.md'
           )
-          if ($env:GITHUB_REF_NAME -like '*-*') { $releaseArgs += '--prerelease' }
+          if ($env:GITHUB_REF_NAME -like '*-*') { $releaseArgs += '--prerelease', '--draft' }
           gh release create @releaseArgs

@@ -31,15 +31,17 @@ and tickets are returned. Catching them means refreshing the seat map over and o
 actually buy, and the app checks them in the background. When one of them becomes free, you get a Windows
 notification - one click takes you straight to the booking page.
 
-It is a small Windows desktop app (WPF, .NET 10) with a Polish and English user interface. For now it supports
-**Cinema City Sadyba (Warsaw), IMAX**, subtitled screenings.
+It is a small Windows desktop app (WPF, .NET 10) with a Polish and English user interface. It supports the
+**IMAX halls of Cinema City in Poland** - Katowice, Kraków, Łódź, Poznań, Warszawa and Wrocław - screenings without
+dubbing.
 
-> Na skrócie po polsku: CinemaWatch monitoruje wybrane miejsca na wyprzedane seanse IMAX w Cinema City Sadyba
+> Na skrócie po polsku: CinemaWatch monitoruje wybrane miejsca na wyprzedane seanse w salach IMAX Cinema City
 > i pokazuje powiadomienie Windows, gdy któreś się zwolni. Kliknięcie otwiera stronę zakupu biletu.
 
 ## Features
 
-- **Guided wizard** - date or date range → film and screenings → hall map → summary. Every step in the
+- **All six IMAX cinemas** - pick a city or *All cities*; screenings are grouped by day and city.
+- **Guided wizard** - city and dates → film and screenings → hall map → summary. Every step in the
   indicator is clickable; data that has not changed is reused, so jumping between steps is instant.
 - **Interactive hall map** drawn from the cinema's own seat plan, with live occupancy.
   - Click a row number to watch the whole row, click seats to add or remove them - taken seats too.
@@ -87,7 +89,8 @@ The exe is not code-signed, so Windows SmartScreen may show a warning on first s
 
 ## Usage
 
-1. **Cinema and dates** (*Kino i termin*) - choose a date or a date range (up to 31 days).
+1. **Cinema and dates** (*Kino i termin*) - choose the city and a date or a date range (up to 31 days for one city,
+   14 days for all cities).
 2. **Film and screenings** (*Film i seanse*) - pick the film and tick the screenings. Sold-out ones can be ticked
    too - those are the ones worth watching.
 3. **Seats** (*Miejsca*) - mark rows and seats on the hall map of each screening.
@@ -144,8 +147,9 @@ dotnet run --project src\CinemaWatch.App       # start the app
 ```
 
 Releases are built by GitHub Actions: pushing a tag such as `v1.3.0` runs the tests, publishes the exe and
-creates the release. Tags with a suffix (`v1.4.0-beta.1`) become pre-releases. Larger changes are developed on
-`feature/*` branches (CI runs there too) and merged through a pull request.
+creates the release. Tags with a suffix (`v1.4.0-beta.1`) become draft pre-releases, visible only to the
+maintainers until published. Larger changes are developed on `feature/*` branches (CI runs there too), tested as a
+beta and merged through a pull request.
 
 ### Project structure
 
@@ -171,8 +175,7 @@ physically adjacent. Wheelchair spaces are flagged in the layout and reported se
 
 ## Roadmap
 
-- Choice of city, cinema and technology (2D, 3D, 4DX, IMAX) - the data model is ready for it.
-- More cinemas from the Cinema City network.
+- Other technologies (2D, 3D, 4DX) and the remaining Cinema City cinemas - the data model is ready for it.
 
 ## License
 

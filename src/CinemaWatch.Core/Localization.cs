@@ -72,6 +72,9 @@ public sealed class AppSettings
     /// <summary>"pl", "en" or null (= follow the Windows display language).</summary>
     public string? Language { get; set; }
 
+    /// <summary>Last city choice in step 1: a cinema id or "all" (null = Warsaw).</summary>
+    public string? LastCinema { get; set; }
+
     public static string FilePath => Path.Combine(AppPaths.DataDirectory, "settings.json");
 
     public static AppSettings Load()

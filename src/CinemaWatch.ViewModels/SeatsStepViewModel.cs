@@ -75,8 +75,9 @@ public sealed class SeatsStepViewModel : ObservableObject
         Items.Clear();
         SetSummary(null);
         SetActionText(null);
+        var showCity = screenings.Select(s => s.CinemaId).Distinct().Count() > 1;
         foreach (var screening in screenings)
-            Items.Add(new ScreeningSeatsItem(screening, _minAdjacent));
+            Items.Add(new ScreeningSeatsItem(screening, _minAdjacent, showCity));
         SelectedItem = Items.FirstOrDefault();
 
         var loaded = 0;
@@ -195,7 +196,7 @@ public sealed class SeatsStepViewModel : ObservableObject
 }
 
 /// <summary>One screening on step 3 (a tab with its hall map).</summary>
-public sealed class ScreeningSeatsItem(Screening screening, int minAdjacent) : ObservableObject
+public sealed class ScreeningSeatsItem(Screening screening, int minAdjacent, bool showCity = false) : ObservableObject
 {
     private HallMapViewModel? _map;
     private Exception? _error;
@@ -203,7 +204,10 @@ public sealed class ScreeningSeatsItem(Screening screening, int minAdjacent) : O
     private int _minAdjacent = minAdjacent;
 
     public Screening Screening { get; } = screening;
-    public string Title => Formatting.ShortDateTime(Screening.StartsAt);
+    /// <summary>"sob. 24.10, 19:00", or "Kraków · sob. 24.10, 19:00" when screenings of several cinemas are open.</summary>
+    public string Title => showCity && Locations.FindCinema(Screening.CinemaId) is { } cinema
+        ? $"{cinema.DisplayCity} · {Formatting.ShortDateTime(Screening.StartsAt)}"
+        : Formatting.ShortDateTime(Screening.StartsAt);
 
     public HallMapViewModel? Map
     {

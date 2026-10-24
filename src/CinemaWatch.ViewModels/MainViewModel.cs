@@ -26,7 +26,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         ITaskScheduler scheduler,
         AppEnvironment environment,
         Func<DateTime>? clock = null,
-        Action? languageChanged = null)
+        Action? languageChanged = null,
+        IPreferences? preferences = null)
     {
         _services = new SessionServices(
             client,
@@ -34,7 +35,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             ui,
             scheduler,
             environment,
-            clock ?? (() => DateTime.Now));
+            clock ?? (() => DateTime.Now),
+            preferences ?? new InMemoryPreferences());
         _languageChanged = languageChanged;
 
         NewProfileCommand = new RelayCommand(() => SelectedSession = AddSession(new ProfileSessionViewModel(_services, closeRequested: Close)));

@@ -59,7 +59,8 @@ public partial class App : Application
             new WpfUserInteraction(),
             new SchtasksScheduler(),
             new AppEnvironment(Environment.ProcessPath, AppPaths.ProfilesDirectory(Environment.ProcessPath), AppPaths.CacheDirectory),
-            languageChanged: OnLanguageChanged);
+            languageChanged: OnLanguageChanged,
+            preferences: new SettingsPreferences(_settings));
         var window = new MainWindow { DataContext = _viewModel };
         MainWindow = window;
         window.Show();

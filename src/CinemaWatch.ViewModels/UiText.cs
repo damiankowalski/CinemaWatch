@@ -31,16 +31,16 @@ public sealed class UiText : ObservableObject
     public string Cinema => T("Kino", "Cinema");
     public string City => T("Miasto", "City");
     public string Technology => T("Technologia", "Technology");
-    public string LocationLater => T("Wybór miasta, kina i technologii pojawi się w kolejnej wersji.",
-        "Choosing the city, cinema and technology will come in a later version.");
+    public string LocationHint => T("W każdym mieście jest jedna sala IMAX Cinema City, więc kino wynika z miasta. Technologia jest na razie stała.",
+        "Each city has one Cinema City IMAX hall, so the cinema follows from the city. The technology is fixed for now.");
     public string Dates => T("Termin", "Dates");
     public string DateRange => T("Zakres dat", "Date range");
     public string DateTo => T("Do", "To");
 
     // Step 2
     public string ScreeningsTitle => T("Film i seanse", "Film and screenings");
-    public string ScreeningsIntro => T("Widoczne są tylko seanse IMAX z napisami. Wyprzedane też możesz zaznaczyć - właśnie je warto monitorować.",
-        "Only subtitled IMAX screenings are shown. You can tick sold-out ones too - those are the ones worth watching.");
+    public string ScreeningsIntro => T("Widoczne są seanse IMAX bez dubbingu. Wyprzedane też możesz zaznaczyć - właśnie je warto monitorować.",
+        "IMAX screenings without dubbing are shown. You can tick sold-out ones too - those are the ones worth watching.");
     public string Film => T("Film", "Film");
     public string Screenings => T("Seanse", "Screenings");
     public string SelectAll => T("Zaznacz wszystkie", "Select all");

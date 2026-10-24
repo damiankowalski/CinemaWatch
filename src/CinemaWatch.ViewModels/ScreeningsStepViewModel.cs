@@ -43,8 +43,8 @@ public sealed class ScreeningsStepViewModel : ObservableObject
 
     public string EmptyText => HasFilms
         ? T("Ten film nie ma seansów w wybranym terminie.", "This film has no screenings on the selected dates.")
-        : T("W wybranym terminie nie ma seansów IMAX z napisami. Seanse z dubbingiem są pomijane.",
-            "There are no subtitled IMAX screenings on the selected dates. Dubbed screenings are skipped.");
+        : T("W wybranym terminie nie ma seansów IMAX bez dubbingu.",
+            "There are no IMAX screenings without dubbing on the selected dates.");
 
     public int SelectedCount => AllOptions.Count(o => o.IsChecked);
     public int TotalCount => AllOptions.Count();
@@ -116,20 +116,36 @@ public sealed class ScreeningsStepViewModel : ObservableObject
         Days.Clear();
         if (_selectedFilm is not null)
         {
-            foreach (var day in _days.OrderBy(d => d.Date))
+            // One DayRepertoire per cinema and day: group by day, then by cinema (city order of the IMAX list).
+            var multipleCinemas = _days.Select(d => d.Screenings.FirstOrDefault()?.CinemaId).Where(id => id is not null).Distinct().Count() > 1;
+            foreach (var date in _days.Select(d => d.Date).Distinct().Order())
             {
-                var options = Matching(day.Screenings)
-                    .Where(s => s.FilmId == _selectedFilm.FilmId)
-                    .OrderBy(s => s.StartsAt)
-                    .Select(s => new ScreeningOption(s, OnSelectionChanged) { IsChecked = ticked.Contains(s.Id) })
+                var cinemaGroups = _days
+                    .Where(d => d.Date == date)
+                    .SelectMany(d => Matching(d.Screenings).Where(s => s.FilmId == _selectedFilm.FilmId))
+                    .GroupBy(s => s.CinemaId)
+                    .OrderBy(g => CinemaOrder(g.Key))
+                    .Select(g => new CinemaGroup(
+                        Locations.FindCinema(g.Key),
+                        g.OrderBy(s => s.StartsAt)
+                         .Select(s => new ScreeningOption(s, OnSelectionChanged) { IsChecked = ticked.Contains(s.Id) })
+                         .ToList(),
+                        showHeader: multipleCinemas))
                     .ToList();
-                if (options.Count > 0)
-                    Days.Add(new DayGroup(day.Date, options));
+                if (cinemaGroups.Count > 0)
+                    Days.Add(new DayGroup(date, cinemaGroups));
             }
         }
         OnPropertyChanged(nameof(HasScreenings));
         OnPropertyChanged(nameof(EmptyText));
         OnSelectionChanged();
+    }
+
+    private static int CinemaOrder(string cinemaId)
+    {
+        for (var i = 0; i < Locations.ImaxCinemas.Count; i++)
+            if (Locations.ImaxCinemas[i].Id == cinemaId) return i;
+        return int.MaxValue;
     }
 
     private void SetAll(bool isChecked)
@@ -157,11 +173,35 @@ public sealed class FilmOption(string filmId, string name, int screeningCount) :
     public void RefreshTexts() => OnPropertyChanged(nameof(DisplayName));
 }
 
-public sealed class DayGroup(DateOnly date, IReadOnlyList<ScreeningOption> screenings) : ObservableObject
+public sealed class DayGroup(DateOnly date, IReadOnlyList<CinemaGroup> cinemas) : ObservableObject
 {
     public DateOnly Date { get; } = date;
     public string Header => Formatting.DayHeader(Date);
+
+    /// <summary>Screenings of the day per cinema (one group when a single city is searched).</summary>
+    public IReadOnlyList<CinemaGroup> Cinemas { get; } = cinemas;
+
+    /// <summary>All screenings of the day, in cinema order.</summary>
+    public IReadOnlyList<ScreeningOption> Screenings { get; } = cinemas.SelectMany(c => c.Screenings).ToList();
+
+    public void RefreshTexts()
+    {
+        OnPropertyChanged(nameof(Header));
+        foreach (var cinema in Cinemas)
+            cinema.RefreshTexts();
+    }
+}
+
+/// <summary>Screenings of one cinema on one day.</summary>
+public sealed class CinemaGroup(Cinema? cinema, IReadOnlyList<ScreeningOption> screenings, bool showHeader) : ObservableObject
+{
     public IReadOnlyList<ScreeningOption> Screenings { get; } = screenings;
+
+    /// <summary>Only shown when screenings of several cinemas are listed.</summary>
+    public bool ShowHeader { get; } = showHeader && cinema is not null;
+
+    /// <summary>"Kraków · Cinema City Zakopianka"</summary>
+    public string Header => cinema is null ? "" : $"{cinema.DisplayCity} · {cinema.Name}";
 
     public void RefreshTexts()
     {

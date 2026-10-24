@@ -14,8 +14,12 @@ public sealed class WatchProfile
 
     public int Version { get; set; } = CurrentVersion;
     public string Name { get; set; } = "";
+    /// <summary>Main cinema (first of <see cref="CinemaIds"/>); kept so that version 1.3 can still open the profile.</summary>
     public string CinemaId { get; set; } = "";
     public string CinemaName { get; set; } = "";
+
+    /// <summary>Cinemas the wizard searched (one city or all IMAX cinemas). Empty in profiles from before 1.4.</summary>
+    public List<string> CinemaIds { get; set; } = [];
     public string FilmId { get; set; } = "";
     public string FilmName { get; set; } = "";
     public DateOnly DateFrom { get; set; }
@@ -33,6 +37,8 @@ public sealed class WatchProfile
 public sealed class WatchedScreening
 {
     public string Id { get; set; } = "";
+    public string CinemaId { get; set; } = "";
+    public string City { get; set; } = "";
     public DateTime StartsAt { get; set; }
     public string Auditorium { get; set; } = "";
     public string BookingLink { get; set; } = "";
