@@ -4,7 +4,7 @@
 > Order of trust when something disagrees: **repository code** > **this document** > chat history.
 > Keep it current: update *Status*, *Version history* and *Decision log* with every release or decision.
 >
-> Last updated: October 2026 (desktop 1.4.0).
+> Last updated: October 2026 (desktop 1.4.0; SaaS plan added in [`docs/SAAS.md`](SAAS.md)).
 
 ---
 
@@ -22,7 +22,7 @@ It only **reads** public seat information. It never logs in, never creates a car
 | Original PowerShell script | Done, kept in `scripts/CinemaWatch.ps1` | E-mail notifications via Gmail SMTP; the origin of the project |
 | **Desktop (Windows)** | **1.4.0 stable** - feature-complete for now | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
 | Android | Planned - concept agreed, nothing built | "Proxy" that checks profiles exported by the desktop app |
-| SaaS (web) | Future idea - exploration / tests only | Fully web-based app |
+| SaaS (web) | Planning - MVP 0 defined, nothing built | Web app; plan in [`docs/SAAS.md`](SAAS.md) |
 
 ---
 
@@ -62,14 +62,16 @@ Open decisions:
 | Distribution | APK via GitHub Releases first (signing key only in GitHub Secrets); Play Store later |
 | Profile extensions for mobile | optional `seatLabels` (key → "row 8, seat 12"), `venueTypeId` / `isReserved` per screening to save a request |
 
-### 2.3 SaaS (web) - future, exploratory
+### 2.3 SaaS (web) - planning
 
-Fully web-based app (accounts, seat map in the browser, server-side checks, web push / e-mail).
-Things to validate before building:
-- **Server-side polling from datacenter IPs** is far more likely to be blocked by Cloudflare than a home PC.
-- **Fan-out**: poll each screening once for all users who watch it (the "check all" de-duplication, at scale).
-- Cinema City terms of use; accounts, privacy (GDPR); cost; abuse prevention.
-- Reuse: `CinemaWatch.Core` is UI-free .NET and could run in an ASP.NET Core worker.
+Fully web-based app (accounts, server-side checks, e-mail; later the wizard and hall map in the browser). The whole
+SaaS track - goals, risks, target architecture, MVP, plan, hosting choice and its own decision log - lives in
+**[`docs/SAAS.md`](SAAS.md)**. In short:
+- Same repository (monorepo), reusing `CinemaWatch.Core`; separate SaaS version and `web-v*` tags.
+- **MVP 0** = server-side profile proxy: accounts, import of `*.cinemawatch.json`, background checks (§5.4),
+  e-mail notifications. The wizard and hall map follow in MVP 1.
+- First technical step: a risk test of polling Cinema City from a datacenter IP (see §10).
+- Hosted infrastructure only (Linux VPS + Docker + Cloudflare); an on-prem lab is parked.
 
 ---
 
@@ -363,6 +365,8 @@ Seat names for the text ("row 8: 12, 13") come from the hall layout (`n` labels;
 | Oct 2026 | Row numbers in two edge columns (not the API anchors) | Matches the website, neat in irregular halls |
 | Oct 2026 | Betas as draft releases | Visible only to the owner until published |
 | Oct 2026 | Mobile = profile-consuming proxy, no seat map, no backend yet | Smallest useful mobile scope; desktop keeps priority |
+| Oct 2026 | SaaS in this repository; its plan and decision log in `docs/SAAS.md` | Reuse `CinemaWatch.Core` directly; one place for SaaS details |
+| Oct 2026 | SaaS MVP 0 = server-side profile proxy; risk test from a datacenter IP first | Biggest risk before the biggest UI work |
 
 ---
 
