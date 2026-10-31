@@ -4,7 +4,8 @@
 > Order of trust when something disagrees: **repository code** > **this document** > chat history.
 > Keep it current: update *Status*, *Version history* and *Decision log* with every release or decision.
 >
-> Last updated: October 2026 (desktop 1.4.0; SaaS plan added in [`docs/SAAS.md`](SAAS.md)).
+> Last updated: 31 October 2026 (desktop 1.4.0; SaaS stage 1 done - plan in [`docs/SAAS.md`](SAAS.md),
+> infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
 
 ---
 
@@ -22,7 +23,7 @@ It only **reads** public seat information. It never logs in, never creates a car
 | Original PowerShell script | Done, kept in `scripts/CinemaWatch.ps1` | E-mail notifications via Gmail SMTP; the origin of the project |
 | **Desktop (Windows)** | **1.4.0 stable** - feature-complete for now | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
 | Android | Planned - concept agreed, nothing built | "Proxy" that checks profiles exported by the desktop app |
-| SaaS (web) | Planning - MVP 0 defined, nothing built | Web app; plan in [`docs/SAAS.md`](SAAS.md) |
+| SaaS (web) | Planning - stage 1 done (domain, DNS); no server yet | Web app; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
 
 ---
 
@@ -47,7 +48,7 @@ checks Cinema City on a schedule with minimal battery impact, and shows a notifi
 - No own server/backend for now.
 - Android first; iOS maybe later.
 
-What the phone needs per check - see the algorithm in **§5.6**. Good news for the mobile design: matching works
+What the phone needs per check - see the algorithm in **§5.4**. Good news for the mobile design: matching works
 from the profile's seat keys alone (the seat position is part of the key), so the phone does not need the seat plan
 to decide *whether* to notify; it needs it (or an optional future `seatLabels` field) only to *name* the seats.
 
@@ -72,6 +73,8 @@ SaaS track - goals, risks, target architecture, MVP, plan, hosting choice and it
   e-mail notifications. The wizard and hall map follow in MVP 1.
 - First technical step: a risk test of polling Cinema City from a datacenter IP (see §10).
 - Hosted infrastructure only (Linux VPS + Docker + Cloudflare); an on-prem lab is parked.
+- What has been set up so far (accounts, domain `damiankowalski.pl`, DNS on Cloudflare, DNSSEC), with a work log,
+  runbooks and an infrastructure glossary: **[`docs/SAAS_INFRA.md`](SAAS_INFRA.md)**.
 
 ---
 

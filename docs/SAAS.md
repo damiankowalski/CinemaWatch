@@ -2,11 +2,15 @@
 
 > Companion to [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md). The product, the Cinema City API, the domain rules and the
 > profile format live there and are not repeated here. This document covers the SaaS (web) track: goals, risks,
-> target architecture, the MVP, the plan and the decisions.
-> Order of trust: **repository code** > **KNOWLEDGE_BASE.md** > **this document** > chat history.
-> Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step.
+> target architecture, the MVP, the plan and the decisions. What has actually been set up (accounts, domain, DNS,
+> later servers), with a work log, runbooks and an infrastructure glossary, lives in [`SAAS_INFRA.md`](SAAS_INFRA.md).
+> Order of trust: **repository code** > **KNOWLEDGE_BASE.md** > **this document** > chat history. For live
+> infrastructure settings the provider panels are the source of truth; `SAAS_INFRA.md` records them.
+> Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
+> `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: October 2026. Status: **planning** - nothing built, no server yet.
+> Last updated: 31 October 2026. Status: **stage 1 done** - accounts, domain `damiankowalski.pl`, DNS on Cloudflare
+> with DNSSEC; no server yet.
 
 ---
 
@@ -31,7 +35,7 @@
 | # | Risk | What we do about it |
 | --- | --- | --- |
 | R1 | Cloudflare in front of Cinema City blocks or challenges requests from datacenter IPs (KB §10) | Test it first, before building the web app (plan stage 2). Fallback: pollers on residential IPs (§11) |
-| R2 | Terms of use: a public (and possibly paid) service built on an unofficial API is a different category than a personal tool | Read the Cinema City terms before the first outside user; record the findings in §9 |
+| R2 | Terms of use: a public (and possibly paid) service built on an unofficial API is a different category than a personal tool | Terms read in Oct 2026: personal and learning use within the guardrails; no public launch or payments without written consent from Cinema City (§9) |
 | R3 | Personal data (GDPR): e-mail addresses, notification history | EU hosting, privacy notice, account deletion, store only what the service needs |
 | R4 | The request budget grows with users | De-duplicate screenings, adaptive intervals, global rate limiter, limits per account (§4.3, §5) |
 | R5 | Real payments mean being a seller (VAT, consumer law, invoices) | Payments only in test mode; a Merchant of Record if it ever becomes real (§4.5) |
@@ -133,9 +137,10 @@ safety net against application bugs.
 - **Edge:** Cloudflare Free plan in front. The server runs `cloudflared` (Cloudflare Tunnel): it opens an outbound
   connection to Cloudflare, so no web ports are opened on the server (only SSH) and no TLS certificates are needed
   on the server. Cloudflare Access protects staging.
-- **Domain:** one "umbrella" domain for all future products, subdomains per product and environment (e.g.
-  `cinemawatch.<domain>`, `staging-cinemawatch.<domain>`). Cloudflare Registrar sells at cost but did not offer
-  `.pl` in Oct 2026; for `.pl` use a Polish registrar. DNS on Cloudflare either way.
+- **Domain:** `damiankowalski.pl` - one "umbrella" domain for all future products, subdomains per product and
+  environment (e.g. `cinemawatch.damiankowalski.pl`, `staging-cinemawatch.damiankowalski.pl`; first-level names, so
+  Cloudflare's free certificate covers them). Registrar OVHcloud, DNS on Cloudflare, DNSSEC on. Current state and
+  runbooks: [`SAAS_INFRA.md`](SAAS_INFRA.md).
 - **Images and deployment:** GitHub Actions builds container images → GitHub Container Registry (GHCR) → the server
   pulls them. No build tools on the server.
 - **Backups:** daily `pg_dump` copied off the server, plus the provider's backup.
@@ -143,6 +148,8 @@ safety net against application bugs.
 
 ### 4.5 Plans, limits and payments (after MVP)
 
+- **Audience:** possibly only the owner (§9). Plans, a trial and test-mode payments stay on the roadmap even then,
+  as self-tests.
 - **Free plan vs trial:** CinemaWatch is used around premieres, so a permanent free plan with limits fits better than
   a time-limited trial.
 - **Entitlements:** a plan defines limits - active profiles, screenings per profile, date range, watched seats,
@@ -153,7 +160,8 @@ safety net against application bugs.
   the source of truth; we keep a mirror updated from webhooks plus an event log with ids (idempotency) and derive
   entitlements from it. BLIK and Przelewy24 matter for Polish users.
 - **Real money** means being a seller (VAT, consumer law, invoices, terms). A Merchant of Record (Paddle, Lemon
-  Squeezy, Stripe Managed Payments) takes this over for a higher fee. Not before R2 is cleared.
+  Squeezy, Stripe Managed Payments) takes this over for a higher fee. Not without written consent from Cinema City
+  (R2, §9).
 
 ---
 
@@ -213,16 +221,17 @@ interchangeable.
 
 Each stage ends with an update of this document.
 
-### Stage 0 - Documents
-- [ ] This file in the repository; KB §2.3 links here.
+### Stage 0 - Documents (done Oct 2026)
+- [x] This file in the repository; KB §2.3 links here.
 
-### Stage 1 - Accounts and decisions (no code, almost no cost)
-- [ ] Password manager entries and 2FA for GitHub, Cloudflare, the hosting provider, the registrar and the e-mail
-      provider.
-- [ ] Cloudflare account (Free plan).
-- [ ] Choose the umbrella domain name (§10); buy it; move its DNS to Cloudflare.
-- [ ] Hosting account (§8). The VPS itself is ordered at the start of stage 2 (monthly billing).
-- [ ] Read the Cinema City terms of use (R2); write the findings into §9.
+### Stage 1 - Accounts and decisions (done 31 Oct 2026; details in `SAAS_INFRA.md` §3)
+- [x] Password manager entries and 2FA: GitHub, Google, OVHcloud (hosting provider and registrar). Cloudflare:
+      Google sign-in only, no own 2FA (accepted risk, §9). E-mail provider: moved to stage 4.
+- [x] Cloudflare account (Free plan).
+- [x] Umbrella domain `damiankowalski.pl` bought at OVHcloud; DNS moved to Cloudflare; zone cleaned to
+      `v=spf1 -all`; DNSSEC on.
+- [x] Hosting account (OVHcloud). The VPS itself is ordered at the start of stage 2 (monthly billing).
+- [x] Cinema City terms of use read (R2); findings in §9.
 
 ### Stage 2 - First server and the risk test (R1)
 - [ ] SSH key on Windows (built-in OpenSSH); order the VPS (Ubuntu 24.04 LTS); first login.
@@ -243,11 +252,13 @@ Each stage ends with an update of this document.
 - [ ] Docker + Compose on the VPS: `web`, `worker`, `postgres`, `cloudflared`.
 - [ ] GitHub Actions: build images → GHCR; deploy = pull + restart on the VPS.
 - [ ] Cloudflare Tunnel hostname for staging + Cloudflare Access for testers.
-- [ ] E-mail domain: SPF, DKIM, DMARC.
+- [ ] E-mail provider account with 2FA (moved from stage 1).
+- [ ] E-mail domain: SPF (replaces `v=spf1 -all`), DKIM, DMARC.
 - [ ] Backups: daily `pg_dump` off the server; restore tested once.
 
 ### Stage 5 - First SaaS test
-- [ ] 3-5 people, 2 weeks. Watch requests per hour, 403/429, notification latency, spam placement, errors.
+- [ ] 3-5 invited people (possibly only the owner, §9), free, behind Cloudflare Access, 2 weeks. Watch requests
+      per hour, 403/429, notification latency, spam placement, errors.
 - [ ] Write the lessons into §9 and decide on MVP 1.
 
 ### Stage 6 - MVP 1 (§5.2)
@@ -278,11 +289,11 @@ as a learning exercise → Cloudflare Workers experiment → Android app as a cl
 | PaaS (Render, Railway, Fly.io) | Less server work; pay per component (web, worker, database) |
 | Cloudflare Workers / Containers | Possible, but means TypeScript (no `CinemaWatch.Core`) and lock-in; Containers need the $5 Workers Paid plan |
 
-### 8.3 Other services (chosen in stage 4)
+### 8.3 Other services
 
-- E-mail provider: Resend, Brevo, Postmark, Amazon SES or Cloudflare Email Sending (beta, Workers Paid plan). Check
-  free plans and .NET support when choosing.
-- Registrar: Cloudflare Registrar for `.com` / `.dev` / `.app`; a Polish registrar for `.pl`.
+- E-mail provider (chosen in stage 4): Resend, Brevo, Postmark, Amazon SES or Cloudflare Email Sending (beta, Workers
+  Paid plan). Check free plans and .NET support when choosing.
+- Registrar: OVHcloud (chosen in stage 1, §9). Cloudflare Registrar does not sell `.pl`.
 
 ---
 
@@ -300,6 +311,13 @@ as a learning exercise → Cloudflare Workers experiment → Android app as a cl
 | Oct 2026 | ASP.NET Core Identity for MVP 0; OIDC provider later | Smallest working auth; standards-based upgrade path |
 | Oct 2026 | Payments only in Stripe test mode | Learning value without legal and tax obligations |
 | Oct 2026 | Proposed: OVHcloud VPS 1 for tests | Price, EU provider with a Polish location; Hetzner's cheap line not orderable |
+| Oct 2026 | Umbrella domain `damiankowalski.pl`: registrar OVHcloud, DNS on Cloudflare (Free) | Neutral personal name that fits any product; `.pl` natural for Polish users with a moderate renewal at OVHcloud (58.99 PLN net per year); one account fewer (OVHcloud is also the VPS provider); Cloudflare Registrar does not sell `.pl` |
+| Oct 2026 | DNS zone holds only `TXT v=spf1 -all` until stage 4 | The domain sends no e-mail; makes spoofing of the personal-name domain harder |
+| Oct 2026 | DNSSEC on: Cloudflare signs the zone, DS set at the registry via OVHcloud | Integrity of DNS answers, incl. future mail records and certificate checks; free, keys managed by Cloudflare. Rule: remove the DS first before disabling DNSSEC or changing the DNS provider (`SAAS_INFRA.md` §4.3) |
+| Oct 2026 | Cloudflare account: Google sign-in only, no Cloudflare password or own 2FA (accepted risk) | Setting a password via "forgot password" did not work; the Google account has 2FA. A Cloudflare password is needed for API tokens; MVP 0 should not need one (§10) |
+| Oct 2026 | Cinema City terms (R2): personal and learning use within the guardrails; stage 5 testers invite-only and free; no public launch or payments without written consent from Cinema City; no Cinema City / IMAX logos, state independence | E-services terms (current text in force since Oct 2023): no explicit ban on automated reads; forbid reproducing or distributing site content and data without consent; links only to the home page and without benefit; users are natural persons; access can be withdrawn at any time |
+| Oct 2026 | Likely audience: the owner only. Plans, trial and Stripe test-mode payments stay on the roadmap as self-tests | Learning value even without outside users |
+| Oct 2026 | Infrastructure as built documented in `SAAS_INFRA.md` (state, work log, runbooks, glossary) | This file stays plan and decisions; the infrastructure log grows with every stage |
 
 ---
 
@@ -307,13 +325,12 @@ as a learning exercise → Cloudflare Workers experiment → Android app as a cl
 
 | Question | Options / notes |
 | --- | --- |
-| Umbrella domain name and TLD | `.com` / `.dev` / `.app` via Cloudflare Registrar, or `.pl` at a Polish registrar |
 | Front end | Blazor (C#, shared models, maybe reuse of `CinemaWatch.ViewModels`) vs React / TypeScript |
 | Development database | PostgreSQL installed on Windows vs Docker Desktop |
 | Web and worker | Two containers from the start vs one process with hosted background services in MVP 0 |
 | Check interval | Fixed 15 minutes in MVP 0; adaptive rules (§4.3) tuned with the stage 2 data |
 | E-mail provider | See §8.3 |
-| Cinema City terms | Findings after stage 1 |
+| Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed |
 
 ---
 
@@ -333,6 +350,9 @@ as a learning exercise → Cloudflare Workers experiment → Android app as a cl
 ---
 
 ## 12. Glossary (SaaS terms)
+
+Infrastructure terms (domains, DNS, DNSSEC, e-mail authentication, accounts) are in
+[`SAAS_INFRA.md`](SAAS_INFRA.md) §6.
 
 | Term | Meaning |
 | --- | --- |
