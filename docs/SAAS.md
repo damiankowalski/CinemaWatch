@@ -260,8 +260,8 @@ interchangeable.
   version (e.g. a `Directory.Build.props` in their folder). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests; the `linux` job (since the
-  probe) runs the shared tests and the probe tests on Linux and publishes the probe; container images come in
-  stage 4. The probe itself is not released: it has its own version in its project file and no tag.
+  probe) runs the shared tests and the probe tests on `ubuntu-26.04` (the server's release) and publishes the
+  probe; container images come in stage 4. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
 - Conventions from KB §7 apply: English code and docs, UI texts via `T("polski", "English")`, tests for every
   behaviour change, no secrets in the repository (configuration via environment variables and GitHub Secrets).
 
@@ -419,6 +419,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Probe as a `systemd` service with `DynamicUser` and a timer, not as `ubuntu` | No account to maintain; the process cannot use sudo or touch the system - `ubuntu` has passwordless sudo |
 | Nov 2026 | Probe built without ICU (invariant globalization); "now" from `PolishTime` (Europe/Warsaw) | Nothing to install on the server; `Localizer` needs no ICU then; the server clock is UTC (KB §4) |
 | Nov 2026 | Control group for R1: the same profiles in the desktop app at home during the test | Separates "the datacenter IP is blocked" from "the API changed" |
+| Nov 2026 | CI: actions on Node 24 (`checkout@v7`, `setup-dotnet@v6`, also in `release.yml`); the Linux job pinned to `ubuntu-26.04`; `*.service` / `*.timer` always with LF line ends | GitHub retires Node 20 for actions; `ubuntu-latest` moves on its own schedule, the pinned label matches the server; a CR from a Windows checkout would break the systemd units |
 
 ---
 
