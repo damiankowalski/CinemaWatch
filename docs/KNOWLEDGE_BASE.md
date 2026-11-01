@@ -4,8 +4,8 @@
 > Order of trust when something disagrees: **repository code** > **this document** > chat history.
 > Keep it current: update *Status*, *Version history* and *Decision log* with every release or decision.
 >
-> Last updated: 31 October 2026 (desktop 1.4.0; SaaS stage 1 done - plan in [`docs/SAAS.md`](SAAS.md),
-> infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
+> Last updated: 1 November 2026 (desktop 1.4.0; SaaS stage 2 in progress: VPS in Warsaw set up and hardened - plan in
+> [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
 
 ---
 
@@ -23,7 +23,7 @@ It only **reads** public seat information. It never logs in, never creates a car
 | Original PowerShell script | Done, kept in `scripts/CinemaWatch.ps1` | E-mail notifications via Gmail SMTP; the origin of the project |
 | **Desktop (Windows)** | **1.4.0 stable** - feature-complete for now | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
 | Android | Planned - concept agreed, nothing built | "Proxy" that checks profiles exported by the desktop app |
-| SaaS (web) | Planning - stage 1 done (domain, DNS); no server yet | Web app; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
+| SaaS (web) | Stage 2 in progress - VPS (OVHcloud, Warsaw) set up and hardened; next the risk test from it | Web app; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
 
 ---
 
@@ -73,8 +73,9 @@ SaaS track - goals, risks, target architecture, MVP, plan, hosting choice and it
   e-mail notifications. The wizard and hall map follow in MVP 1.
 - First technical step: a risk test of polling Cinema City from a datacenter IP (see §10).
 - Hosted infrastructure only (Linux VPS + Docker + Cloudflare); an on-prem lab is parked.
-- What has been set up so far (accounts, domain `damiankowalski.pl`, DNS on Cloudflare, DNSSEC), with a work log,
-  runbooks and an infrastructure glossary: **[`docs/SAAS_INFRA.md`](SAAS_INFRA.md)**.
+- What has been set up so far (accounts, domain `damiankowalski.pl`, DNS on Cloudflare, DNSSEC, a hardened VPS in
+  Warsaw with Ubuntu 26.04 LTS), with a work log, runbooks and an infrastructure glossary:
+  **[`docs/SAAS_INFRA.md`](SAAS_INFRA.md)**.
 
 ---
 

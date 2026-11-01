@@ -5,9 +5,12 @@
 > The provider panels (OVHcloud, Cloudflare) are the source of truth for live settings; update this file with every
 > change: the state (§1), the work log (§3) and, if needed, the runbooks (§4) and the glossary (§6).
 > **No secrets here** - no passwords, recovery codes, API keys or tokens; they live in the owner's password manager.
-> Everything below is public anyway (DNS data is public).
+> **No server addresses either** - the server's IPv4 / IPv6 and host name stay out of this public repository (behind
+> Cloudflare Tunnel the origin must stay unknown); runbooks write `<server-ip>`, the real value is in the password
+> manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
+> public by design).
 >
-> Last updated: 31 October 2026 - stage 1 done (accounts, domain, DNS, DNSSEC). No server yet.
+> Last updated: 1 November 2026 - stage 2: VPS ordered (OVHcloud VPS-1, Warsaw) and hardened. Next: the risk test (R1).
 
 ---
 
@@ -26,8 +29,9 @@
 | DNS records | One: `TXT damiankowalski.pl "v=spf1 -all"` (the domain sends no e-mail) |
 | DNSSEC | On since 31 Oct 2026: Cloudflare signs the zone; DS at the registry with key tag 2371, algorithm 13, digest type 2 |
 | Cloudflare zone extras | AI crawler policy at defaults (allow); Bot Preference Sync on (robots.txt) - irrelevant until a site exists |
-| Website / e-mail / server | None yet (server: stage 2, e-mail: stage 4) |
-| Costs | Domain 16.69 PLN net (20.53 PLN gross) for the first year, then 58.99 PLN net (72.56 PLN gross) per year; Cloudflare Free 0 |
+| Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026, hardened (§1.3) |
+| Website / e-mail | None yet (both stage 4) |
+| Costs | Domain 16.69 PLN net (20.53 PLN gross) for the first year, then 58.99 PLN net (72.56 PLN gross) per year; Cloudflare Free 0; VPS about 19.20 PLN net (23.62 PLN gross) per month (cart price on 1 Nov 2026 - confirm on the first invoice) |
 
 ### 1.1 Accounts
 
@@ -36,7 +40,8 @@
 | GitHub | Repository, CI; later container images (GHCR) | Password | Yes |
 | Google | Sign-in to Cloudflare | Password | Yes |
 | Cloudflare | DNS, DNSSEC; later Tunnel and Access | "Sign in with Google" only, no Cloudflare password | No own 2FA - accepted risk (§1.2) |
-| OVHcloud | Registrar; VPS from stage 2 | Password | Yes |
+| OVHcloud | Registrar; VPS and its KVM console (since 1 Nov 2026) | Password | Yes |
+| Server user `ubuntu` | Administering the VPS | SSH key only (§1.3); its password works only on the KVM console | The key file plus its passphrase |
 | E-mail provider | Transactional e-mail | - | Stage 4 |
 
 Passwords and recovery codes are in the owner's password manager. The accounts use the owner's existing e-mail
@@ -51,6 +56,34 @@ address, not an address on the new domain: losing the domain must not lock the o
   support.
 - **Personal name in the domain.** Visible in URLs and e-mail senders. Fine for learning; a product that becomes real
   gets its own domain.
+- **Passwordless sudo for `ubuntu`.** Whoever gets an SSH session as `ubuntu` is root. Mitigation: key-only login and
+  a passphrase on the key. A sudo password would be one more secret to manage.
+- **One SSH key on one PC.** If the PC or the key file is lost, access goes through the KVM console (§4.9). The
+  encrypted key file is backed up in the password manager.
+- **SSH port 22 open to the internet.** Key-only login, so bots have nothing to guess; rate limiting or fail2ban is
+  in the backlog ([`SAAS.md`](SAAS.md) §11).
+
+### 1.3 Server (VPS)
+
+| Item | Value |
+| --- | --- |
+| Provider / model | OVHcloud, range "VPS 2027", model VPS-1: 2 vCores, 4 GB RAM, 40 GB NVMe (38 GB usable); no swap yet |
+| Location | Warsaw (WAW), Poland; OpenStack region `os-waw2` |
+| Ordered / billing | 1 Nov 2026; monthly, no commitment |
+| Provider backup | Automated Backup Standard (daily, last 24 h), in the order as a promotion - check the invoice |
+| Addresses | One IPv4, one IPv6 - **not recorded here** (password manager, OVHcloud panel) |
+| System | Ubuntu 26.04.1 LTS; kernel 7.0.0-42 after the first update; `sudo` is sudo-rs (Ubuntu 26.04 default) |
+| Time | Time zone `Etc/UTC` (decision: stays UTC); clock synchronised |
+| Host key (server identity) | ED25519 `SHA256:87XQpd1kTc/ZaNB2h6C3FpNUb+e6hZpTSgX2moBx+uI` - compare on the first connection from any device |
+| Login | User `ubuntu`, SSH key only; password login off; root login off (§4.10) |
+| Owner's SSH key | ed25519 with a passphrase on the development PC, `SHA256:OSzKjZeroCXb1qjlUzWLZBaUcrzAB0t2PnirmonCrew`; the encrypted key file is backed up in the password manager |
+| `ubuntu` password | In the password manager; used only on the KVM console |
+| sudo | Passwordless for `ubuntu`, granted by the cloud image (a sudoers drop-in), not by the `sudo` group |
+| SSH settings | Drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (§2.2, §4.10) |
+| Firewall | `ufw` active: incoming denied except 22/tcp (IPv4 + IPv6), outgoing allowed, routed disabled, logging low (§4.11) |
+| Updates | `unattended-upgrades` installs security updates daily; `/etc/apt/apt.conf.d/52unattended-upgrades-local` reboots at 03:30 UTC when needed (§4.12) |
+| Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9) |
+| Our services | None yet (Probe: rest of stage 2; containers: stage 4) |
 
 ---
 
@@ -92,6 +125,43 @@ Device --> resolver (e.g. 1.1.1.1; caches answers for the TTL)
   nothing.
 - **Obligation.** Before disabling DNSSEC or moving the nameservers away from Cloudflare, remove the DS at the
   registrar first and wait (§4.3). The reverse order makes the domain unreachable for validating resolvers.
+
+### 2.2 The server and SSH access
+
+```
+Development PC (Windows)                              VPS (Warsaw)
+  .ssh\id_ed25519   private key (passphrase)
+  .ssh\known_hosts  server's host key  --- SSH, port 22 --->  ufw: only 22/tcp in, all out
+                                                              sshd: key only, no root, no passwords
+                                                              ~ubuntu/.ssh/authorized_keys: public key
+OVHcloud panel --> KVM console (user ubuntu + password) --->  local login; bypasses SSH and ufw
+```
+
+- **Key pair.** The private key (`id_ed25519`) is like a seal: only it can make a signature. It stays on the PC,
+  locked by the passphrase. The public key (`id_ed25519.pub`) is like the seal's pattern: anyone may have it, it
+  checks signatures but cannot make them. The pattern sits on the server in `authorized_keys`.
+- **Login.** (1) The server shows its host key; the PC compares it with `known_hosts` - this proves it is the right
+  server. (2) The server sends a random challenge. (3) The PC unlocks the private key with the passphrase and signs
+  the challenge locally. (4) The server checks the signature against `authorized_keys`. Neither the private key nor
+  the passphrase ever leaves the PC.
+- **First connection (TOFU).** `ssh` cannot know the host key yet and asks; compare the fingerprint with §1.3, then
+  it is stored in `known_hosts` and checked automatically. A later `REMOTE HOST IDENTIFICATION HAS CHANGED` means
+  stop, unless the server was reinstalled.
+- **Where the SSH settings live.** `sshd` reads `/etc/ssh/sshd_config` and the drop-ins in
+  `/etc/ssh/sshd_config.d/` in alphabetical order, and **the first value found wins**. The cloud image ships its own
+  drop-ins (which allowed passwords); our `00-hardening.conf` is read first, so it wins, and deleting it undoes the
+  change. The same pattern is used for APT (`52unattended-upgrades-local`): never edit the package's own files.
+- **Which window am I in?** `PS C:\…>` is Windows (PowerShell), `ubuntu@vps-…:~$` is the server (bash). A PowerShell
+  command pasted into the SSH session runs on the server and fails (stage 2 step 3).
+
+If files in `C:\Users\<user>\.ssh` are lost:
+
+| File | What it is | If lost |
+| --- | --- | --- |
+| `id_ed25519.pub` | Public key | Nothing: recreate it with `ssh-keygen -y -f id_ed25519` |
+| `known_hosts` | Host keys of known servers | Nothing: the next connection asks again; compare with §1.3 |
+| `id_ed25519` | **Private key** | No SSH access (passwords are off): restore it from the password manager, or use the KVM console and add a new key (§4.8) |
+| `id_ed25519` stolen | - | The thief also needs the passphrase. Rotate anyway: new key in, old line out of `authorized_keys` (§4.8) |
 
 ---
 
@@ -138,11 +208,40 @@ Device --> resolver (e.g. 1.1.1.1; caches answers for the TTL)
       2371 and a digest matching Cloudflare's (§4.2).
 7. **Cinema City terms (R2)** read; findings and rules in [`SAAS.md`](SAAS.md) §9.
 
+### Stage 2 - server and hardening (1 Nov 2026)
+
+1. **SSH key.** ed25519 with a passphrase generated on the development PC (`ssh-keygen`); passphrase in the password
+   manager. Other files in `.ssh` are unrelated and not offered automatically (non-default names).
+2. **Ordering.** The OVHcloud configurator first offered VPS-1 only in Canada (Beauharnois) and in Europe only VPS-2
+   (France). Canada was rejected before paying (R1 not representative, EU hosting, location fixed); alternatives were
+   compared ([`SAAS.md`](SAAS.md) §8.2). Later the same day VPS-1 in Warsaw could be ordered: monthly, Ubuntu 26.04,
+   Automated Backup Standard as a promotion. Delivered with user `ubuntu`, password login on, root login with a key
+   allowed, firewall inactive, no swap.
+3. **First login** with the password from the OVHcloud delivery; host key fingerprint noted. The public key was added
+   to `~/.ssh/authorized_keys` from PowerShell (Windows has no `ssh-copy-id`, §4.8) and key login tested. Lesson: the
+   PowerShell command was first pasted into the SSH session and ran on the server (`Get-Content: command not found`,
+   then an SSH prompt from the server to itself; answered `no`, nothing changed) - check the prompt before pasting.
+4. **State check** (§4.14); the host key fingerprint seen from the server side matched the first connection.
+5. **Updates.** `apt update` + `apt full-upgrade` (the image was from August); new kernel 7.0.0-42. `needrestart`
+   reported "Pending kernel upgrade", so the server was rebooted; `sudo` (sudo-rs, an alternatives warning during the
+   upgrade) checked before and after the reboot.
+6. **SSH hardening.** Drop-in `00-hardening.conf` (§4.10), checked with `sshd -t` and `sshd -T`, reloaded, tested in
+   a second window: key login works, password and root are refused.
+7. **Firewall.** `ufw` defaults plus 22/tcp, enabled, tested: a new SSH session and `apt update` (outbound) work.
+8. **Automatic updates.** `unattended-upgrades` was already on; automatic reboot at 03:30 UTC added (§4.12); dry run
+   OK.
+9. **Way back.** Encrypted private key file backed up in the password manager; KVM console login as `ubuntu` tested.
+10. **Decisions** recorded in [`SAAS.md`](SAAS.md) §9: Warsaw, Ubuntu 26.04, user `ubuntu`, UTC, `ufw`, automatic
+    reboot, addresses out of the repository, Ansible in stage 4, no fail2ban.
+
 ---
 
 ## 4. Runbooks
 
-All commands: **Windows (PowerShell)**.
+Runbooks 4.1-4.6 (domain and DNS) run on **Windows (PowerShell)**. Server runbooks (4.7-4.14) mark every block as
+**Windows (PowerShell)** or **server (bash, over SSH)**. `<server-ip>` = the server's IPv4 from the password manager
+or the OVHcloud panel - never write it into the repository. Before a change to SSH or the firewall, keep one SSH
+session open and test in a second window.
 
 ### 4.1 Check the nameservers
 
@@ -198,12 +297,195 @@ Automatic every year at OVHcloud (next: before 30 Oct 2027). Keep a valid paymen
 renewal e-mails. An expired domain stops working (DNS, e-mail, sites), and after the registry's grace period someone
 else can register it.
 
+### 4.7 Connect to the server
+
+Windows (PowerShell):
+
+```powershell
+ssh ubuntu@<server-ip>
+```
+
+Expected: the passphrase prompt for `id_ed25519`, then the server prompt `ubuntu@vps-…:~$`. On the first connection
+from a device (or after `known_hosts` was lost) `ssh` asks about the host key: answer `yes` only if the fingerprint
+matches §1.3. `REMOTE HOST IDENTIFICATION HAS CHANGED` means stop - unless the server was reinstalled; then forget
+the old key with `ssh-keygen -R <server-ip>` and update §1.3.
+
+### 4.8 Add, replace or remove an SSH key
+
+New key pair, Windows (PowerShell); passphrase into the password manager, the key file as an attachment too:
+
+```powershell
+ssh-keygen -t ed25519 -C "damian@$env:COMPUTERNAME" -f "$env:USERPROFILE\.ssh\id_ed25519"
+```
+
+With a working key, add another public key (Windows, PowerShell; `<other-key>` = the new key's file name):
+
+```powershell
+Get-Content "$env:USERPROFILE\.ssh\<other-key>.pub" | ssh ubuntu@<server-ip> "cat >> ~/.ssh/authorized_keys"
+```
+
+Without a working key (key lost): log in on the KVM console (§4.9) and allow passwords for a moment (server):
+
+```bash
+sudo mv /etc/ssh/sshd_config.d/00-hardening.conf /root/00-hardening.conf.off && sudo systemctl reload ssh
+```
+
+Then add the key with the server password (Windows, PowerShell):
+
+```powershell
+Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub" | ssh ubuntu@<server-ip> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+```
+
+and switch passwords off again (server), then run the tests of §4.10:
+
+```bash
+sudo mv /root/00-hardening.conf.off /etc/ssh/sshd_config.d/00-hardening.conf && sudo sshd -t && sudo systemctl reload ssh
+```
+
+Remove an old key (server): list the keys, delete the old key's line in the editor (`Ctrl+K` deletes a line,
+`Ctrl+O` saves, `Ctrl+X` exits), list again:
+
+```bash
+ssh-keygen -lf ~/.ssh/authorized_keys
+nano ~/.ssh/authorized_keys
+ssh-keygen -lf ~/.ssh/authorized_keys
+```
+
+A leaked or stolen key is rotated (new key in, old line out), not just deleted on the PC.
+
+### 4.9 Emergency access: KVM console
+
+OVHcloud panel → the VPS → KVM console. Log in as `ubuntu` with the password from the password manager (the password
+works here, not over SSH). The console is a screen and keyboard attached to the VM: `ufw` and the SSH settings do not
+apply. If a password with special characters is refused, suspect the console's keyboard layout. Last resorts: rescue
+mode, or a reinstall and rebuild (§4.13). Tested 1 Nov 2026.
+
+### 4.10 SSH: key-only login, no root (apply, check, undo)
+
+Server (bash, over SSH):
+
+```bash
+sudo tee /etc/ssh/sshd_config.d/00-hardening.conf > /dev/null <<'EOF'
+# Stage 2 hardening (docs/SAAS_INFRA.md): key-only login, no root login
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+PubkeyAuthentication yes
+EOF
+sudo sshd -t && echo "config OK"
+sudo sshd -T | grep -E "^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication) "
+sudo systemctl reload ssh
+```
+
+Expected: `config OK`, then `permitrootlogin no`, `pubkeyauthentication yes`, `passwordauthentication no`,
+`kbdinteractiveauthentication no`. An error from `sshd -t`: do not reload, delete the file. Keep the session open and
+test in a new window, Windows (PowerShell):
+
+```powershell
+ssh ubuntu@<server-ip>
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password ubuntu@<server-ip>
+ssh root@<server-ip>
+```
+
+Expected: the first logs in; the other two end with `Permission denied (publickey).` without asking for a password.
+
+Undo (server): `sudo rm /etc/ssh/sshd_config.d/00-hardening.conf && sudo systemctl reload ssh` - back to the
+delivered state (passwords allowed).
+
+### 4.11 Firewall (`ufw`)
+
+Server (bash, over SSH) - rules first, then enable:
+
+```bash
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp comment 'SSH'
+sudo ufw show added
+sudo ufw enable
+sudo ufw status verbose
+```
+
+Expected: `show added` lists `ufw allow 22/tcp comment 'SSH'` (if not, do not enable); `enable` asks
+`Proceed with operation (y|n)?` → `y`; status shows `Status: active`,
+`Default: deny (incoming), allow (outgoing), disabled (routed)` and `22/tcp ALLOW IN Anywhere # SSH` plus the same
+for `(v6)`. Test: a new SSH session (§4.7) and `sudo apt update` (outbound). Blocked attempts in the last hour:
+`sudo journalctl -k --since "1 hour ago" | grep -c "UFW BLOCK"`.
+
+Undo: `sudo ufw disable` (also works on the KVM console). Note for stage 4: ports published by Docker bypass `ufw`;
+our containers publish none.
+
+### 4.12 Updates (manual and automatic)
+
+Manual, server (bash, over SSH):
+
+```bash
+sudo apt update && sudo apt full-upgrade -y
+[ -f /var/run/reboot-required ] && cat /var/run/reboot-required || echo "no reboot needed"
+```
+
+Dialogs: accept the defaults; for `/etc/ssh/sshd_config` keep the local version. `Pending kernel upgrade!` from
+`needrestart` means a reboot is needed: check `sudo -n true && echo "sudo OK"`, then `sudo reboot`, reconnect after
+1-2 minutes (§4.7) and check `uname -r; uptime`.
+
+Automatic: `unattended-upgrades` (on by default) installs security updates daily from `apt-daily-upgrade.timer`
+(early morning UTC). Our drop-in adds the reboot, server (bash, over SSH):
+
+```bash
+sudo tee /etc/apt/apt.conf.d/52unattended-upgrades-local > /dev/null <<'EOF'
+// Stage 2 hardening (docs/SAAS_INFRA.md): reboot automatically when an update requires it
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:30";
+EOF
+apt-config dump | grep -E "Unattended-Upgrade::Automatic-Reboot|APT::Periodic::(Update-Package-Lists|Unattended-Upgrade) "
+sudo unattended-upgrade --dry-run --debug 2>&1 | grep -E "Allowed origins|No packages|Packages that will be upgraded|ERROR|Traceback"
+```
+
+Expected: both `APT::Periodic` values `"1"`, `Automatic-Reboot "true"`, `Automatic-Reboot-Time "03:30"`; the allowed
+origins include `-security`; no `ERROR` or `Traceback`. After an update that needs it, the reboot happens at the next
+03:30 UTC. Logs: `/var/log/unattended-upgrades/`. Undo: `sudo rm /etc/apt/apt.conf.d/52unattended-upgrades-local`
+(updates continue, without the automatic reboot).
+
+### 4.13 Rebuild the server from scratch (until the Ansible playbook exists)
+
+1. OVHcloud panel: reinstall the VPS with Ubuntu 26.04 LTS (all data on the server is lost).
+2. Windows (PowerShell): `ssh-keygen -R <server-ip>` (forget the old host key).
+3. First login with the password from OVHcloud (§4.7); note the new host key fingerprint.
+4. Add the key (§4.8, `mkdir -p ~/.ssh …` variant) and test key login.
+5. Updates and reboot (§4.12, manual part).
+6. SSH hardening (§4.10), firewall (§4.11), automatic reboot (§4.12, automatic part).
+7. Check the state (§4.14); update §1.3 (host key fingerprint, kernel) and the work log (§3).
+
+About 30 minutes. In stage 4 this becomes one Ansible run ([`SAAS.md`](SAAS.md) §7).
+
+### 4.14 Check the server state (read only)
+
+Server (bash, over SSH):
+
+```bash
+echo "== system =="; . /etc/os-release; echo "$PRETTY_NAME"; uname -r
+echo "== user =="; whoami; id; sudo -n true 2>/dev/null && echo "sudo: no password" || echo "sudo: asks for a password"
+echo "== resources =="; nproc; free -h; df -h /
+echo "== time =="; timedatectl | grep -E "Time zone|synchronized"
+echo "== ssh =="; sudo sshd -T | grep -E "^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication) "; ls -la ~/.ssh
+echo "== firewall =="; sudo ufw status verbose
+echo "== updates =="; apt list --upgradable 2>/dev/null | tail -n +2 | wc -l
+echo "== host key =="; ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+Expected: the values of §1.3 - Ubuntu 26.04 LTS, `sudo: no password`, 2 CPUs, about 3.7 GiB RAM, `Etc/UTC` and
+synchronised, `permitrootlogin no` / `passwordauthentication no`, `ufw` active with 22/tcp only, the host key
+fingerprint of §1.3. The update count is only current after `sudo apt update`.
+
 ---
 
 ## 5. Next infrastructure steps
 
-Stage 2 of [`SAAS.md`](SAAS.md) §7: SSH key, the OVHcloud VPS (Ubuntu 24.04 LTS), basic hardening and the risk test
-(R1). Each step will be added to §1 and §3 of this file.
+- Rest of stage 2 of [`SAAS.md`](SAAS.md) §7: `CinemaWatch.Probe` (code on `feature/saas-probe`), run from a systemd
+  timer every 10-15 minutes for 5-7 days, then the decision gate (R1).
+- Stage 4: the Ansible playbook first (stage 2 hardening as code, verified by a reinstall), then swap, Docker and
+  Compose, a `deploy` user, Cloudflare Tunnel and Access, e-mail records, backups.
+
+Each step will be added to §1 and §3 of this file.
 
 ---
 
@@ -301,3 +583,59 @@ Stage 2 of [`SAAS.md`](SAAS.md) §7: SSH key, the OVHcloud VPS (Ubuntu 24.04 LTS
 | Cloudflare Free plan | Free DNS, DNSSEC, proxy, TLS certificates and basic protection |
 | AI crawler policy / Bot Preference Sync | Zone settings that tell AI and search bots what they may do on the owner's site, written into robots.txt |
 | robots.txt | File that tells crawlers what they may visit; a convention, not enforcement |
+
+### Servers and Linux
+
+| Term | Meaning |
+| --- | --- |
+| VPS | Virtual private server: a rented virtual machine with its own system and guaranteed CPU / RAM |
+| KVM (virtualisation) | Full hardware virtualisation: the VM has its own kernel, so Docker and firewalls work; OpenVZ / LXC "VPS" share the host's kernel |
+| Cloud image | Prepared system the provider installs; brings defaults such as the `ubuntu` user |
+| cloud-init | Tool that configures a cloud image at first boot (user, keys, network, SSH settings) |
+| LTS | Long-term support Ubuntu release: 5 years of standard updates (26.04: until 2031) |
+| Kernel | Core of the operating system; a new kernel runs only after a reboot |
+| root | Administrator account; direct login disabled here |
+| `sudo` | Runs one command as root; on Ubuntu 26.04 implemented by sudo-rs |
+| Drop-in file | Small extra configuration file in a `*.d/` folder that overrides defaults without editing the package's files |
+| `apt` | Ubuntu's package manager: `update` refreshes the lists, `full-upgrade` installs the updates |
+| `needrestart` | Reports services and kernels that need a restart after updates |
+| `unattended-upgrades` | Installs security updates automatically; here also reboots at 03:30 UTC when needed |
+| systemd, unit, timer | Ubuntu's service manager; a timer starts a unit on a schedule (planned for the Probe) |
+| Firewall, `ufw` | Filters network connections; `ufw` ("uncomplicated firewall") is Ubuntu's simple front end, for IPv4 and IPv6 |
+| Default deny | Everything not explicitly allowed is blocked |
+| Port | Number that identifies a service on a server (SSH = 22/tcp) |
+| KVM console | Screen and keyboard of the VM in the provider's panel; works without SSH, firewall rules do not apply |
+| Rescue mode | Starts the VPS from a separate system to repair its disk |
+| Swap | Disk space used when RAM runs out; none yet, 2 GB planned in stage 4 |
+| UTC | Coordinated Universal Time, without daylight saving time; the server's time zone |
+| Anti-DDoS, blackholing | Protection against floods of traffic; blackholing drops all traffic to the attacked IP, so the server goes offline |
+
+### SSH
+
+| Term | Meaning |
+| --- | --- |
+| SSH | Secure Shell: encrypted remote login to a server's command line |
+| Key pair | Private key plus its public key, generated together with `ssh-keygen` |
+| Private key | Stays on the owner's PC (`id_ed25519`); signs the login challenge; never shared |
+| Public key | May be shared (`id_ed25519.pub`); lets a server check signatures made with the private key |
+| Passphrase | Password that encrypts the private key file on disk; never sent to the server |
+| ed25519 | Modern, short key type; the OpenSSH default |
+| `authorized_keys` | File on the server (`~/.ssh/authorized_keys`) with the public keys allowed to log in as that user |
+| Host key | The server's own key pair; proves to the client that it reached the right server |
+| `known_hosts` | File on the client with the host keys of servers seen before |
+| Fingerprint | Short hash of a key (`SHA256:…`) for comparing keys by eye; public |
+| TOFU | Trust on first use: the first connection accepts the host key after a manual check, later ones are checked automatically |
+| `sshd` | The SSH server; settings in `/etc/ssh/sshd_config` and drop-ins in `sshd_config.d/` (first value wins) |
+| `ssh-agent` | Optional service that keeps an unlocked key in memory so the passphrase is typed less often; not used |
+| `ssh-copy-id` | Linux / macOS helper that adds a public key to a server; Windows has none (§4.8 does the same) |
+
+### Configuration as code
+
+| Term | Meaning |
+| --- | --- |
+| Infrastructure as code | Server configuration kept as versioned files instead of manual steps |
+| Ansible | Brings servers to a described state over SSH, without an agent on the server; files in YAML (planned for stage 4) |
+| Playbook, role | Ansible file (or reusable part) that describes the desired state |
+| Inventory | List of servers Ansible manages; contains addresses, so it stays out of git here |
+| Control node | Machine that runs Ansible: Linux, macOS or WSL2, not native Windows |
+| Idempotency (configuration) | Running the same playbook again changes only what differs |

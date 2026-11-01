@@ -3,14 +3,14 @@
 > Companion to [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md). The product, the Cinema City API, the domain rules and the
 > profile format live there and are not repeated here. This document covers the SaaS (web) track: goals, risks,
 > target architecture, the MVP, the plan and the decisions. What has actually been set up (accounts, domain, DNS,
-> later servers), with a work log, runbooks and an infrastructure glossary, lives in [`SAAS_INFRA.md`](SAAS_INFRA.md).
+> the VPS), with a work log, runbooks and an infrastructure glossary, lives in [`SAAS_INFRA.md`](SAAS_INFRA.md).
 > Order of trust: **repository code** > **KNOWLEDGE_BASE.md** > **this document** > chat history. For live
 > infrastructure settings the provider panels are the source of truth; `SAAS_INFRA.md` records them.
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 31 October 2026. Status: **stage 1 done** - accounts, domain `damiankowalski.pl`, DNS on Cloudflare
-> with DNSSEC; no server yet.
+> Last updated: 1 November 2026. Status: **stage 2 in progress** - VPS ordered (OVHcloud VPS-1, Warsaw) and hardened;
+> next: `CinemaWatch.Probe` and the risk test (R1).
 
 ---
 
@@ -132,11 +132,15 @@ safety net against application bugs.
 
 ### 4.4 Hosting and infrastructure
 
-- **Server:** one Linux VPS in the EU with Docker and Docker Compose. One server, many containers; future products
-  get their own subdomains on the same server.
+- **Server:** one Linux VPS in the EU with Docker and Docker Compose: OVHcloud VPS-1 in Warsaw with Ubuntu 26.04 LTS,
+  ordered in stage 2 (state and runbooks: [`SAAS_INFRA.md`](SAAS_INFRA.md)). One server, many containers; future
+  products get their own subdomains on the same server. Requirements and sizing: §4.6.
+- **Addresses:** the server's IP addresses and host name never go into this public repository; with the tunnel the
+  origin stays unknown, so nobody can bypass Cloudflare.
 - **Edge:** Cloudflare Free plan in front. The server runs `cloudflared` (Cloudflare Tunnel): it opens an outbound
   connection to Cloudflare, so no web ports are opened on the server (only SSH) and no TLS certificates are needed
-  on the server. Cloudflare Access protects staging.
+  on the server. Cloudflare Access protects staging. The host firewall (`ufw`) lets in SSH only. Containers publish no
+  ports: ports published by Docker bypass `ufw`.
 - **Domain:** `damiankowalski.pl` - one "umbrella" domain for all future products, subdomains per product and
   environment (e.g. `cinemawatch.damiankowalski.pl`, `staging-cinemawatch.damiankowalski.pl`; first-level names, so
   Cloudflare's free certificate covers them). Registrar OVHcloud, DNS on Cloudflare, DNSSEC on. Current state and
@@ -162,6 +166,43 @@ safety net against application bugs.
 - **Real money** means being a seller (VAT, consumer law, invoices, terms). A Merchant of Record (Paddle, Lemon
   Squeezy, Stripe Managed Payments) takes this over for a higher fee. Not without written consent from Cinema City
   (R2, §9).
+
+### 4.6 VPS requirements and sizing (Nov 2026)
+
+What a server must offer for the whole plan, from MVP 0 to the full vision:
+
+| Requirement | Why |
+| --- | --- |
+| Full virtualisation (KVM, VMware, Xen HVM), not OpenVZ / LXC | Docker, k3s and the firewall need their own kernel |
+| x86-64 (amd64) | Images are built on GitHub Actions for amd64; ARM means multi-arch builds |
+| Ubuntu LTS image or own ISO | Ubuntu 26.04 LTS in use |
+| EU location, preferably Poland | GDPR (R3); latency for Polish users |
+| Own static public IPv4 (+ IPv6), no NAT | SSH; the Cinema City polling comes from this IP (R1) |
+| Inbound TCP and UDP ports can be opened | Today SSH only; TURN or a game server needs more (below) |
+| Emergency console (KVM / VNC), rescue mode, reinstall from the panel | Way back when SSH is locked out |
+| Provider backup or snapshot at least every 24 h | Plus our own `pg_dump` off the server (stage 4) |
+| Monthly or hourly billing | No yearly commitment while learning |
+| 2FA on the provider panel | Whoever has the panel has the server |
+| Terms allow automated HTTP requests (and game servers) | Polling; possible game server |
+| NVMe disk, at least 40 GB; any transfer limit (we use a few GB a day) | Images, logs, database |
+
+Sizing (estimates; measure with `docker stats` in stage 4):
+
+| Scope | Components | RAM | Server |
+| --- | --- | --- | --- |
+| MVP 0 | OS + Docker, PostgreSQL, web, worker, `cloudflared` | about 1-1.5 GB | 2 vCPU / 4 GB / 40 GB (current VPS-1) |
+| Full vision | MVP 0 + staging next to production, Keycloak, RabbitMQ, Prometheus / Grafana, k3s | about 4-6 GB | 4 vCPU / 8 GB / 80 GB |
+
+OVHcloud upgrades a VPS in place within the same data centre; a smaller plan or another location means a new order
+and a migration.
+
+**Game servers (other projects, e.g. swapDuel).** A static game page and a PeerJS signalling server fit behind the
+tunnel. A TURN server (coturn) or an authoritative UDP game server does not: it needs direct inbound UDP/TCP ports,
+"DNS only" records, temporary TURN credentials, anti-DDoS better than blackholing, steady CPU and a location close to
+the players (Poland). TURN over TLS also needs a certificate on the server (DNS-01 with a Cloudflare API token, which
+the account cannot create today, or HTTP-01 on port 80). Such a server goes on a separate small VPS (or a managed TURN
+service): an attack on the game's IP must not take down this server's SSH and polling, and this server keeps the
+"SSH only" model (§9).
 
 ---
 
@@ -233,10 +274,12 @@ Each stage ends with an update of this document.
 - [x] Hosting account (OVHcloud). The VPS itself is ordered at the start of stage 2 (monthly billing).
 - [x] Cinema City terms of use read (R2); findings in §9.
 
-### Stage 2 - First server and the risk test (R1)
-- [ ] SSH key on Windows (built-in OpenSSH); order the VPS (Ubuntu 24.04 LTS); first login.
-- [ ] Basic hardening: own user with sudo, key-only SSH, no root login, firewall (SSH only), automatic security
-      updates, time zone.
+### Stage 2 - First server and the risk test (R1) (server part done 1 Nov 2026; details in `SAAS_INFRA.md` §3)
+- [x] SSH key on Windows (built-in OpenSSH; ed25519 with a passphrase, backup in the password manager); VPS ordered:
+      OVHcloud VPS-1 in Warsaw, monthly, **Ubuntu 26.04 LTS** instead of 24.04 (§9); first login.
+- [x] Basic hardening: system updated; key-only SSH, no root login; `ufw` lets in SSH only; automatic security updates
+      with an automatic reboot at 03:30 UTC. Changed from the plan (§9): the image's `ubuntu` user is kept instead of
+      an own user; the time zone stays UTC. Emergency access through the KVM console tested.
 - [ ] `CinemaWatch.Probe`: console app on `CinemaWatch.Core`, published as a self-contained `linux-x64` single file;
       runs one check of a profile (KB §5.4) and logs time, endpoint, HTTP status and duration. No notifications.
 - [ ] Run it from a systemd timer every 10-15 minutes for 5-7 days on 2-3 real screenings.
@@ -249,8 +292,12 @@ Each stage ends with an update of this document.
 - [ ] Tests (reuse the fixtures from `tests/CinemaWatch.Tests`).
 
 ### Stage 4 - Deploy to the VPS (staging)
-- [ ] Docker + Compose on the VPS: `web`, `worker`, `postgres`, `cloudflared`.
-- [ ] GitHub Actions: build images → GHCR; deploy = pull + restart on the VPS.
+- [ ] Ansible playbook in `infra/ansible/` (first): the stage 2 hardening plus the setup below; the real inventory
+      (server address) stays out of git; verified by reinstalling the VPS from scratch. Control node: §10.
+- [ ] Swap file (2 GB) before Docker.
+- [ ] Docker + Compose on the VPS: `web`, `worker`, `postgres`, `cloudflared`; containers publish no ports (§4.4).
+- [ ] GitHub Actions: build images → GHCR; deploy = pull + restart on the VPS through a dedicated `deploy` user
+      with limited rights (its SSH key in GitHub Secrets).
 - [ ] Cloudflare Tunnel hostname for staging + Cloudflare Access for testers.
 - [ ] E-mail provider account with 2FA (moved from stage 1).
 - [ ] E-mail domain: SPF (replaces `v=spf1 -all`), DKIM, DMARC.
@@ -271,20 +318,33 @@ as a learning exercise → Cloudflare Workers experiment → Android app as a cl
 
 ## 8. Hosting for tests (checked Oct 2026)
 
-### 8.1 Proposal: OVHcloud VPS, range "VPS 2027", model VPS 1
+### 8.1 Chosen: OVHcloud VPS, range "VPS 2027", model VPS-1 (ordered 1 Nov 2026, Warsaw)
 
-- From €3.81 per month excl. VAT (OVHcloud, June 2026); IPv4 + IPv6, unlimited traffic, 99.9% SLA. Reviews list
-  2 vCores, 4 GB RAM, 40 GB NVMe and a daily backup - enough for MVP 0 (web, worker, PostgreSQL, cloudflared).
-- European provider with a Polish company and a data centre in Poland; choose a Polish location if VPS 1 offers it.
-- Monthly billing, no hourly billing - order it when stage 2 starts.
-- Weak points: support reputation; verify specs and price at checkout.
+- 2 vCores, 4 GB RAM, 40 GB NVMe, daily automated backup (last 24 h), IPv4 + IPv6, 500 Mbps, unlimited traffic,
+  anti-DDoS, KVM console in the panel - enough for MVP 0 (web, worker, PostgreSQL, cloudflared).
+- Price (Nov 2026): from 16.32 PLN net per month with a 12-month commitment; 19.20 PLN net (23.62 PLN gross) per
+  month without commitment in the cart (June 2026: from €3.81 net). Monthly billing, no hourly billing.
+- European provider with a Polish company and a data centre in Warsaw.
+- Availability changes quickly: on 1 Nov 2026 the configurator first offered VPS-1 only in Canada (Beauharnois) and
+  in Europe only VPS-2 (France, about twice the price); hours later VPS-1 in Warsaw could be ordered.
+- Avoid "Local Zone" locations: they do not support Docker.
+- Weak points: support reputation.
 
 ### 8.2 Alternatives considered
 
-| Option | Notes (Oct 2026) |
+Prices per month excluding VAT, checked Oct-Nov 2026.
+
+| Option | Notes |
 | --- | --- |
-| Hetzner Cloud | Good docs, hourly billing; but the cheap CX/CAX line could not be ordered in Sep-Oct 2026 and the available CPX22 costs about €20/month |
-| DigitalOcean, Vultr, Linode | Good docs, hourly billing; about $18-24/month for 2 vCPU / 4 GB |
+| Hetzner Cloud | Best price / spec and docs, hourly billing; but the cheap CX / CAX line could not be ordered (Sep-Oct 2026). CX23 (2 vCPU / 4 GB) €5.99 with IPv4 when available; CPX22 €19.99 |
+| Netcup | VPS 500 G12 (2 vCPU / 4 GB / 128 GB NVMe) €4.97 with IPv4, but a 12-month minimum term; Germany, Austria, Netherlands |
+| Scaleway | Warsaw location and hourly billing; DEV1-S (2 vCPU / 2 GB) about €10-11 with IPv4 - tight for MVP 0 |
+| Contabo | Many resources for little money (about €6.60 for 4 vCPU / 8 GB, monthly); weak performance in tests, IP ranges popular with bots (bad for R1) |
+| OVHcloud Public Cloud | Hourly billing; d2-4 (2 vCore / 4 GB) 0.09 PLN net per hour, about 66 PLN a month 24/7; OpenStack concepts |
+| Webh (Poland, Łódź) | KVM mini from 25 PLN (1-2 vCPU / 2-4 GB), hourly backups kept 21 days; 2 vCPU / 4 GB (KVM PRO) about 80 PLN; network protection is automatic blackholing only |
+| cyber_Folks (Poland) | vroot START (1 vCPU / 2 GB) 24.90 PLN, renewal 34 PLN; vroot RUN (2 vCPU / 4 GB / 60 GB NVMe) 49.90 PLN; extended anti-DDoS, backups up to 28 days |
+| Hostinger, Cal.pl, LH.pl | From a Polish affiliate ranking (jakwybrachosting.pl); not a fit: weekly backups only (Hostinger), not checked (Cal.pl), managed with DirectAdmin (LH.pl) |
+| DigitalOcean, Vultr, Linode | Good docs, hourly billing; about €21 ($18-24) for 2 vCPU / 4 GB |
 | Azure | Common in enterprises, free credits; expensive for a 24/7 server |
 | PaaS (Render, Railway, Fly.io) | Less server work; pay per component (web, worker, database) |
 | Cloudflare Workers / Containers | Possible, but means TypeScript (no `CinemaWatch.Core`) and lock-in; Containers need the $5 Workers Paid plan |
@@ -318,6 +378,17 @@ as a learning exercise → Cloudflare Workers experiment → Android app as a cl
 | Oct 2026 | Cinema City terms (R2): personal and learning use within the guardrails; stage 5 testers invite-only and free; no public launch or payments without written consent from Cinema City; no Cinema City / IMAX logos, state independence | E-services terms (current text in force since Oct 2023): no explicit ban on automated reads; forbid reproducing or distributing site content and data without consent; links only to the home page and without benefit; users are natural persons; access can be withdrawn at any time |
 | Oct 2026 | Likely audience: the owner only. Plans, trial and Stripe test-mode payments stay on the roadmap as self-tests | Learning value even without outside users |
 | Oct 2026 | Infrastructure as built documented in `SAAS_INFRA.md` (state, work log, runbooks, glossary) | This file stays plan and decisions; the infrastructure log grows with every stage |
+| Nov 2026 | VPS ordered: OVHcloud VPS-1 in Warsaw, monthly without commitment | As proposed in §8.1; the R1 test runs from a Polish datacenter IP, data stays in Poland (R3). VPS-1 in Canada (first offered) rejected: R1 not representative, against EU hosting, the location cannot change later |
+| Nov 2026 | Ubuntu 26.04 LTS instead of 24.04 | LTS with standard support until 2031; officially supported by Docker; the Probe is self-contained, so no .NET is needed on the server |
+| Nov 2026 | SSH: one ed25519 key with a passphrase (backup of the key file in the password manager); key-only login, no root login, port 22 | Bots cannot guess a key; another port would be cosmetic |
+| Nov 2026 | Keep the image's `ubuntu` user (passwordless sudo) instead of an own user | It already has the key and sudo; with key-only login a user name protects nothing; moving to a new user only adds lock-out risk. A limited `deploy` user comes in stage 4. Passwordless sudo is an accepted risk (`SAAS_INFRA.md` §1.2) |
+| Nov 2026 | Server time zone stays UTC | Server standard, no daylight-saving jumps in logs; the app converts to Europe/Warsaw itself (KB §4) |
+| Nov 2026 | `ufw`: incoming SSH only, outgoing open; containers publish no ports | The tunnel and the polling are outbound; ports published by Docker bypass `ufw` |
+| Nov 2026 | Automatic security updates with an automatic reboot at 03:30 UTC when needed | Kernel fixes take effect only after a reboot; a test server can reboot at night |
+| Nov 2026 | Server IP addresses and host name stay out of the repository | Public repository; with the tunnel the origin stays unknown, so Cloudflare cannot be bypassed |
+| Nov 2026 | Ansible playbook at the start of stage 4, in this repository (`infra/ansible/`), real inventory outside git | Most of the configuration comes in stage 4; until then the runbooks in `SAAS_INFRA.md` §4 rebuild the server by hand (about 30 minutes) |
+| Nov 2026 | No fail2ban for now | With key-only SSH there is nothing to guess; it mainly reduces log noise. Revisit when services with logins are exposed (§11) |
+| Nov 2026 | A game server for another project (e.g. swapDuel) goes on a separate VPS | It needs open UDP ports and anti-DDoS; an attack on it must not take this server down (§4.6) |
 
 ---
 
@@ -330,7 +401,8 @@ as a learning exercise → Cloudflare Workers experiment → Android app as a cl
 | Web and worker | Two containers from the start vs one process with hosted background services in MVP 0 |
 | Check interval | Fixed 15 minutes in MVP 0; adaptive rules (§4.3) tuned with the stage 2 data |
 | E-mail provider | See §8.3 |
-| Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed |
+| Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
+| Ansible control node | WSL2 on the development PC (a system change there) vs a GitHub Actions Linux runner with the SSH key in GitHub Secrets (fits the stage 4 deployment) |
 
 ---
 
@@ -345,7 +417,13 @@ as a learning exercise → Cloudflare Workers experiment → Android app as a cl
   containers.
 - **More channels:** web push, Telegram / Signal bots.
 - **`profileId`** in the profile format for sync between desktop, Android and SaaS (KB §5.3).
-- **Learning items:** Kubernetes (k3s), RabbitMQ, Keycloak, Row-Level Security, monitoring (Prometheus / Grafana).
+- **Learning items:** Kubernetes (k3s), RabbitMQ, Keycloak, Row-Level Security, monitoring (Prometheus / Grafana),
+  Ansible (planned for stage 4).
+- **SSH brute-force noise:** not a risk with key-only login. If the log noise bothers: `ufw limit 22/tcp` first;
+  fail2ban when services with password logins are exposed.
+- **Second SSH key** on another device as a further way in (today: one key plus the KVM console).
+- **Ubuntu Pro (ESM):** extra security updates for packages outside the main repository; not needed now.
+- **Game server for swapDuel:** separate small VPS in Poland with real anti-DDoS, or a managed TURN service (§4.6).
 
 ---
 
