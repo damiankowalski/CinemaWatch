@@ -1,0 +1,28 @@
+# CinemaWatch Probe - one read-only check of the profiles (SaaS stage 2, risk test R1).
+# Installed as /etc/systemd/system/cinemawatch-probe.service and started by cinemawatch-probe.timer.
+# Paths: program /opt/cinemawatch-probe, profiles /etc/cinemawatch-probe, data /var/lib/cinemawatch-probe.
+
+[Unit]
+Description=CinemaWatch Probe (read-only check of Cinema City seat status)
+Documentation=https://github.com/damiankowalski/CinemaWatch/blob/main/tools/CinemaWatch.Probe/README.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/cinemawatch-probe/CinemaWatch.Probe --profiles /etc/cinemawatch-probe --data /var/lib/cinemawatch-probe
+TimeoutStartSec=5min
+
+# A temporary user without any rights is created for each run; it can write only to its state directory
+# (/var/lib/cinemawatch-probe). It cannot use sudo, read home folders or change the system.
+DynamicUser=yes
+StateDirectory=cinemawatch-probe
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+MemoryMax=300M

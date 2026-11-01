@@ -18,5 +18,28 @@ jobs:
       - name: Test
         run: dotnet run --project tests/CinemaWatch.Tests -c Release
 
+      - name: Test probe
+        run: dotnet run --project tests/CinemaWatch.Probe.Tests -c Release
+
       - name: Build app
         run: dotnet build src/CinemaWatch.App -c Release
+
+  # SaaS: the shared logic and the probe on Linux, the system the server runs (docs/SAAS.md §6).
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Test (shared logic)
+        run: dotnet run --project tests/CinemaWatch.Tests -c Release
+
+      - name: Test probe
+        run: dotnet run --project tests/CinemaWatch.Probe.Tests -c Release
+
+      - name: Publish probe (linux-x64, single file)
+        shell: pwsh
+        run: ./tools/CinemaWatch.Probe/publish.ps1

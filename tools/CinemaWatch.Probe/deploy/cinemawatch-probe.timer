@@ -1,0 +1,15 @@
+# Starts cinemawatch-probe.service 1 minute after the timer starts (also after every reboot),
+# then 10-12 minutes after each run: every 10 minutes plus a random delay of up to 2 minutes.
+# Installed as /etc/systemd/system/cinemawatch-probe.timer.
+
+[Unit]
+Description=Run the CinemaWatch Probe every 10-12 minutes
+
+[Timer]
+OnActiveSec=1min
+OnUnitActiveSec=10min
+RandomizedDelaySec=2min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

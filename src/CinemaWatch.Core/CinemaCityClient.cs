@@ -16,26 +16,39 @@ public sealed class CinemaCityClient : IDisposable
     private readonly HttpClient _http;
 
     public CinemaCityClient()
-        : this(new SocketsHttpHandler
-        {
-            AutomaticDecompression = DecompressionMethods.All,
-            UseCookies = true,
-            CookieContainer = new CookieContainer(),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
-        })
+        : this(CreateDefaultHandler())
     {
     }
 
-    /// <summary>Creates a client on top of a custom handler (used by tests).</summary>
-    public CinemaCityClient(HttpMessageHandler handler, bool disposeHandler = true)
+    /// <summary>
+    /// Creates a client on top of a custom handler: a fake in tests, or a wrapper around
+    /// <see cref="CreateDefaultHandler"/> that measures the requests (the SaaS probe). <paramref name="userAgent"/>
+    /// replaces <see cref="DefaultUserAgent"/>; clients that do not run on Windows must say so honestly.
+    /// </summary>
+    public CinemaCityClient(HttpMessageHandler handler, bool disposeHandler = true, string? userAgent = null)
     {
         _http = new HttpClient(handler, disposeHandler) { Timeout = TimeSpan.FromSeconds(30) };
         // The ticketing API expects a client-generated id, like the browser sends.
         _http.DefaultRequestHeaders.Add("uuid", Guid.NewGuid().ToString());
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"Mozilla/5.0 (Windows NT 10.0; Win64; x64) CinemaWatch/{AppInfo.Version}");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent ?? DefaultUserAgent);
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/json");
         _http.DefaultRequestHeaders.AcceptLanguage.ParseAdd("pl-PL");
     }
+
+    /// <summary>User-Agent of the desktop app: a browser-compatible prefix plus the app name and version.</summary>
+    public static string DefaultUserAgent => $"Mozilla/5.0 (Windows NT 10.0; Win64; x64) CinemaWatch/{AppInfo.Version}";
+
+    /// <summary>
+    /// Network handler of the app: transparent decompression, one cookie container per client (like a browser
+    /// session) and connections renewed every 5 minutes.
+    /// </summary>
+    public static SocketsHttpHandler CreateDefaultHandler() => new()
+    {
+        AutomaticDecompression = DecompressionMethods.All,
+        UseCookies = true,
+        CookieContainer = new CookieContainer(),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    };
 
     public async Task<DayRepertoire> GetRepertoireAsync(string cinemaId, DateOnly date, CancellationToken cancellationToken = default)
     {

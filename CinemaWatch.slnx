@@ -5,6 +5,10 @@
     <Project Path="src/CinemaWatch.ViewModels/CinemaWatch.ViewModels.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/CinemaWatch.Probe.Tests/CinemaWatch.Probe.Tests.csproj" />
     <Project Path="tests/CinemaWatch.Tests/CinemaWatch.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/CinemaWatch.Probe/CinemaWatch.Probe.csproj" />
   </Folder>
 </Solution>
