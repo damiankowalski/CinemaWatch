@@ -13,13 +13,22 @@ public enum AppLanguage
 /// Current UI language. Texts are written inline as <c>T("polski", "English")</c> pairs, so both languages sit
 /// next to each other in the code. Changing the language raises <see cref="LanguageChanged"/>; view models refresh
 /// their texts in response, so the UI switches without a restart.
+/// <para>
+/// The desktop app has one language for the whole process (<see cref="SetLanguage"/>). A server handles many people
+/// at once, so it sets the language per request or per e-mail with <see cref="Use"/>; that value belongs to the
+/// current asynchronous flow only and wins over the process-wide one.
+/// </para>
 /// </summary>
 public static class Localizer
 {
     private static readonly CultureInfo PolishCulture = CultureInfo.GetCultureInfo("pl-PL");
     private static readonly CultureInfo EnglishCulture = CultureInfo.GetCultureInfo("en-GB");
 
-    public static AppLanguage Language { get; private set; } = AppLanguage.Polish;
+    private static readonly AsyncLocal<AppLanguage?> ScopedLanguage = new();
+    private static AppLanguage _processLanguage = AppLanguage.Polish;
+
+    /// <summary>The language of the current flow (see <see cref="Use"/>), otherwise the process-wide language.</summary>
+    public static AppLanguage Language => ScopedLanguage.Value ?? _processLanguage;
 
     /// <summary>Culture for dates and numbers in the current language (pl-PL or en-GB).</summary>
     public static CultureInfo Culture => Language == AppLanguage.Polish ? PolishCulture : EnglishCulture;
@@ -29,11 +38,36 @@ public static class Localizer
 
     public static event EventHandler? LanguageChanged;
 
+    /// <summary>Sets the process-wide language (desktop app).</summary>
     public static void SetLanguage(AppLanguage language)
     {
-        if (Language == language) return;
-        Language = language;
+        if (_processLanguage == language) return;
+        _processLanguage = language;
         LanguageChanged?.Invoke(null, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Sets the language for the current asynchronous flow only - one web request or one e-mail - until the
+    /// returned scope is disposed. Code awaited inside the scope sees this language; other requests do not.
+    /// Raises no <see cref="LanguageChanged"/> event.
+    /// </summary>
+    public static IDisposable Use(AppLanguage language)
+    {
+        var previous = ScopedLanguage.Value;
+        ScopedLanguage.Value = language;
+        return new LanguageScope(previous);
+    }
+
+    private sealed class LanguageScope(AppLanguage? previous) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            ScopedLanguage.Value = previous;
+        }
     }
 
     public static string T(string polish, string english) => Language == AppLanguage.Polish ? polish : english;

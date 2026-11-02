@@ -1,0 +1,69 @@
+@page "/Account/Manage/DeleteAccount"
+@inject UserManager<AppUser> UserManager
+@inject SignInManager<AppUser> SignInManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<DeleteAccount> Logger
+
+<PageTitle>@T("Usuwanie konta", "Delete account") – CinemaWatch</PageTitle>
+
+<section class="narrow">
+    <h1>@T("Usuń konto", "Delete account")</h1>
+    <p class="lead">
+        @T("Usunięcie konta jest nieodwracalne. Usuniemy adres e-mail, hasło i wszystkie dane konta.",
+           "Deleting the account cannot be undone. The e-mail address, the password and all data of the account are removed.")
+    </p>
+
+    <StatusMessage Message="@error" />
+
+    <EditForm Model="Input" method="post" OnSubmit="DeleteAsync" FormName="delete-account" class="form">
+        <label for="password">@T("Hasło (dla potwierdzenia)", "Password (to confirm)")</label>
+        <InputText id="password" type="password" @bind-Value="Input.Password" autocomplete="current-password" required />
+        <button type="submit" class="button danger">@T("Usuń konto na stałe", "Delete account permanently")</button>
+    </EditForm>
+
+    <p class="aside"><a href="Account/Manage">@T("Nie usuwaj, wróć do konta", "Keep it, back to your account")</a></p>
+</section>
+
+@code {
+    private string? error;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override void OnInitialized() => Input ??= new();
+
+    private async Task DeleteAsync()
+    {
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectTo("Account/Login");
+            return;
+        }
+        if (!await UserManager.CheckPasswordAsync(user, Input.Password))
+        {
+            error = T("Nieprawidłowe hasło.", "Incorrect password.");
+            return;
+        }
+
+        // Later increments add profiles and history; they are removed with the account (cascade in the database).
+        var result = await UserManager.DeleteAsync(user);
+        if (!result.Succeeded)
+        {
+            error = string.Join(" ", result.Errors.Select(e => e.Description));
+            return;
+        }
+
+        await SignInManager.SignOutAsync();
+        Logger.LogInformation("User {UserId} deleted their account", user.Id);
+        RedirectManager.RedirectToWithStatus("Account/Login", StatusMessageKind.Success, T("Konto usunięte.", "Account deleted."), HttpContext);
+    }
+
+    private sealed class InputModel
+    {
+        public string Password { get; set; } = "";
+    }
+}

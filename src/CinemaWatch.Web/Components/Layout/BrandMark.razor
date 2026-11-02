@@ -1,0 +1,11 @@
+@* A row of seats facing the screen; one has just become free. *@
+<svg class="mark" viewBox="0 0 62 12" width="62" height="12" aria-hidden="true" focusable="false">
+    @for (var i = 0; i < 7; i++)
+    {
+        var x = 7 + i * 8;
+        var y = 8.5 - 0.45 * (i - 3) * (i - 3);
+        <circle cx="@x.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                cy="@y.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)"
+                r="3" class="@(i == 4 ? "free" : null)" />
+    }
+</svg>

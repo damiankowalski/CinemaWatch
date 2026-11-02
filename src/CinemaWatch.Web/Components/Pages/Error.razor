@@ -1,0 +1,23 @@
+@page "/Error"
+@attribute [AllowAnonymous]
+@using System.Diagnostics
+
+<PageTitle>@T("Błąd", "Error") – CinemaWatch</PageTitle>
+
+<section class="narrow">
+    <h1>@T("Coś poszło nie tak", "Something went wrong")</h1>
+    <p class="lead">@T("Serwer nie obsłużył tego żądania. Spróbuj ponownie za chwilę.", "The server could not handle this request. Try again in a moment.")</p>
+    @if (!string.IsNullOrEmpty(requestId))
+    {
+        <p class="hint">@T("Identyfikator żądania (do zgłoszenia):", "Request ID (for a report):") <code>@requestId</code></p>
+    }
+</section>
+
+@code {
+    private string? requestId;
+
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    protected override void OnInitialized() => requestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

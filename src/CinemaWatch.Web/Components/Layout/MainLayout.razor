@@ -1,0 +1,56 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Navigation
+@inject IOptions<SaasOptions> Saas
+
+<header class="site-header">
+    <div class="bar">
+        <a class="brand" href="/">
+            <BrandMark />
+            <span>CinemaWatch</span>
+        </a>
+        <nav aria-label="@T("Menu główne", "Main menu")">
+            <AuthorizeView>
+                <Authorized>
+                    <a href="/">@T("Profile", "Profiles")</a>
+                    @if (OwnerAuthorizationHandler.IsOwner(context.User, Saas.Value))
+                    {
+                        <a href="admin/users">@T("Użytkownicy", "Users")</a>
+                    }
+                    <a href="Account/Manage">@T("Konto", "Account")</a>
+                    <form action="Account/Logout" method="post" class="inline">
+                        <AntiforgeryToken />
+                        <button type="submit" class="link">@T("Wyloguj", "Sign out")</button>
+                    </form>
+                </Authorized>
+            </AuthorizeView>
+            <span class="languages">
+                @if (Language == AppLanguage.Polish)
+                {
+                    <span aria-current="true">PL</span>
+                    <a href="@LanguageLink("en")" lang="en" title="English">EN</a>
+                }
+                else
+                {
+                    <a href="@LanguageLink("pl")" lang="pl" title="Polski">PL</a>
+                    <span aria-current="true">EN</span>
+                }
+            </span>
+        </nav>
+    </div>
+</header>
+
+<main class="content">
+    @Body
+</main>
+
+<footer class="site-footer">
+    <a href="privacy">@T("Prywatność", "Privacy")</a>
+    <span>CinemaWatch @Version</span>
+</footer>
+
+@code {
+    private static readonly string Version = AppInfo.VersionOf(typeof(Program).Assembly);
+
+    private string LanguageLink(string code) =>
+        $"language/{code}?returnUrl={Uri.EscapeDataString("/" + Navigation.ToBaseRelativePath(Navigation.Uri))}";
+}

@@ -441,6 +441,53 @@ ViewModelTests.RegisterTabTests();
 ViewModelTests.RegisterTabSwitchTests();
 ViewModelTests.RegisterAllImaxTests();
 
+TestRunner.Add("Localization: a language scope belongs to one asynchronous flow (server requests and e-mails)", async () =>
+{
+    Localizer.SetLanguage(AppLanguage.Polish);
+    using (Localizer.Use(AppLanguage.English))
+    {
+        Assert.Equal("Seats available", Localizer.T("Wolne miejsca", "Seats available"));
+        using (Localizer.Use(AppLanguage.Polish))
+            Assert.Equal(AppLanguage.Polish, Localizer.Language);
+        Assert.Equal(AppLanguage.English, Localizer.Language);
+        Assert.Equal("en-GB", Localizer.Culture.Name);
+    }
+    Assert.Equal(AppLanguage.Polish, Localizer.Language);
+
+    // Two "requests" at the same time keep their own language while they interleave.
+    var gate = new TaskCompletionSource();
+    async Task<string> Request(AppLanguage language)
+    {
+        using var scope = Localizer.Use(language);
+        await gate.Task;
+        return Localizer.T("pl", "en");
+    }
+    var polish = Task.Run(() => Request(AppLanguage.Polish));
+    var english = Task.Run(() => Request(AppLanguage.English));
+    await Task.Delay(50);
+    gate.SetResult();
+    Assert.Equal("pl", await polish);
+    Assert.Equal("en", await english);
+
+    // The desktop's process-wide language is untouched by scopes and still raises its event.
+    var raised = 0;
+    void OnChanged(object? sender, EventArgs e) => raised++;
+    Localizer.LanguageChanged += OnChanged;
+    try
+    {
+        using (Localizer.Use(AppLanguage.English)) { }
+        Assert.Equal(0, raised);
+        Localizer.SetLanguage(AppLanguage.English);
+        Assert.Equal(1, raised);
+        Assert.Equal(AppLanguage.English, Localizer.Language);
+    }
+    finally
+    {
+        Localizer.LanguageChanged -= OnChanged;
+        Localizer.SetLanguage(AppLanguage.Polish);
+    }
+});
+
 return await TestRunner.RunAsync();
 
 internal sealed class RecordingNotifier : INotifier

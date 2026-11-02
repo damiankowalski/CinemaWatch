@@ -2,10 +2,13 @@
   <Folder Name="/src/">
     <Project Path="src/CinemaWatch.App/CinemaWatch.App.csproj" />
     <Project Path="src/CinemaWatch.Core/CinemaWatch.Core.csproj" />
+    <Project Path="src/CinemaWatch.Server/CinemaWatch.Server.csproj" />
     <Project Path="src/CinemaWatch.ViewModels/CinemaWatch.ViewModels.csproj" />
+    <Project Path="src/CinemaWatch.Web/CinemaWatch.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CinemaWatch.Probe.Tests/CinemaWatch.Probe.Tests.csproj" />
+    <Project Path="tests/CinemaWatch.Saas.Tests/CinemaWatch.Saas.Tests.csproj" />
     <Project Path="tests/CinemaWatch.Tests/CinemaWatch.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
