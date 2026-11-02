@@ -63,6 +63,13 @@ CSV columns: `time_utc`, `run`, `method`, `host`, `endpoint` (`presentation`, `s
 | 3 | Blocked: HTTP 403 / 429 or a Cloudflare challenge; the run stopped |
 | 4 | Nothing to check: all screenings of all profiles are over |
 
+## Known issue (0.1.0)
+
+The `bytes` column stays empty for compressed responses: .NET does not report the size after decompression, and
+the tests did not catch it because their fake network does not compress. It does not affect R1 (status,
+`cf_mitigated`, content type and duration decide). Left as is while the probe measures; fix it (count the buffered
+body) if the probe is used again.
+
 ## Tests
 
 ```powershell

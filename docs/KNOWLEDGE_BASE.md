@@ -4,8 +4,8 @@
 > Order of trust when something disagrees: **repository code** > **this document** > chat history.
 > Keep it current: update *Status*, *Version history* and *Decision log* with every release or decision.
 >
-> Last updated: 1 November 2026 (desktop 1.4.0; SaaS stage 2 in progress: VPS in Warsaw set up and hardened - plan in
-> [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
+> Last updated: 2 November 2026 (desktop 1.4.0; SaaS stage 2 done: VPS in Warsaw hardened, risk test running and
+> provisionally green - plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
 
 ---
 
@@ -23,7 +23,7 @@ It only **reads** public seat information. It never logs in, never creates a car
 | Original PowerShell script | Done, kept in `scripts/CinemaWatch.ps1` | E-mail notifications via Gmail SMTP; the origin of the project |
 | **Desktop (Windows)** | **1.4.0 stable** - feature-complete for now | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
 | Android | Planned - concept agreed, nothing built | "Proxy" that checks profiles exported by the desktop app |
-| SaaS (web) | Stage 2 in progress - VPS (OVHcloud, Warsaw) set up and hardened; next the risk test from it | Web app; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
+| SaaS (web) | Stage 2 done - VPS (OVHcloud, Warsaw) hardened; risk test (`tools/CinemaWatch.Probe`) running, provisionally green; next stage 3: MVP 0 on the PC | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
 
 ---
 
@@ -71,7 +71,8 @@ SaaS track - goals, risks, target architecture, MVP, plan, hosting choice and it
 - Same repository (monorepo), reusing `CinemaWatch.Core`; separate SaaS version and `web-v*` tags.
 - **MVP 0** = server-side profile proxy: accounts, import of `*.cinemawatch.json`, background checks (§5.4),
   e-mail notifications. The wizard and hall map follow in MVP 1.
-- First technical step: a risk test of polling Cinema City from a datacenter IP (see §10).
+- First technical step: a risk test of polling Cinema City from a datacenter IP (see §10) - running since
+  2 Nov 2026 (`tools/CinemaWatch.Probe`), provisionally green; the full check comes before the first deployment.
 - Hosted infrastructure only (Linux VPS + Docker + Cloudflare); an on-prem lab is parked.
 - What has been set up so far (accounts, domain `damiankowalski.pl`, DNS on Cloudflare, DNSSEC, a hardened VPS in
   Warsaw with Ubuntu 26.04 LTS), with a work log, runbooks and an infrastructure glossary:

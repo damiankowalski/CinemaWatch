@@ -9,9 +9,9 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 1 November 2026. Status: **stage 2 in progress** - VPS ordered (OVHcloud VPS-1, Warsaw) and hardened;
-> `CinemaWatch.Probe` 0.1.0 written (branch `feature/saas-probe`); next: smoke test at home, deployment and the
-> 5-7 day risk test (R1).
+> Last updated: 2 November 2026. Status: **stage 2 done** - VPS hardened; `CinemaWatch.Probe` 0.1.0 runs on it every
+> 10-12 minutes since 2 Nov; risk test R1 provisionally green (the probe keeps collecting data, the full check comes
+> before stage 4). Next: **stage 3** - MVP 0 on the development PC.
 
 ---
 
@@ -283,26 +283,29 @@ Each stage ends with an update of this document.
 - [x] Hosting account (OVHcloud). The VPS itself is ordered at the start of stage 2 (monthly billing).
 - [x] Cinema City terms of use read (R2); findings in §9.
 
-### Stage 2 - First server and the risk test (R1) (server part done 1 Nov 2026; details in `SAAS_INFRA.md` §3)
+### Stage 2 - First server and the risk test (R1) (done 2 Nov 2026; details in `SAAS_INFRA.md` §1.4, §3)
 - [x] SSH key on Windows (built-in OpenSSH; ed25519 with a passphrase, backup in the password manager); VPS ordered:
       OVHcloud VPS-1 in Warsaw, monthly, **Ubuntu 26.04 LTS** instead of 24.04 (§9); first login.
 - [x] Basic hardening: system updated; key-only SSH, no root login; `ufw` lets in SSH only; automatic security updates
       with an automatic reboot at 03:30 UTC. Changed from the plan (§9): the image's `ubuntu` user is kept instead of
       an own user; the time zone stays UTC. Emergency access through the KVM console tested.
-- [ ] `CinemaWatch.Probe` 0.1.0 (code on `feature/saas-probe`, [README](../tools/CinemaWatch.Probe/README.md)):
+- [x] `CinemaWatch.Probe` 0.1.0 ([README](../tools/CinemaWatch.Probe/README.md)):
       console app on `CinemaWatch.Core`, published as a self-contained `linux-x64` single file. One run checks every
       profile once (KB §5.4, de-duplicated, layouts cached), logs every request to a monthly CSV (time, endpoint,
       status, duration, size, Cloudflare headers), stops the run at the first 403 / 429 / challenge, logs what it
       would e-mail (no notifications) and fetches the repertoire of the watched cinemas once an hour.
-- [ ] Smoke test from home (Windows), then deployment: `systemd` service with a temporary user (`DynamicUser`)
-      and a timer every 10-12 minutes.
-- [ ] Run for 5-7 days on 2-3 real IMAX screenings (starting no earlier than about 10-12 Nov, ideally sold out, two
-      cinemas). Control group: the same profiles in the desktop app's Task Scheduler at home.
-- [ ] Decision gate. Green: at least 5 days without 403 / 429 and without Cloudflare challenges; other errors
-      (timeouts, 5xx) under 1% and also seen from home → stage 3. Red: repeated 403 / 429 / challenges from the
-      server while home works at the same time → evaluate the residential-poller fallback (§11) first. Unclear
-      (single incidents) → run a few more days. Limit: about 900 requests a day is a desktop user's load, not the
-      SaaS load of §2.1; green means "the datacenter IP is not blocked outright", not "full load is fine".
+- [x] Smoke test from home (Windows), then deployment (2 Nov): `systemd` service with a temporary user
+      (`DynamicUser`) and a timer every 10-12 minutes.
+- [x] Run started 2 Nov 2026 on two profiles with six IMAX screenings in Sadyba (21 Nov - 18 Dec). Control group: the
+      same profiles in the desktop app's Task Scheduler at home. It keeps running during stage 3.
+- [x] Provisional gate (2 Nov, first runs): green - 38 requests, all HTTP 200, no Cloudflare challenges, both hosts;
+      "would notify" matched the desktop toast. Thin evidence on purpose: the full check moves to stage 4 (§9).
+- Gate criteria (full check before stage 4). Green: at least 5 days without 403 / 429 and without Cloudflare
+      challenges; other errors (timeouts, 5xx) under 1% and also seen from home → deploy in stage 4. Red: repeated
+      403 / 429 / challenges from the server while home works at the same time → evaluate the residential-poller
+      fallback (§11) first. Unclear (single incidents) → collect a few more days. Limit: about 1,600 requests a day
+      is a desktop user's load, not the SaaS load of §2.1; green means "the datacenter IP is not blocked outright",
+      not "full load is fine".
 - How the result is checked: the server's log (statuses and "would notify" lines) against the desktop's toasts at
       home for the same seats at about the same time. From stage 3 the proof is the e-mail (a test inbox on the
       development PC first, then the real inbox).
@@ -314,6 +317,9 @@ Each stage ends with an update of this document.
 - [ ] Tests (reuse the fixtures from `tests/CinemaWatch.Tests`).
 
 ### Stage 4 - Deploy to the VPS (staging)
+- [ ] Final R1 check first: at least 5 days of probe data (`SAAS_INFRA.md` §4.18) against the gate criteria of
+      stage 2. Red → evaluate the residential-poller fallback (§11) before deploying. Then stop and remove the probe
+      (`SAAS_INFRA.md` §4.19) unless it is still useful.
 - [ ] Ansible playbook in `infra/ansible/` (first): the stage 2 hardening plus the setup below; the real inventory
       (server address) stays out of git; verified by reinstalling the VPS from scratch. Control node: §10.
 - [ ] Swap file (2 GB) before Docker.
@@ -419,6 +425,8 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Probe as a `systemd` service with `DynamicUser` and a timer, not as `ubuntu` | No account to maintain; the process cannot use sudo or touch the system - `ubuntu` has passwordless sudo |
 | Nov 2026 | Probe built without ICU (invariant globalization); "now" from `PolishTime` (Europe/Warsaw) | Nothing to install on the server; `Localizer` needs no ICU then; the server clock is UTC (KB §4) |
 | Nov 2026 | Control group for R1: the same profiles in the desktop app at home during the test | Separates "the datacenter IP is blocked" from "the API changed" |
+| Nov 2026 | R1 gate brought forward: provisionally green after the first runs on 2 Nov; the probe keeps running during stage 3 and the full check with at least 5 days of data moves to the start of stage 4 | Stage 3 runs on the development PC and does not need the server; accounts, profiles and e-mail of MVP 0 are needed even with the residential-poller fallback (§11), so little work is at risk |
+| Nov 2026 | Probe 0.1.0 stays unchanged while it measures; the empty `bytes` column (compressed responses) is a known issue | Changing the instrument in the middle of the measurement is worse than one missing column; status, `cf_mitigated`, content type and duration decide R1 |
 | Nov 2026 | CI: actions on Node 24 (`checkout@v7`, `setup-dotnet@v6`, also in `release.yml`); the Linux job pinned to `ubuntu-26.04`; `*.service` / `*.timer` always with LF line ends | GitHub retires Node 20 for actions; `ubuntu-latest` moves on its own schedule, the pinned label matches the server; a CR from a Windows checkout would break the systemd units |
 
 ---
