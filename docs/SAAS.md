@@ -9,8 +9,9 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 1 November 2026. Status: **stage 2 in progress** - VPS ordered (OVHcloud VPS-1, Warsaw) and hardened;
-> next: `CinemaWatch.Probe` and the risk test (R1).
+> Last updated: 2 November 2026. Status: **stage 2 done** - VPS hardened; `CinemaWatch.Probe` 0.1.0 runs on it every
+> 10-12 minutes since 2 Nov; risk test R1 provisionally green (the probe keeps collecting data, the full check comes
+> before stage 4). Next: **stage 3** - MVP 0 on the development PC.
 
 ---
 
@@ -214,15 +215,21 @@ The desktop app stays the profile editor; the SaaS checks the profiles and sends
 (KB §2.2) on a server, with the same contract (KB §5).
 
 In scope:
-- Account: sign-up with e-mail and password, e-mail confirmation, login, logout, password reset, account deletion
-  (with all data).
+- The whole site sits behind the login: `cinemawatch.damiankowalski.pl` shows only the login page (with "forgot
+  password" by e-mail) to anyone not signed in.
+- Accounts by invitation only (the owner creates them; no open sign-up form): e-mail confirmation, login, logout,
+  password reset, account deletion (with all data).
 - Import of a `*.cinemawatch.json` file (validation as in KB §5.3: refuse a higher `version`, ignore unknown fields).
 - Profile list: screenings, number of watched seats, enabled/disabled, last check, last notification; enable,
   disable, delete, download the stored JSON.
-- Background checks per KB §5.4 with de-duplication and the poller rules (§4.3).
-- E-mail "Wolne miejsca: {film}" with one line per screening and the booking link.
+- "Check now" per profile, like the desktop, rate-limited (e.g. once a minute per account) to protect the request
+  budget.
+- Background checks per KB §5.4 with de-duplication and the poller rules (§4.3), at the profile's own interval
+  (`intervalMinutes`) but never more often than a server minimum (e.g. 10 minutes).
+- E-mail "Wolne miejsca: {film}" with one line per screening and the booking link; a "send a test e-mail" button
+  to check delivery and spam placement.
 - Notification history per profile.
-- Fixed limits in configuration (e.g. 3 active profiles per account, minimum interval 15 minutes).
+- Fixed limits in configuration (e.g. 3 active profiles per account, minimum interval 10 minutes).
 - Privacy notice page; UI in Polish and English like the desktop app.
 - Operator view (owner only): requests per hour, HTTP status breakdown, last errors.
 
@@ -243,16 +250,18 @@ interchangeable.
 
 ## 6. Repository and engineering (monorepo)
 
-- The SaaS lives in this repository. New projects (names proposed): `src/CinemaWatch.Web` (ASP.NET Core),
-  `src/CinemaWatch.Worker` (poller + notifier), `tools/CinemaWatch.Probe` (risk test, stage 2).
+- The SaaS lives in this repository. Projects: `tools/CinemaWatch.Probe` (risk test, stage 2; tests in
+  `tests/CinemaWatch.Probe.Tests`); proposed: `src/CinemaWatch.Web` (ASP.NET Core), `src/CinemaWatch.Worker`
+  (poller + notifier).
 - `CinemaWatch.Core` is shared. A change in Core needs the desktop tests to pass and must not change desktop
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects get their own
   version (e.g. a `Directory.Build.props` in their folder). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
-- CI: the current `ci.yml` (Windows: tests + desktop build) stays; the SaaS gets its own job (Linux build, tests,
-  container image) when the first SaaS project lands.
+- CI: the Windows job (tests + desktop build) stays and also runs the probe tests; the `linux` job (since the
+  probe) runs the shared tests and the probe tests on `ubuntu-26.04` (the server's release) and publishes the
+  probe; container images come in stage 4. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
 - Conventions from KB §7 apply: English code and docs, UI texts via `T("polski", "English")`, tests for every
   behaviour change, no secrets in the repository (configuration via environment variables and GitHub Secrets).
 
@@ -274,16 +283,32 @@ Each stage ends with an update of this document.
 - [x] Hosting account (OVHcloud). The VPS itself is ordered at the start of stage 2 (monthly billing).
 - [x] Cinema City terms of use read (R2); findings in §9.
 
-### Stage 2 - First server and the risk test (R1) (server part done 1 Nov 2026; details in `SAAS_INFRA.md` §3)
+### Stage 2 - First server and the risk test (R1) (done 2 Nov 2026; details in `SAAS_INFRA.md` §1.4, §3)
 - [x] SSH key on Windows (built-in OpenSSH; ed25519 with a passphrase, backup in the password manager); VPS ordered:
       OVHcloud VPS-1 in Warsaw, monthly, **Ubuntu 26.04 LTS** instead of 24.04 (§9); first login.
 - [x] Basic hardening: system updated; key-only SSH, no root login; `ufw` lets in SSH only; automatic security updates
       with an automatic reboot at 03:30 UTC. Changed from the plan (§9): the image's `ubuntu` user is kept instead of
       an own user; the time zone stays UTC. Emergency access through the KVM console tested.
-- [ ] `CinemaWatch.Probe`: console app on `CinemaWatch.Core`, published as a self-contained `linux-x64` single file;
-      runs one check of a profile (KB §5.4) and logs time, endpoint, HTTP status and duration. No notifications.
-- [ ] Run it from a systemd timer every 10-15 minutes for 5-7 days on 2-3 real screenings.
-- [ ] Decision gate: no blocks → stage 3. Blocks → evaluate the residential-poller fallback (§11) first.
+- [x] `CinemaWatch.Probe` 0.1.0 ([README](../tools/CinemaWatch.Probe/README.md)):
+      console app on `CinemaWatch.Core`, published as a self-contained `linux-x64` single file. One run checks every
+      profile once (KB §5.4, de-duplicated, layouts cached), logs every request to a monthly CSV (time, endpoint,
+      status, duration, size, Cloudflare headers), stops the run at the first 403 / 429 / challenge, logs what it
+      would e-mail (no notifications) and fetches the repertoire of the watched cinemas once an hour.
+- [x] Smoke test from home (Windows), then deployment (2 Nov): `systemd` service with a temporary user
+      (`DynamicUser`) and a timer every 10-12 minutes.
+- [x] Run started 2 Nov 2026 on two profiles with six IMAX screenings in Sadyba (21 Nov - 18 Dec). Control group: the
+      same profiles in the desktop app's Task Scheduler at home. It keeps running during stage 3.
+- [x] Provisional gate (2 Nov, first runs): green - 38 requests, all HTTP 200, no Cloudflare challenges, both hosts;
+      "would notify" matched the desktop toast. Thin evidence on purpose: the full check moves to stage 4 (§9).
+- Gate criteria (full check before stage 4). Green: at least 5 days without 403 / 429 and without Cloudflare
+      challenges; other errors (timeouts, 5xx) under 1% and also seen from home → deploy in stage 4. Red: repeated
+      403 / 429 / challenges from the server while home works at the same time → evaluate the residential-poller
+      fallback (§11) first. Unclear (single incidents) → collect a few more days. Limit: about 1,600 requests a day
+      is a desktop user's load, not the SaaS load of §2.1; green means "the datacenter IP is not blocked outright",
+      not "full load is fine".
+- How the result is checked: the server's log (statuses and "would notify" lines) against the desktop's toasts at
+      home for the same seats at about the same time. From stage 3 the proof is the e-mail (a test inbox on the
+      development PC first, then the real inbox).
 
 ### Stage 3 - MVP 0 on the development PC
 - [ ] Solution structure (§6), PostgreSQL for development (§10), EF Core migrations.
@@ -292,6 +317,9 @@ Each stage ends with an update of this document.
 - [ ] Tests (reuse the fixtures from `tests/CinemaWatch.Tests`).
 
 ### Stage 4 - Deploy to the VPS (staging)
+- [ ] Final R1 check first: at least 5 days of probe data (`SAAS_INFRA.md` §4.18) against the gate criteria of
+      stage 2. Red → evaluate the residential-poller fallback (§11) before deploying. Then stop and remove the probe
+      (`SAAS_INFRA.md` §4.19) unless it is still useful.
 - [ ] Ansible playbook in `infra/ansible/` (first): the stage 2 hardening plus the setup below; the real inventory
       (server address) stays out of git; verified by reinstalling the VPS from scratch. Control node: §10.
 - [ ] Swap file (2 GB) before Docker.
@@ -389,6 +417,17 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Ansible playbook at the start of stage 4, in this repository (`infra/ansible/`), real inventory outside git | Most of the configuration comes in stage 4; until then the runbooks in `SAAS_INFRA.md` §4 rebuild the server by hand (about 30 minutes) |
 | Nov 2026 | No fail2ban for now | With key-only SSH there is nothing to guess; it mainly reduces log noise. Revisit when services with logins are exposed (§11) |
 | Nov 2026 | A game server for another project (e.g. swapDuel) goes on a separate VPS | It needs open UDP ports and anti-DDoS; an attack on it must not take this server down (§4.6) |
+| Nov 2026 | Direction confirmed: private tool for the owner and invited friends at `cinemawatch.damiankowalski.pl`, everything behind the login, same features as the desktop (wizard and hall map in MVP 1), profiles in PostgreSQL per user, manual and scheduled checks, e-mail with the booking link; no commercial use | Matches §1 and the R2 decision; built in stages (MVP 0 imports desktop profiles) |
+| Nov 2026 | MVP 0 refinements: invitation-only accounts; "check now" with a rate limit; the profile's own interval with a server minimum (about 10 min) instead of a fixed 15; "send a test e-mail" | Closed group (R2); same behaviour as the desktop; delivery can be checked without waiting for free seats |
+| Nov 2026 | Booking links in e-mails stay as in the desktop toasts (deep links to the ticketing page) | The terms allow links to the home page only; in a closed, free group the practical risk is low; a public launch would need Cinema City's consent anyway (R2) |
+| Nov 2026 | Probe: every 10 min + up to 2 min random delay; one CSV row per request; stop the run at the first 403 / 429 / Cloudflare challenge and keep the response; "would notify" log instead of notifications; repertoire once an hour per watched cinema | Slightly stricter than the MVP 0 interval within KB §3.6; data for the gate; no retry storms; checks the notification logic and the second host (`www.cinema-city.pl`, MVP 1) in the same run |
+| Nov 2026 | Probe User-Agent `Mozilla/5.0 (X11; Linux x86_64) CinemaWatch-Probe/<version> (+<repository URL>)` | Honest platform and name with a way to find the project (KB §3.1); the desktop UA would claim Windows |
+| Nov 2026 | Probe as a `systemd` service with `DynamicUser` and a timer, not as `ubuntu` | No account to maintain; the process cannot use sudo or touch the system - `ubuntu` has passwordless sudo |
+| Nov 2026 | Probe built without ICU (invariant globalization); "now" from `PolishTime` (Europe/Warsaw) | Nothing to install on the server; `Localizer` needs no ICU then; the server clock is UTC (KB §4) |
+| Nov 2026 | Control group for R1: the same profiles in the desktop app at home during the test | Separates "the datacenter IP is blocked" from "the API changed" |
+| Nov 2026 | R1 gate brought forward: provisionally green after the first runs on 2 Nov; the probe keeps running during stage 3 and the full check with at least 5 days of data moves to the start of stage 4 | Stage 3 runs on the development PC and does not need the server; accounts, profiles and e-mail of MVP 0 are needed even with the residential-poller fallback (§11), so little work is at risk |
+| Nov 2026 | Probe 0.1.0 stays unchanged while it measures; the empty `bytes` column (compressed responses) is a known issue | Changing the instrument in the middle of the measurement is worse than one missing column; status, `cf_mitigated`, content type and duration decide R1 |
+| Nov 2026 | CI: actions on Node 24 (`checkout@v7`, `setup-dotnet@v6`, also in `release.yml`); the Linux job pinned to `ubuntu-26.04`; `*.service` / `*.timer` always with LF line ends | GitHub retires Node 20 for actions; `ubuntu-latest` moves on its own schedule, the pinned label matches the server; a CR from a Windows checkout would break the systemd units |
 
 ---
 
@@ -399,7 +438,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Front end | Blazor (C#, shared models, maybe reuse of `CinemaWatch.ViewModels`) vs React / TypeScript |
 | Development database | PostgreSQL installed on Windows vs Docker Desktop |
 | Web and worker | Two containers from the start vs one process with hosted background services in MVP 0 |
-| Check interval | Fixed 15 minutes in MVP 0; adaptive rules (§4.3) tuned with the stage 2 data |
+| Check interval | MVP 0: the profile's interval with a server minimum (about 10 minutes, decided Nov 2026); the minimum and the adaptive rules (§4.3) tuned with the stage 2 data |
 | E-mail provider | See §8.3 |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
 | Ansible control node | WSL2 on the development PC (a system change there) vs a GitHub Actions Linux runner with the SSH key in GitHub Secrets (fits the stage 4 deployment) |

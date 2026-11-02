@@ -182,6 +182,8 @@ beta and merged through a pull request.
 | `src/CinemaWatch.ViewModels` | Wizard view models without WPF references (fully testable) |
 | `src/CinemaWatch.App` | WPF app: views, hall map, Windows notifications, dialogs |
 | `tests/CinemaWatch.Tests` | Dependency-free tests using captured API responses |
+| `tools/CinemaWatch.Probe` | SaaS risk test: checks profiles from a server and logs every request, no notifications ([details](tools/CinemaWatch.Probe/README.md)) |
+| `tests/CinemaWatch.Probe.Tests` | Tests of the probe |
 | `scripts/CinemaWatch.ps1` | Standalone PowerShell monitor with e-mail notifications (the project's origin) |
 
 ### Cinema City endpoints

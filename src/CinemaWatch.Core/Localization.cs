@@ -112,11 +112,11 @@ public static class AppInfo
     /// "1.3.0" or a pre-release such as "1.4.0-beta.1" - set at build time (Directory.Build.props or
     /// <c>publish.ps1 -Version</c>). Build metadata after "+" (commit hash) is dropped.
     /// </summary>
-    public static string Version { get; } = ReadVersion();
+    public static string Version { get; } = VersionOf(typeof(AppInfo).Assembly);
 
-    private static string ReadVersion()
+    /// <summary>Version of any assembly in the same format (tools such as the SaaS probe have their own version).</summary>
+    public static string VersionOf(System.Reflection.Assembly assembly)
     {
-        var assembly = typeof(AppInfo).Assembly;
         var informational = assembly
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
             .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()

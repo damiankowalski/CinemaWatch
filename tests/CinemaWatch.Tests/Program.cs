@@ -405,6 +405,35 @@ TestRunner.Add("IMAX cinemas: six halls; Kraków row keys and aisle; Wrocław ro
     Assert.Equal("Kraków · ", NotificationBuilder.Build(SampleProfile(), [(new WatchedScreening { CinemaId = "1064", StartsAt = new DateTime(2026, 10, 24, 9, 20, 0) }, row9.Take(1).ToList())]).Lines[0][..9]);
 });
 
+// ---------------------------------------------------------------- shared with the SaaS (stage 2: probe)
+
+TestRunner.Add("Client: desktop User-Agent unchanged; a custom User-Agent replaces it", async () =>
+{
+    var desktop = new HeaderRecordingHandler();
+    using (var client = new CinemaCityClient(desktop))
+        await client.GetPresentationAsync("1765592");
+    Assert.Equal(CinemaCityClient.DefaultUserAgent, desktop.UserAgents.Single());
+    Assert.True(desktop.UserAgents.Single().StartsWith("Mozilla/5.0 (Windows NT 10.0; Win64; x64) CinemaWatch/"));
+
+    const string custom = "Mozilla/5.0 (X11; Linux x86_64) CinemaWatch-Probe/0.1.0 (+https://github.com/damiankowalski/CinemaWatch)";
+    var probe = new HeaderRecordingHandler();
+    using (var client = new CinemaCityClient(probe, userAgent: custom))
+        await client.GetPresentationAsync("1765592");
+    Assert.Equal(custom, probe.UserAgents.Single());
+});
+
+TestRunner.Add("Polish time: UTC to Europe/Warsaw in winter and summer time, also across the October switch", () =>
+{
+    Assert.Equal(new DateTime(2026, 12, 16, 16, 0, 0), PolishTime.FromUtc(new DateTime(2026, 12, 16, 15, 0, 0, DateTimeKind.Utc)));
+    Assert.Equal(new DateTime(2026, 7, 1, 12, 0, 0), PolishTime.FromUtc(new DateTime(2026, 7, 1, 10, 0, 0, DateTimeKind.Utc)));
+    // 25 Oct 2026: clocks go back from 03:00 CEST to 02:00 CET at 01:00 UTC.
+    Assert.Equal(new DateTime(2026, 10, 25, 2, 59, 0), PolishTime.FromUtc(new DateTime(2026, 10, 25, 0, 59, 0, DateTimeKind.Utc)));
+    Assert.Equal(new DateTime(2026, 10, 25, 2, 0, 0), PolishTime.FromUtc(new DateTime(2026, 10, 25, 1, 0, 0, DateTimeKind.Utc)));
+    var now = PolishTime.Now(new FixedClock(new DateTimeOffset(2026, 11, 2, 9, 30, 0, TimeSpan.Zero)));
+    Assert.Equal(new DateTime(2026, 11, 2, 10, 30, 0), now);
+    Assert.Equal(DateTimeKind.Unspecified, now.Kind);
+});
+
 ViewModelTests.Register();
 ViewModelTests.RegisterLanguageTests();
 ViewModelTests.RegisterNavigationTests();
@@ -418,4 +447,25 @@ internal sealed class RecordingNotifier : INotifier
 {
     public List<AvailabilityNotification> Shown { get; } = [];
     public void Show(AvailabilityNotification notification) => Shown.Add(notification);
+}
+
+/// <summary>Records the User-Agent of every request and answers with the captured presentation.</summary>
+internal sealed class HeaderRecordingHandler : HttpMessageHandler
+{
+    public List<string> UserAgents { get; } = [];
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        UserAgents.Add(request.Headers.UserAgent.ToString());
+        var json = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "presentation-1765592.json"));
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json"),
+        });
+    }
+}
+
+internal sealed class FixedClock(DateTimeOffset now) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => now;
 }

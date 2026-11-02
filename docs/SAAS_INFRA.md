@@ -10,7 +10,8 @@
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 1 November 2026 - stage 2: VPS ordered (OVHcloud VPS-1, Warsaw) and hardened. Next: the risk test (R1).
+> Last updated: 2 November 2026 - stage 2 done: VPS hardened; `CinemaWatch.Probe` runs every 10-12 minutes since
+> 2 Nov 2026 (risk test R1, provisional result green; it keeps running during stage 3).
 
 ---
 
@@ -29,7 +30,7 @@
 | DNS records | One: `TXT damiankowalski.pl "v=spf1 -all"` (the domain sends no e-mail) |
 | DNSSEC | On since 31 Oct 2026: Cloudflare signs the zone; DS at the registry with key tag 2371, algorithm 13, digest type 2 |
 | Cloudflare zone extras | AI crawler policy at defaults (allow); Bot Preference Sync on (robots.txt) - irrelevant until a site exists |
-| Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026, hardened (§1.3) |
+| Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026, hardened (§1.3); runs `CinemaWatch.Probe` (§1.4) |
 | Website / e-mail | None yet (both stage 4) |
 | Costs | Domain 16.69 PLN net (20.53 PLN gross) for the first year, then 58.99 PLN net (72.56 PLN gross) per year; Cloudflare Free 0; VPS about 19.20 PLN net (23.62 PLN gross) per month (cart price on 1 Nov 2026 - confirm on the first invoice) |
 
@@ -83,7 +84,22 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Firewall | `ufw` active: incoming denied except 22/tcp (IPv4 + IPv6), outgoing allowed, routed disabled, logging low (§4.11) |
 | Updates | `unattended-upgrades` installs security updates daily; `/etc/apt/apt.conf.d/52unattended-upgrades-local` reboots at 03:30 UTC when needed (§4.12) |
 | Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9) |
-| Our services | None yet (Probe: rest of stage 2; containers: stage 4) |
+| Our services | `CinemaWatch.Probe` (systemd service + timer) since 2 Nov 2026 (§1.4); containers: stage 4 |
+
+### 1.4 CinemaWatch.Probe (stage 2, risk test R1)
+
+| Item | Value |
+| --- | --- |
+| Version / source | 0.1.0 from `tools/CinemaWatch.Probe` ([README](../tools/CinemaWatch.Probe/README.md)); built on the development PC with `publish.ps1`: one self-contained `linux-x64` file, about 35 MB, no .NET on the server |
+| Program | `/opt/cinemawatch-probe/CinemaWatch.Probe` (root, 0755) |
+| Profiles | `/etc/cinemawatch-probe/*.cinemawatch.json` (root, 0644): two profiles from the desktop app, six IMAX screenings in Sadyba between 21 Nov and 18 Dec 2026 |
+| Data | `/var/lib/cinemawatch-probe` - a link into `/var/lib/private`, readable with `sudo` only: `requests-yyyy-MM.csv`, `would-notify.log`, `state/`, `cache/`, `repertoire-last.txt`, `blocked/` (only after a block) |
+| Units | `/etc/systemd/system/cinemawatch-probe.service` (oneshot, temporary user `DynamicUser`, sandboxed, `MemoryMax=300M`) and `cinemawatch-probe.timer` (1 min after the timer starts, then every 10 min plus up to 2 min random delay); timer enabled since 2 Nov 2026, so it also starts after every reboot |
+| Output | The journal: `journalctl -u cinemawatch-probe.service` |
+| Load | About 12 requests per run (2 per screening; hall layout cached for 7 days) plus the repertoire once an hour: about 1,600 requests a day. One run: about 2.5 s, 1.2 s CPU, memory peak 75 MB |
+| Control group | The same profiles in the desktop app's Task Scheduler at home; "would notify" matched the desktop toast on 2 Nov |
+| Known issue | Column `bytes` stays empty for compressed responses (.NET does not report the size after decompression); irrelevant for R1, fixed only if the probe is used again |
+| Ends | Runs until the final R1 check before stage 4 ([`SAAS.md`](SAAS.md) §7); stop and remove with §4.19 |
 
 ---
 
@@ -163,6 +179,29 @@ If files in `C:\Users\<user>\.ssh` are lost:
 | `id_ed25519` | **Private key** | No SSH access (passwords are off): restore it from the password manager, or use the KVM console and add a new key (§4.8) |
 | `id_ed25519` stolen | - | The thief also needs the passphrase. Rotate anyway: new key in, old line out of `authorized_keys` (§4.8) |
 
+### 2.3 The probe on the server
+
+```
+cinemawatch-probe.timer (every 10-12 min, also after a reboot)
+  '-> cinemawatch-probe.service (oneshot; temporary user without rights; sandbox)
+        '-> /opt/cinemawatch-probe/CinemaWatch.Probe
+              reads   /etc/cinemawatch-probe/*.cinemawatch.json
+              writes  /var/lib/cinemawatch-probe/  (CSV, state, cache; root-only folder)
+              prints  to the journal
+              '-> HTTPS out (ufw allows outgoing) -> Cloudflare (WAW) -> Cinema City, read-only
+```
+
+- **Why a temporary user.** `DynamicUser=yes` makes systemd create a user without any rights for each run. It can
+  write only to its own data folder; it cannot use sudo, read home folders or change the system. `ubuntu` has
+  passwordless sudo, so a bug in parsing data from the internet would otherwise mean root. Between runs the files
+  show `nobody` as their owner.
+- **Why the data folder needs sudo.** systemd keeps the data of temporary users in `/var/lib/private` (root only)
+  and links `/var/lib/cinemawatch-probe` to it.
+- **sudo and `*`.** The shell expands `*` into file names before the command runs, as `ubuntu`, who cannot look
+  into that folder: `sudo cat /var/lib/cinemawatch-probe/requests-*.csv` fails with "No such file". Use the full
+  name or let a root shell expand it: `sudo sh -c 'cat /var/lib/cinemawatch-probe/requests-*.csv'`.
+- **Nothing opened.** The probe only connects out; `ufw`, SSH and the users are unchanged.
+
 ---
 
 ## 3. Work log
@@ -233,6 +272,30 @@ If files in `C:\Users\<user>\.ssh` are lost:
 9. **Way back.** Encrypted private key file backed up in the password manager; KVM console login as `ubuntu` tested.
 10. **Decisions** recorded in [`SAAS.md`](SAAS.md) §9: Warsaw, Ubuntu 26.04, user `ubuntu`, UTC, `ufw`, automatic
     reboot, addresses out of the repository, Ansible in stage 4, no fail2ban.
+
+### Stage 2 - the probe and the risk test R1 (1-2 Nov 2026)
+
+11. **Probe written** on `feature/saas-probe` (design and decisions: [`SAAS.md`](SAAS.md) §7, §9). The repository
+    came as a zip built on Linux: Windows then listed dozens of files as modified. Only the line ends differed (LF
+    from Linux, CRLF in the Windows copy; Git first compares file sizes); `git add -A` showed the 21 real changes.
+    Later zips come with CRLF.
+12. **Smoke test at home** (`dotnet run` on Windows): `exit 0`, all requests HTTP 200.
+13. **CI:** both jobs green. Annotations: actions `@v4` run on the retired Node 20 → `actions/checkout@v7` and
+    `actions/setup-dotnet@v6` (also in `release.yml`); `ubuntu-latest` moves to Ubuntu 26 → the Linux job pinned to
+    `ubuntu-26.04` (the server's release). `.gitattributes`: `*.service` and `*.timer` always with LF - a CR from a
+    Windows checkout would become part of a value in the unit.
+14. **Deployment** (§4.15): `publish.ps1` → one upload folder → `scp -r` to `/tmp` → `sha256sum -c` OK, `file`
+    shows no CRLF → `install` into `/opt`, `/etc/cinemawatch-probe` and `/etc/systemd/system` → `daemon-reload`,
+    `systemd-analyze verify` OK.
+15. **First run**, started by hand (`systemctl start`) at 15:44 UTC: 14 requests, all HTTP 200, no `cf-mitigated`,
+    `cf-ray` ending in `-WAW` (Cloudflare Warsaw), both hosts (`tickets.` and `www.cinema-city.pl`); Polish time
+    correct on the UTC server; 2.5 s, 75 MB. "Would notify" for 21 Nov (row 6: 14, 21) matched the desktop toast.
+    Lesson: `sudo cat …/requests-*.csv` failed - the shell expands `*` as `ubuntu` before sudo runs (§2.3).
+16. **Timer enabled** (`systemctl enable --now`): runs every 10-12 minutes; the first 3 runs (one by hand) made 38
+    requests, all HTTP 200, no challenges. Lesson: deleting the folder the shell stands in (`rm -rf
+    /tmp/cinemawatch-probe-upload` from inside it) makes later commands print `getcwd() failed` - harmless, `cd ~`.
+17. **Provisional gate** (2 Nov): green. The probe keeps running during stage 3; the full check with at least
+    5 days of data comes before the first deployment in stage 4 ([`SAAS.md`](SAAS.md) §9).
 
 ---
 
@@ -476,12 +539,132 @@ Expected: the values of §1.3 - Ubuntu 26.04 LTS, `sudo: no password`, 2 CPUs, a
 synchronised, `permitrootlogin no` / `passwordauthentication no`, `ufw` active with 22/tcp only, the host key
 fingerprint of §1.3. The update count is only current after `sudo apt update`.
 
+### 4.15 Deploy or update the probe
+
+Windows (PowerShell), in the repository folder - build, then gather everything to upload in one folder (the
+profiles come from `C:\DEV\CINEMAWATCH\probe\profiles`, the same files as the desktop control group):
+
+```powershell
+cd C:\DEV\CINEMAWATCH\repo\CinemaWatch
+.\tools\CinemaWatch.Probe\publish.ps1
+$up = 'C:\DEV\CINEMAWATCH\probe\upload'
+Remove-Item $up -Recurse -ErrorAction SilentlyContinue
+New-Item -ItemType Directory "$up\profiles" -Force | Out-Null
+Copy-Item .\artifacts\probe\CinemaWatch.Probe, .\artifacts\probe\CinemaWatch.Probe.sha256, .\tools\CinemaWatch.Probe\deploy\cinemawatch-probe.service, .\tools\CinemaWatch.Probe\deploy\cinemawatch-probe.timer $up
+Copy-Item C:\DEV\CINEMAWATCH\probe\profiles\*.cinemawatch.json "$up\profiles"
+scp -r $up ubuntu@<server-ip>:/tmp/cinemawatch-probe-upload
+```
+
+Expected: `publish.ps1` ends with the file size (about 35 MB) and `SHA-256: …`; `scp` asks for the key's passphrase
+and prints one `100%` line per file. If `/tmp/cinemawatch-probe-upload` already exists on the server, delete it
+first, otherwise `scp` nests an `upload` folder inside it. If PowerShell refuses to run scripts:
+`powershell -ExecutionPolicy Bypass -File .\tools\CinemaWatch.Probe\publish.ps1`.
+
+Server (bash, over SSH) - check the copy, install, check the units:
+
+```bash
+cd /tmp/cinemawatch-probe-upload
+sha256sum -c CinemaWatch.Probe.sha256
+file cinemawatch-probe.service cinemawatch-probe.timer
+sudo install -d -m 0755 /opt/cinemawatch-probe /etc/cinemawatch-probe
+sudo install -m 0755 CinemaWatch.Probe /opt/cinemawatch-probe/
+sudo install -m 0644 profiles/*.cinemawatch.json /etc/cinemawatch-probe/
+sudo install -m 0644 cinemawatch-probe.service cinemawatch-probe.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemd-analyze verify /etc/systemd/system/cinemawatch-probe.service /etc/systemd/system/cinemawatch-probe.timer && echo "units OK"
+/opt/cinemawatch-probe/CinemaWatch.Probe --help | head -1
+cd ~ && rm -rf /tmp/cinemawatch-probe-upload
+```
+
+Expected: `CinemaWatch.Probe: OK`; both units `ASCII text` without `with CRLF line terminators` (otherwise stop);
+`units OK`; the version line. An update of the program alone is picked up by the next run - no restart needed.
+First deployment only: one run by hand, then the timer:
+
+```bash
+sudo systemctl start cinemawatch-probe.service; echo "exit=$?"
+sudo journalctl -u cinemawatch-probe.service --no-pager -n 30
+sudo systemctl enable --now cinemawatch-probe.timer
+systemctl list-timers cinemawatch-probe.timer --no-pager
+```
+
+Expected: `exit=0`; the journal ends with `Done …: N request(s) (200 xN) … exit 0` and `Finished`; the timer shows
+`NEXT` about a minute ahead. Exit codes: 1 configuration, 2 every screening failed, 3 blocked (do not retry; the
+response is in `blocked/`), 4 nothing to check (all screenings over).
+
+### 4.16 Check the probe (daily)
+
+Server (bash, over SSH):
+
+```bash
+systemctl list-timers cinemawatch-probe.timer --no-pager
+sudo journalctl -u cinemawatch-probe.service --since today --no-pager | grep -cE "Done in"
+sudo journalctl -u cinemawatch-probe.service --since today --no-pager | grep -E "BLOCKED|WOULD NOTIFY|ERROR|NOTHING TO CHECK|, exit [1-4]$"
+sudo sh -c 'cat /var/lib/cinemawatch-probe/requests-*.csv' | awk -F, -v d="$(date -u +%F)" '$1 ~ "^"d {n++; s[$7==""?"error":$7]++; if ($11!="") c++} END {printf "Requests on %s (UTC): %d;", d, n; for (k in s) printf " %s x%d", k, s[k]; printf "; Cloudflare challenges: %d\n", c+0}'
+```
+
+Expected: fresh `LAST` / `NEXT`; about 5-6 runs per hour since midnight UTC (about 130 a day); only `WOULD NOTIFY`
+lines (compare them with the desktop toasts); `200 xN` and `Cloudflare challenges: 0`. `BLOCKED`, `ERROR`,
+`exit 1-4`, any status other than 200 or a challenge count above 0 need a look. "Today" is the UTC day.
+
+### 4.17 Change the watched profiles
+
+Keep the server's profiles identical to the desktop control group. Upload the changed profiles like in §4.15
+(Windows), then on the server (bash, over SSH):
+
+```bash
+ls /etc/cinemawatch-probe/
+sudo rm "/etc/cinemawatch-probe/<old profile>.cinemawatch.json"
+sudo install -m 0644 /tmp/cinemawatch-probe-upload/profiles/*.cinemawatch.json /etc/cinemawatch-probe/
+ls /etc/cinemawatch-probe/
+```
+
+The next run reads the new set. The state of a removed profile stays in `state/` (harmless).
+
+### 4.18 Copy the probe data to the PC (for the gate)
+
+Server (bash, over SSH) - copy the files to `/tmp` and hand them to `ubuntu`:
+
+```bash
+sudo sh -c 'cp /var/lib/cinemawatch-probe/requests-*.csv /var/lib/cinemawatch-probe/would-notify.log /tmp/ && chown ubuntu: /tmp/requests-*.csv /tmp/would-notify.log'
+```
+
+Windows (PowerShell) - download and summarise:
+
+```powershell
+New-Item -ItemType Directory C:\DEV\CINEMAWATCH\probe\gate -Force | Out-Null
+scp "ubuntu@<server-ip>:/tmp/requests-*.csv" "ubuntu@<server-ip>:/tmp/would-notify.log" C:\DEV\CINEMAWATCH\probe\gate\
+$rows = Get-ChildItem C:\DEV\CINEMAWATCH\probe\gate\requests-*.csv | ForEach-Object { Import-Csv $_ }
+$rows | Group-Object status | Select-Object Name, Count
+$rows | Where-Object { $_.cf_mitigated -or $_.status -ne '200' } | Format-Table time_utc, endpoint, status, cf_mitigated, error
+```
+
+Expected: one group `200` with all requests, nothing in the second table. Afterwards on the server:
+`rm /tmp/requests-*.csv /tmp/would-notify.log`.
+
+### 4.19 Stop or remove the probe
+
+Server (bash, over SSH). Stop the runs and keep the data:
+
+```bash
+sudo systemctl disable --now cinemawatch-probe.timer
+```
+
+Remove everything (the server returns to the state after the hardening):
+
+```bash
+sudo systemctl disable --now cinemawatch-probe.timer
+sudo rm /etc/systemd/system/cinemawatch-probe.service /etc/systemd/system/cinemawatch-probe.timer
+sudo systemctl daemon-reload
+sudo rm -rf /opt/cinemawatch-probe /etc/cinemawatch-probe /var/lib/private/cinemawatch-probe /var/lib/cinemawatch-probe
+```
+
 ---
 
 ## 5. Next infrastructure steps
 
-- Rest of stage 2 of [`SAAS.md`](SAAS.md) §7: `CinemaWatch.Probe` (code on `feature/saas-probe`), run from a systemd
-  timer every 10-15 minutes for 5-7 days, then the decision gate (R1).
+- During stage 3 (development on the PC, no server work): the probe keeps running; a look with §4.16 now and then.
+- Start of stage 4: the final R1 check with at least 5 days of probe data (§4.18), then stop and remove the probe
+  (§4.19) unless it is still useful.
 - Stage 4: the Ansible playbook first (stage 2 hardening as code, verified by a reinstall), then swap, Docker and
   Compose, a `deploy` user, Cloudflare Tunnel and Access, e-mail records, backups.
 
@@ -600,7 +783,19 @@ Each step will be added to §1 and §3 of this file.
 | `apt` | Ubuntu's package manager: `update` refreshes the lists, `full-upgrade` installs the updates |
 | `needrestart` | Reports services and kernels that need a restart after updates |
 | `unattended-upgrades` | Installs security updates automatically; here also reboots at 03:30 UTC when needed |
-| systemd, unit, timer | Ubuntu's service manager; a timer starts a unit on a schedule (planned for the Probe) |
+| systemd, unit, timer | Ubuntu's service manager; a unit describes a service, a timer starts a unit on a schedule (used by the probe) |
+| `oneshot` service | `Type=oneshot`: each start runs the program once to the end (the probe: one check per start) |
+| `daemon-reload` | Makes systemd read new or changed unit files |
+| `enable --now` | Start a unit now and after every boot |
+| `DynamicUser` | systemd creates a temporary user without rights for each run; between runs its files show `nobody` as owner |
+| `StateDirectory` | Data folder systemd creates for a service (`/var/lib/<name>`; with `DynamicUser` a link into the root-only `/var/lib/private`) |
+| Journal, `journalctl` | systemd's log of everything the services print; `-u <unit>` shows one service, `--since today` one day |
+| Symbolic link | File-system entry that points to another path |
+| Glob (`*`) | Pattern the shell turns into file names before running a command - as the current user, so `sudo cat folder/*` fails when only root can read the folder; `sudo sh -c '…'` expands it as root |
+| `install` | Copies a file and sets its owner and permissions in one step |
+| Checksum, `sha256sum -c` | Fingerprint of a file's content; `-c` checks a copy against the recorded fingerprint |
+| `scp` | Copies files over SSH (same key, passphrase and host-key check); `-r` copies a whole folder |
+| Current directory, `getcwd` | The folder a shell stands in; deleting it from inside makes later commands complain until `cd ~` |
 | Firewall, `ufw` | Filters network connections; `ufw` ("uncomplicated firewall") is Ubuntu's simple front end, for IPv4 and IPv6 |
 | Default deny | Everything not explicitly allowed is blocked |
 | Port | Number that identifies a service on a server (SSH = 22/tcp) |

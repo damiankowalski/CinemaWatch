@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    SaaS stage 2: read-only risk test (R1) - checks profiles from a server and logs every request.
+    Versioned separately from the desktop app (the root Directory.Build.props holds the desktop version).
+    Publish for the server: .\tools\CinemaWatch.Probe\publish.ps1
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CinemaWatch.Probe</RootNamespace>
+    <Version>0.1.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- An unreachable NuGet vulnerability feed must not fail the build. -->
+    <WarningsNotAsErrors>NU1900</WarningsNotAsErrors>
+    <!-- No ICU needed on the server: cultures use invariant data, time zones come from the system's tzdata. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <PredefinedCulturesOnly>false</PredefinedCulturesOnly>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CinemaWatch.Core\CinemaWatch.Core.csproj" />
+  </ItemGroup>
+
+</Project>
