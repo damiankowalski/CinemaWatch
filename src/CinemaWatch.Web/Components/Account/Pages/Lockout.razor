@@ -1,0 +1,13 @@
+@page "/Account/Lockout"
+@attribute [AllowAnonymous]
+
+<PageTitle>@T("Konto zablokowane", "Account locked") – CinemaWatch</PageTitle>
+
+<section class="narrow">
+    <h1>@T("Konto tymczasowo zablokowane", "Account temporarily locked")</h1>
+    <p class="lead">
+        @T("Po pięciu nieudanych próbach logowania konto jest zablokowane na 15 minut. Spróbuj ponownie później albo ustaw nowe hasło.",
+           "After five failed sign-in attempts the account is locked for 15 minutes. Try again later or set a new password.")
+    </p>
+    <p><a href="Account/ForgotPassword">@T("Nie pamiętasz hasła?", "Forgot your password?")</a></p>
+</section>

@@ -1,0 +1,43 @@
+@*
+    One message: either the Message parameter, or a message carried over a redirect in a short-lived cookie
+    (IdentityRedirectManager.RedirectToWithStatus).
+*@
+@if (text is not null)
+{
+    <p class="status @(kind == StatusMessageKind.Error ? "error" : "ok")" role="@(kind == StatusMessageKind.Error ? "alert" : "status")">@text</p>
+}
+
+@code {
+    private string? text;
+    private StatusMessageKind kind;
+
+    [Parameter]
+    public string? Message { get; set; }
+
+    [Parameter]
+    public StatusMessageKind Kind { get; set; } = StatusMessageKind.Error;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        var cookie = HttpContext.Request.Cookies[IdentityRedirectManager.StatusCookieName];
+        if (cookie is null)
+            return;
+        HttpContext.Response.Cookies.Delete(IdentityRedirectManager.StatusCookieName);
+        var separator = cookie.IndexOf('|');
+        if (separator <= 0)
+            return;
+        kind = cookie[..separator] == "error" ? StatusMessageKind.Error : StatusMessageKind.Success;
+        text = cookie[(separator + 1)..];
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (Message is null)
+            return;
+        text = Message;
+        kind = Kind;
+    }
+}

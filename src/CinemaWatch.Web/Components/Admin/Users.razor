@@ -1,0 +1,121 @@
+@page "/admin/users"
+@attribute [Authorize(Policy = OwnerAuthorizationHandler.Policy)]
+@inject AccountService Accounts
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>@T("Użytkownicy", "Users") – CinemaWatch</PageTitle>
+
+<h1>@T("Użytkownicy", "Users")</h1>
+<StatusMessage />
+
+<section class="narrow">
+    <h2>@T("Zaproś osobę", "Invite someone")</h2>
+    <p>@T("Zaproszona osoba dostanie e-mail z linkiem do ustawienia hasła. Link działa 24 godziny.", "The invited person gets an e-mail with a link to set a password. The link works for 24 hours.")</p>
+
+    <StatusMessage Message="@error" />
+
+    <EditForm Model="Input" method="post" OnSubmit="InviteAsync" FormName="invite" class="form">
+        <label for="email">E-mail</label>
+        <InputText id="email" type="email" @bind-Value="Input.Email" autocomplete="off" required />
+
+        <label for="language">@T("Język e-maili", "E-mail language")</label>
+        <InputSelect id="language" @bind-Value="Input.Language">
+            <option value="pl">polski</option>
+            <option value="en">English</option>
+        </InputSelect>
+
+        <button type="submit" class="button primary">@T("Wyślij zaproszenie", "Send invitation")</button>
+    </EditForm>
+</section>
+
+<h2>@T("Konta", "Accounts")</h2>
+@if (accounts.Count == 0)
+{
+    <p>@T("Nie ma jeszcze kont.", "There are no accounts yet.")</p>
+}
+else
+{
+    <div class="table-scroll">
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">E-mail</th>
+                    <th scope="col">@T("Stan", "Status")</th>
+                    <th scope="col">@T("Utworzone", "Created")</th>
+                    <th scope="col">@T("Ostatnie zaproszenie", "Last invitation")</th>
+                    <th scope="col"><span class="visually-hidden">@T("Akcje", "Actions")</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var account in accounts)
+                {
+                    <tr>
+                        <td>@account.Email</td>
+                        <td>
+                            @if (account.IsPending)
+                            {
+                                <span class="badge pending">@T("czeka na aktywację", "waiting for activation")</span>
+                            }
+                            else
+                            {
+                                <span class="badge active">@T("aktywne", "active")</span>
+                            }
+                        </td>
+                        <td>@Format(account.CreatedAt)</td>
+                        <td>@(account.InvitedAt is { } invited ? Format(invited) : "")</td>
+                        <td>
+                            @if (account.IsPending)
+                            {
+                                <form action="admin/users/resend" method="post">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="email" value="@account.Email" />
+                                    <button type="submit" class="link">@T("Wyślij ponownie", "Send again")</button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<AccountSummary> accounts = [];
+    private string? error;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        accounts = await Accounts.ListAccountsAsync();
+    }
+
+    private async Task InviteAsync()
+    {
+        if (FormChecks.Email(Input.Email) is { } problem)
+        {
+            error = problem;
+            return;
+        }
+
+        var email = Input.Email.Trim();
+        var result = await Accounts.InviteAsync(email, Localizer.Parse(Input.Language) ?? AppLanguage.Polish);
+        var (kind, message) = AdminMessages.Describe(result, email);
+        RedirectManager.RedirectToWithStatus("admin/users", kind, message, HttpContext);
+    }
+
+    // Polish wall-clock time, like everything else in CinemaWatch (the server runs in UTC).
+    private static string Format(DateTimeOffset time) => PolishTime.FromUtc(time.UtcDateTime).ToString("d.MM.yyyy HH:mm", Culture);
+
+    private sealed class InputModel
+    {
+        public string Email { get; set; } = "";
+        public string Language { get; set; } = "pl";
+    }
+}

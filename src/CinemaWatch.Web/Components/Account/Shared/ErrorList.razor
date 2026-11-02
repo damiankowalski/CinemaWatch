@@ -1,0 +1,24 @@
+@* Validation and Identity errors of a form, in the current language. *@
+@if (Errors.Count > 0)
+{
+    <div class="status error" role="alert">
+        @if (Errors.Count == 1)
+        {
+            <p>@Errors[0]</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var error in Errors)
+                {
+                    <li>@error</li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<string> Errors { get; set; } = [];
+}

@@ -1,0 +1,42 @@
+@page "/Account/Manage"
+@inject UserManager<AppUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>@T("Konto", "Account") – CinemaWatch</PageTitle>
+
+<section class="narrow">
+    <h1>@T("Twoje konto", "Your account")</h1>
+    <StatusMessage />
+
+    @if (user is not null)
+    {
+        <dl class="facts">
+            <dt>E-mail</dt>
+            <dd>@user.Email</dd>
+            <dt>@T("Język e-maili", "E-mail language")</dt>
+            <dd>@(user.Language == "en" ? "English" : "polski") <span class="hint">@T("(zmienisz go przełącznikiem PL / EN u góry)", "(change it with the PL / EN switch at the top)")</span></dd>
+        </dl>
+
+        <h2>@T("Hasło", "Password")</h2>
+        <p><a class="button" href="Account/Manage/ChangePassword">@T("Zmień hasło", "Change password")</a></p>
+
+        <h2>@T("Twoje dane", "Your data")</h2>
+        <p>@T("Możesz pobrać dane konta w pliku JSON albo usunąć konto razem ze wszystkimi danymi.", "You can download your account's data as a JSON file or delete the account with all its data.")</p>
+        <div class="actions">
+            <form action="Account/Manage/DownloadPersonalData" method="post">
+                <AntiforgeryToken />
+                <button type="submit" class="button">@T("Pobierz moje dane", "Download my data")</button>
+            </form>
+            <a class="button danger-outline" href="Account/Manage/DeleteAccount">@T("Usuń konto", "Delete account")</a>
+        </div>
+    }
+</section>
+
+@code {
+    private AppUser? user;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync() => user = await UserManager.GetUserAsync(HttpContext.User);
+}

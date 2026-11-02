@@ -1,0 +1,312 @@
+/*
+  CinemaWatch web: one stylesheet, no framework. The font and the light/dark switch follow the system, like the
+  desktop app. One accent: the green of a seat that has just become free - also the colour of the main action.
+*/
+:root {
+    color-scheme: light dark;
+    --screen: #f4f6f9;
+    --surface: #ffffff;
+    --ink: #1b2232;
+    --muted: #5b6476;
+    --line: #d8dde6;
+    --seat: #b9c1ce;
+    --free: #17804f;
+    --free-hover: #126a41;
+    --on-free: #ffffff;
+    --danger: #b42318;
+    --on-danger: #ffffff;
+    --focus: #2457d6;
+    --ok-bg: #e7f4ec;
+    --error-bg: #fdecea;
+    --radius: 6px;
+    --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --screen: #12161e;
+        --surface: #1a202b;
+        --ink: #e5e9f0;
+        --muted: #9ea7b6;
+        --line: #2c3442;
+        --seat: #3b4455;
+        --free: #3fbf85;
+        --free-hover: #5ccf9a;
+        --on-free: #0b1a12;
+        --danger: #f2766b;
+        --on-danger: #1f0b09;
+        --focus: #7ea3ff;
+        --ok-bg: #16281f;
+        --error-bg: #2d1715;
+    }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--screen);
+    color: var(--ink);
+    font: 1rem/1.55 var(--font);
+}
+
+a {
+    color: var(--ink);
+    text-decoration-color: var(--free);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+}
+
+a:hover { color: var(--free); }
+
+:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+h1, h2 {
+    font-family: var(--font-display);
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+}
+
+h1 { font-size: 1.85rem; font-weight: 600; margin: 0 0 0.75rem; }
+h2 { font-size: 1.2rem; font-weight: 600; margin: 2rem 0 0.5rem; }
+p { margin: 0 0 1rem; }
+code { font-size: 0.9em; }
+
+/* Header, main column, footer */
+
+.site-header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+}
+
+.bar {
+    max-width: 56rem;
+    margin: 0 auto;
+    padding: 0.75rem 1.25rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.mark circle { fill: var(--seat); }
+.mark .free { fill: var(--free); }
+
+nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.1rem;
+}
+
+nav a { text-decoration: none; }
+nav a:hover { text-decoration: underline; }
+
+.languages {
+    display: inline-flex;
+    gap: 0.5rem;
+    padding-left: 1rem;
+    border-left: 1px solid var(--line);
+    font-size: 0.9rem;
+}
+
+.languages [aria-current] { font-weight: 600; }
+
+.content {
+    flex: 1;
+    width: 100%;
+    max-width: 56rem;
+    margin: 0 auto;
+    padding: 2rem 1.25rem 3rem;
+}
+
+.site-footer {
+    width: 100%;
+    max-width: 56rem;
+    margin: 0 auto;
+    padding: 1rem 1.25rem 2rem;
+    display: flex;
+    gap: 1.5rem;
+    color: var(--muted);
+    font-size: 0.875rem;
+}
+
+.site-footer a { color: var(--muted); }
+
+/* Text */
+
+.narrow { max-width: 26rem; }
+.prose { max-width: 40rem; }
+.lead { color: var(--muted); font-size: 1.05rem; }
+.hint { color: var(--muted); font-size: 0.875rem; }
+.aside { margin-top: 1.5rem; }
+
+/* Forms */
+
+.form {
+    display: grid;
+    gap: 0.35rem;
+    margin: 1.25rem 0;
+}
+
+.form label { margin-top: 0.6rem; font-size: 0.95rem; font-weight: 600; }
+.form label.check { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; }
+.form .hint { margin: 0; }
+.form button { margin-top: 1.1rem; justify-self: start; }
+
+input[type=email], input[type=password], input[type=text], select {
+    width: 100%;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+}
+
+input[readonly] { background: transparent; color: var(--muted); }
+input[type=checkbox] { width: 1.1rem; height: 1.1rem; accent-color: var(--free); }
+
+/* Buttons */
+
+.button {
+    display: inline-block;
+    padding: 0.55rem 1rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.button:hover { border-color: var(--ink); color: var(--ink); }
+.button.primary { background: var(--free); border-color: var(--free); color: var(--on-free); }
+.button.primary:hover { background: var(--free-hover); border-color: var(--free-hover); }
+.button.danger { background: var(--danger); border-color: var(--danger); color: var(--on-danger); }
+.button.danger-outline { border-color: var(--danger); color: var(--danger); }
+
+button.link {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--ink);
+    font: inherit;
+    text-decoration: underline;
+    text-decoration-color: var(--free);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+
+form.inline { display: inline; }
+
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.actions form { margin: 0; }
+
+/* Messages */
+
+.status {
+    margin: 0 0 1rem;
+    padding: 0.65rem 0.9rem;
+    border-left: 4px solid var(--free);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: var(--ok-bg);
+}
+
+.status.error { border-left-color: var(--danger); background: var(--error-bg); }
+.status p, .status ul { margin: 0; }
+.status ul { padding-left: 1.1rem; }
+
+/* Account facts, empty state */
+
+.facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.4rem 1.25rem;
+    margin: 1rem 0;
+}
+
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+
+.empty {
+    max-width: 40rem;
+    padding: 1.5rem;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+}
+
+.empty .mark { width: 93px; height: 18px; margin-bottom: 0.75rem; }
+
+/* Owner's account list: the status dot is a seat - grey while waiting, green once active. */
+
+.table-scroll { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+
+th, td {
+    padding: 0.55rem 0.75rem 0.55rem 0;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: middle;
+}
+
+th { color: var(--muted); font-weight: 600; }
+td form { margin: 0; }
+
+.badge { font-size: 0.85rem; white-space: nowrap; }
+
+.badge::before {
+    content: "";
+    display: inline-block;
+    width: 0.6rem;
+    height: 0.6rem;
+    margin-right: 0.4rem;
+    border-radius: 50%;
+    background: var(--seat);
+    vertical-align: 0.05rem;
+}
+
+.badge.active::before { background: var(--free); }
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+    .bar { padding: 0.6rem 1rem; }
+    .content { padding: 1.5rem 1rem 2.5rem; }
+    .languages { padding-left: 0; border-left: 0; }
+}

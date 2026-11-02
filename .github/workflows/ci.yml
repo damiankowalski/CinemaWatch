@@ -24,9 +24,31 @@ jobs:
       - name: Build app
         run: dotnet build src/CinemaWatch.App -c Release
 
+      - name: Test SaaS (without a database; the Linux job runs the database and web tests)
+        run: dotnet run --project tests/CinemaWatch.Saas.Tests -c Release
+
   # SaaS: the shared logic and the probe on Linux - the same Ubuntu release as the server (docs/SAAS.md §6).
   linux:
     runs-on: ubuntu-26.04
+    # PostgreSQL for the SaaS tests: a throwaway container inside the runner, gone when the job ends. The password
+    # below protects nothing else and is not a secret.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: cinemawatch
+          POSTGRES_PASSWORD: ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cinemawatch"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CINEMAWATCH_TEST_DB: Host=localhost;Port=5432;Database=postgres;Username=cinemawatch;Password=ci-only
+      # Here the database tests must run; a missing connection fails the job instead of skipping them.
+      CINEMAWATCH_REQUIRE_DB: "1"
     steps:
       - uses: actions/checkout@v7
 
@@ -39,6 +61,9 @@ jobs:
 
       - name: Test probe
         run: dotnet run --project tests/CinemaWatch.Probe.Tests -c Release
+
+      - name: Test SaaS (database and web)
+        run: dotnet run --project tests/CinemaWatch.Saas.Tests -c Release
 
       - name: Publish probe (linux-x64, single file)
         shell: pwsh

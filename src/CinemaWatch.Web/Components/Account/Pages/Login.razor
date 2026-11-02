@@ -1,0 +1,88 @@
+@page "/Account/Login"
+@using Microsoft.AspNetCore.Authentication
+@attribute [AllowAnonymous]
+@inject SignInManager<AppUser> SignInManager
+@inject UserManager<AppUser> UserManager
+@inject IdentityRedirectManager RedirectManager
+@inject ILogger<Login> Logger
+
+<PageTitle>@T("Logowanie", "Sign in") – CinemaWatch</PageTitle>
+
+<section class="narrow">
+    <h1>@T("Zaloguj się", "Sign in")</h1>
+    <p class="lead">@T("CinemaWatch to prywatny serwis dla zaproszonych osób.", "CinemaWatch is a private service for invited people.")</p>
+
+    <StatusMessage Message="@error" />
+
+    <EditForm Model="Input" method="post" OnSubmit="SignInAsync" FormName="login" class="form">
+        <label for="email">E-mail</label>
+        <InputText id="email" type="email" @bind-Value="Input.Email" autocomplete="username" required />
+
+        <label for="password">@T("Hasło", "Password")</label>
+        <InputText id="password" type="password" @bind-Value="Input.Password" autocomplete="current-password" required />
+
+        <label class="check">
+            <InputCheckbox @bind-Value="Input.RememberMe" />
+            @T("Nie wylogowuj mnie na tym urządzeniu", "Keep me signed in on this device")
+        </label>
+
+        <button type="submit" class="button primary">@T("Zaloguj się", "Sign in")</button>
+    </EditForm>
+
+    <p class="aside"><a href="Account/ForgotPassword">@T("Nie pamiętasz hasła?", "Forgot your password?")</a></p>
+</section>
+
+@code {
+    private string? error;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        if (HttpMethods.IsGet(HttpContext.Request.Method))
+            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+    }
+
+    private async Task SignInAsync()
+    {
+        if (!FormChecks.IsEmail(Input.Email) || string.IsNullOrEmpty(Input.Password))
+        {
+            error = T("Podaj adres e-mail i hasło.", "Enter your e-mail address and password.");
+            return;
+        }
+
+        // Five wrong passwords lock the account for 15 minutes (Program.cs).
+        var result = await SignInManager.PasswordSignInAsync(Input.Email.Trim(), Input.Password, Input.RememberMe, lockoutOnFailure: true);
+        if (result.Succeeded)
+        {
+            if (await UserManager.FindByEmailAsync(Input.Email.Trim()) is { } user)
+                await WebLanguage.SyncAfterSignInAsync(HttpContext, UserManager, user);
+            Logger.LogInformation("User signed in");
+            RedirectManager.RedirectTo(ReturnUrl);
+        }
+        else if (result.IsLockedOut)
+        {
+            Logger.LogWarning("Account locked out after failed sign-ins");
+            RedirectManager.RedirectTo("Account/Lockout");
+        }
+        else
+        {
+            error = T("Nieprawidłowy e-mail lub hasło.", "Incorrect e-mail or password.");
+        }
+    }
+
+    private sealed class InputModel
+    {
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public bool RememberMe { get; set; }
+    }
+}

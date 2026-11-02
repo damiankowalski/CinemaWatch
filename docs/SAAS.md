@@ -9,9 +9,9 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 2 November 2026. Status: **stage 2 done** - VPS hardened; `CinemaWatch.Probe` 0.1.0 runs on it every
-> 10-12 minutes since 2 Nov; risk test R1 provisionally green (the probe keeps collecting data, the full check comes
-> before stage 4). Next: **stage 3** - MVP 0 on the development PC.
+> Last updated: 2 November 2026. Status: **stage 3 in progress** - MVP 0 on the development PC; increment 1
+> (`saas-skeleton`: accounts by invitation, e-mail, Polish/English UI) built and tested. `CinemaWatch.Probe` 0.1.0 keeps
+> running on the VPS; risk test R1 provisionally green (full check before stage 4). Next: increment 2 (profiles).
 
 ---
 
@@ -251,17 +251,20 @@ interchangeable.
 ## 6. Repository and engineering (monorepo)
 
 - The SaaS lives in this repository. Projects: `tools/CinemaWatch.Probe` (risk test, stage 2; tests in
-  `tests/CinemaWatch.Probe.Tests`); proposed: `src/CinemaWatch.Web` (ASP.NET Core), `src/CinemaWatch.Worker`
-  (poller + notifier).
+  `tests/CinemaWatch.Probe.Tests`); `src/CinemaWatch.Server` (no HTTP: database, accounts, e-mail; later the poller
+  and the notifier); `src/CinemaWatch.Web` (ASP.NET Core, Blazor static server-side rendering; hosts the background
+  services in MVP 0, a separate worker host can follow); `tests/CinemaWatch.Saas.Tests`. Local setup and runbook:
+  [`src/CinemaWatch.Web/README.md`](../src/CinemaWatch.Web/README.md).
 - `CinemaWatch.Core` is shared. A change in Core needs the desktop tests to pass and must not change desktop
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
-- **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects get their own
-  version (e.g. a `Directory.Build.props` in their folder). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+- **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.1.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
-- CI: the Windows job (tests + desktop build) stays and also runs the probe tests; the `linux` job (since the
-  probe) runs the shared tests and the probe tests on `ubuntu-26.04` (the server's release) and publishes the
-  probe; container images come in stage 4. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
+- CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
+  database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
+  release) with a PostgreSQL 18 service container (`CINEMAWATCH_REQUIRE_DB=1`: a missing database fails the job) and
+  publishes the probe; container images come in stage 4. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
 - Conventions from KB §7 apply: English code and docs, UI texts via `T("polski", "English")`, tests for every
   behaviour change, no secrets in the repository (configuration via environment variables and GitHub Secrets).
 
@@ -310,11 +313,23 @@ Each stage ends with an update of this document.
       home for the same seats at about the same time. From stage 3 the proof is the e-mail (a test inbox on the
       development PC first, then the real inbox).
 
-### Stage 3 - MVP 0 on the development PC
-- [ ] Solution structure (§6), PostgreSQL for development (§10), EF Core migrations.
-- [ ] Identity, profile import and list, poller and notifier as background services, e-mail via the provider's
-      test mode.
-- [ ] Tests (reuse the fixtures from `tests/CinemaWatch.Tests`).
+### Stage 3 - MVP 0 on the development PC (in progress)
+Four increments, each a `feature/saas-<name>` branch squash-merged into `main` after CI; nothing is deployed or tagged.
+Every increment ends with something testable in the browser on the PC (`src/CinemaWatch.Web/README.md`).
+- [x] 1 `saas-skeleton` (2 Nov 2026): `CinemaWatch.Server` and `CinemaWatch.Web`, PostgreSQL 18 on the PC (EDB zip, no
+      service), EF Core migrations; accounts by invitation only (owner from configuration, invitation and reset links,
+      sign-in with lockout, account page, password change, data download, account deletion); e-mail over SMTP to a
+      local test inbox (smtp4dev); Polish/English UI; privacy page (draft); `Localizer.Use` in Core (language per
+      request / e-mail); tests incl. the whole web flow on a real database; CI with PostgreSQL.
+- [ ] 2 `saas-profiles`: import of `*.cinemawatch.json` (validation as KB §5.3), profile list, enable / disable /
+      delete / download, limit of active profiles.
+- [ ] 3 `saas-poller`: `watched_screenings` from the enabled profiles, scheduling (profile interval, server minimum
+      10 min, jitter), global rate limit, stop on 403 / 429 / challenge, notification state in the database, e-mail
+      "Wolne miejsca", history, "check now", "send a test e-mail", `check_log`. Development uses a fake Cinema City
+      client with captured responses; the real API only on demand.
+- [ ] 4 `saas-operator`: operator view (requests per hour, statuses, errors), polish, privacy text reviewed, docs.
+- Done when: the whole flow (invitation → import → freed seat → e-mail with the booking link) works on the PC, one
+      manual check against the real API passes, and the SaaS and desktop tests are green in CI.
 
 ### Stage 4 - Deploy to the VPS (staging)
 - [ ] Final R1 check first: at least 5 days of probe data (`SAAS_INFRA.md` §4.18) against the gate criteria of
@@ -428,6 +443,17 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | R1 gate brought forward: provisionally green after the first runs on 2 Nov; the probe keeps running during stage 3 and the full check with at least 5 days of data moves to the start of stage 4 | Stage 3 runs on the development PC and does not need the server; accounts, profiles and e-mail of MVP 0 are needed even with the residential-poller fallback (§11), so little work is at risk |
 | Nov 2026 | Probe 0.1.0 stays unchanged while it measures; the empty `bytes` column (compressed responses) is a known issue | Changing the instrument in the middle of the measurement is worse than one missing column; status, `cf_mitigated`, content type and duration decide R1 |
 | Nov 2026 | CI: actions on Node 24 (`checkout@v7`, `setup-dotnet@v6`, also in `release.yml`); the Linux job pinned to `ubuntu-26.04`; `*.service` / `*.timer` always with LF line ends | GitHub retires Node 20 for actions; `ubuntu-latest` moves on its own schedule, the pinned label matches the server; a CR from a Windows checkout would break the systemd units |
+| Nov 2026 | Stage 3 in four increments (skeleton, profiles, poller, operator view), each its own branch and pull request | Small reviewable steps; `main` holds unfinished SaaS code but nothing is deployed or tagged |
+| Nov 2026 | Front end: Blazor Web App with static server-side rendering, no JavaScript; interactivity only in MVP 1 (hall map) | Plain HTML forms cover MVP 0; C# and the Core texts are shared; no WebSocket circuit to keep alive |
+| Nov 2026 | Development database: PostgreSQL 18 from the EDB zip archive (`C:\DEV\CINEMAWATCH\pgsql`, cluster `pgdata`), started by hand; role `cinemawatch` with `CREATEDB` | No installer, no Windows service, undo = delete the folders; the same major version as the stage 4 container (19 was still a release candidate); Docker Desktop would need WSL2 |
+| Nov 2026 | One process in MVP 0: the web app hosts the background services; their logic lives in the library `CinemaWatch.Server` | One container in stage 4; a separate worker later is only a new host; "check now" goes through the database, so it survives the split |
+| Nov 2026 | E-mail over SMTP (MailKit); smtp4dev as the test inbox on the PC (local tool, in memory, localhost only); provider chosen in stage 4 | Every candidate provider offers SMTP, so the provider is configuration; nothing installed globally |
+| Nov 2026 | During development the poller uses a fake Cinema City client with captured responses; the real API only on demand | The home IP already carries the R1 control group; fixtures produce a "freed seat" on demand |
+| Nov 2026 | `Localizer.Use` (AsyncLocal) in Core: language per web request and per e-mail next to the process-wide language | A server serves people in different languages at once; the desktop is unchanged (tested) |
+| Nov 2026 | Accounts: Identity without roles, owner = `Saas:OwnerEmail` (user secrets / environment); invitation and reset use the same one-time link (24 h) and page; "Forgot your password?" re-sends an invitation to a waiting account; links built from `Saas:BaseUrl` | Smallest model for invitation-only accounts; an expired invitation needs no owner; no host-header injection in e-mail links |
+| Nov 2026 | Passwords: at least 12 characters, no character rules; 5 failed sign-ins lock the account for 15 minutes | Length beats composition rules, passwords come from a password manager; slows down guessing |
+| Nov 2026 | Database names in snake_case (`users`, `user_tokens`); data-protection keys in the database | No quoting in psql; sign-in cookies and e-mail links survive restarts and redeployments |
+| Nov 2026 | Development over `http://localhost:5180`, no development certificate | Nothing to install or trust on the PC; HTTPS comes from Cloudflare in stage 4 |
 
 ---
 
@@ -435,12 +461,12 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 
 | Question | Options / notes |
 | --- | --- |
-| Front end | Blazor (C#, shared models, maybe reuse of `CinemaWatch.ViewModels`) vs React / TypeScript |
-| Development database | PostgreSQL installed on Windows vs Docker Desktop |
-| Web and worker | Two containers from the start vs one process with hosted background services in MVP 0 |
 | Check interval | MVP 0: the profile's interval with a server minimum (about 10 minutes, decided Nov 2026); the minimum and the adaptive rules (§4.3) tuned with the stage 2 data |
 | E-mail provider | See §8.3 |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
+| Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
+| Migrations in production | Applied by the app at start-up vs an EF Core migration bundle in the deployment step (stage 4) |
+| Container image | The web app formats dates with the pl-PL / en-GB cultures, so the image needs ICU (stage 4) |
 | Ansible control node | WSL2 on the development PC (a system change there) vs a GitHub Actions Linux runner with the SSH key in GitHub Secrets (fits the stage 4 deployment) |
 
 ---
