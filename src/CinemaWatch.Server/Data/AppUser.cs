@@ -17,6 +17,11 @@ public sealed class AppUser : IdentityUser
     /// <summary>When the last invitation e-mail was sent.</summary>
     public DateTimeOffset? InvitedAt { get; set; }
 
+    /// <summary>
+    /// Own profile limit set by the owner; null = the default (<see cref="Profiles.LimitOptions.MaxProfiles"/>).
+    /// </summary>
+    public int? MaxProfiles { get; set; }
+
     /// <summary>True until the invitation link has been used (no password yet).</summary>
     public bool IsPending => !EmailConfirmed;
 }

@@ -1,7 +1,9 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CinemaWatch.Core;
 using CinemaWatch.Server.Accounts;
 using CinemaWatch.Server.Data;
+using CinemaWatch.Server.Profiles;
 using CinemaWatch.Web.Components.Account;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
@@ -10,7 +12,7 @@ using static CinemaWatch.Core.Localizer;
 
 namespace Microsoft.AspNetCore.Routing;
 
-/// <summary>Form endpoints that are not pages: sign-out, the personal-data download and the owner's "send again".</summary>
+/// <summary>Form endpoints that are not pages: sign-out, the personal-data download, the owner's "send again" and profile limit.</summary>
 internal static class AccountEndpoints
 {
     public static void MapAccountEndpoints(this IEndpointRouteBuilder endpoints)
@@ -24,7 +26,7 @@ internal static class AccountEndpoints
         });
 
         endpoints.MapPost("/Account/Manage/DownloadPersonalData", async (
-            HttpContext context, IAntiforgery antiforgery, UserManager<AppUser> users, ILoggerFactory loggerFactory) =>
+            HttpContext context, IAntiforgery antiforgery, UserManager<AppUser> users, ProfileService profiles, ILoggerFactory loggerFactory) =>
         {
             await antiforgery.ValidateRequestAsync(context);
             var user = await users.GetUserAsync(context.User);
@@ -32,15 +34,29 @@ internal static class AccountEndpoints
                 return Results.NotFound();
 
             loggerFactory.CreateLogger("PersonalData").LogInformation("User {UserId} downloaded their personal data", user.Id);
-            var data = new Dictionary<string, string?>
+            var list = await profiles.ListAsync(user.Id);
+            var data = new JsonObject
             {
                 ["id"] = user.Id,
                 ["email"] = user.Email,
                 ["language"] = user.Language,
                 ["createdAt"] = user.CreatedAt.ToString("O"),
                 ["invitedAt"] = user.InvitedAt?.ToString("O"),
+                ["profileLimit"] = list.Limit,
+                ["profiles"] = new JsonArray(list.Profiles.Select(p => (JsonNode)new JsonObject
+                {
+                    ["name"] = p.Name,
+                    ["enabled"] = p.Enabled,
+                    ["createdAt"] = p.CreatedAt.ToString("O"),
+                    ["updatedAt"] = p.UpdatedAt.ToString("O"),
+                    ["document"] = JsonNode.Parse(ProfileStore.Serialize(p.Document)),
+                }).ToArray()),
             };
-            var json = JsonSerializer.SerializeToUtf8Bytes(data, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonSerializer.SerializeToUtf8Bytes(data, new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // Polish letters stay readable
+            });
             return Results.File(json, "application/json", "cinemawatch-personal-data.json");
         });
 
@@ -50,6 +66,32 @@ internal static class AccountEndpoints
             // Form-bound minimal endpoints check the antiforgery token automatically.
             var result = await accounts.InviteAsync(email, AppLanguage.Polish);
             var (kind, message) = AdminMessages.Describe(result, email);
+            IdentityRedirectManager.SetStatus(context, kind, message);
+            return TypedResults.LocalRedirect("/admin/users");
+        }).RequireAuthorization(CinemaWatch.Web.OwnerAuthorizationHandler.Policy);
+
+        endpoints.MapPost("/admin/users/limit", async (
+            [FromForm] string userId, [FromForm] string? maxProfiles, HttpContext context, UserManager<AppUser> users, ProfileService profiles) =>
+        {
+            // Form-bound minimal endpoints check the antiforgery token automatically. An empty field means the default.
+            var email = (await users.FindByIdAsync(userId))?.Email ?? "";
+            int? limit = null;
+            var isNumberOrEmpty = string.IsNullOrWhiteSpace(maxProfiles);
+            if (!isNumberOrEmpty && int.TryParse(maxProfiles!.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+            {
+                limit = parsed;
+                isNumberOrEmpty = true;
+            }
+            var change = isNumberOrEmpty ? await profiles.SetLimitAsync(userId, limit) : LimitChange.OutOfRange;
+
+            var (kind, message) = change switch
+            {
+                LimitChange.Saved when limit is null => (StatusMessageKind.Success,
+                    T($"Limit profili dla {email}: domyślny ({profiles.Limits.MaxProfiles}).", $"Profile limit of {email}: the default ({profiles.Limits.MaxProfiles}).")),
+                LimitChange.Saved => (StatusMessageKind.Success, T($"Limit profili dla {email}: {limit}.", $"Profile limit of {email}: {limit}.")),
+                LimitChange.NotFound => (StatusMessageKind.Error, T("Nie ma takiego konta.", "There is no such account.")),
+                _ => (StatusMessageKind.Error, T($"Limit musi być liczbą od 1 do {LimitOptions.ProfileLimitCeiling}.", $"The limit must be a number from 1 to {LimitOptions.ProfileLimitCeiling}.")),
+            };
             IdentityRedirectManager.SetStatus(context, kind, message);
             return TypedResults.LocalRedirect("/admin/users");
         }).RequireAuthorization(CinemaWatch.Web.OwnerAuthorizationHandler.Policy);

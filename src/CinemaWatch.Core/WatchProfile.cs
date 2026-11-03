@@ -55,18 +55,29 @@ public static class ProfileStore
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // keep Polish letters readable
     };
 
-    public static WatchProfile Load(string path)
+    public static WatchProfile Load(string path) => Parse(File.ReadAllText(path));
+
+    /// <summary>
+    /// Reads a profile from JSON text (a file, an upload, a database row). Unknown fields are ignored; a newer format
+    /// version and a profile without a cinema or screenings are refused with <see cref="InvalidDataException"/>;
+    /// text that is not JSON of the right shape throws <see cref="JsonException"/>.
+    /// </summary>
+    public static WatchProfile Parse(string json)
     {
-        var profile = JsonSerializer.Deserialize<WatchProfile>(File.ReadAllText(path), Options)
+        var profile = JsonSerializer.Deserialize<WatchProfile>(json, Options)
             ?? throw new InvalidDataException(T("Plik profilu jest pusty.", "The profile file is empty."));
         if (profile.Version > WatchProfile.CurrentVersion)
             throw new InvalidDataException(T(
                 $"Profil zapisano w nowszej wersji aplikacji (wersja {profile.Version}).",
                 $"The profile was saved by a newer version of the app (version {profile.Version})."));
-        if (string.IsNullOrWhiteSpace(profile.CinemaId) || profile.Screenings.Count == 0)
+        // "screenings": null in the JSON leaves the list null despite the initializer.
+        if (string.IsNullOrWhiteSpace(profile.CinemaId) || profile.Screenings is not { Count: > 0 })
             throw new InvalidDataException(T("Profil nie zawiera kina albo seansów.", "The profile has no cinema or screenings."));
         return profile;
     }
+
+    /// <summary>The profile as readable JSON, exactly as <see cref="Save"/> writes it.</summary>
+    public static string Serialize(WatchProfile profile) => JsonSerializer.Serialize(profile, Options);
 
     /// <summary>Writes atomically (temp file + replace), so a crash never leaves a half-written profile.</summary>
     public static void Save(string path, WatchProfile profile)
@@ -75,7 +86,7 @@ public static class ProfileStore
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
         var temp = path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(profile, Options));
+        File.WriteAllText(temp, Serialize(profile));
         File.Move(temp, path, overwrite: true);
     }
 

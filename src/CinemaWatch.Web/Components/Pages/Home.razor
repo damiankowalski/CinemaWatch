@@ -1,15 +1,284 @@
 @page "/"
+@inject ProfileService Profiles
+@inject UserManager<AppUser> UserManager
+@inject IdentityRedirectManager RedirectManager
 
 <PageTitle>@T("Profile", "Profiles") – CinemaWatch</PageTitle>
 
-<h1>@T("Profile", "Profiles")</h1>
+<div class="page-head">
+    <h1>@T("Profile", "Profiles")</h1>
+    <p class="count">@T($"{list.Profiles.Count} z {list.Limit} profili", $"{list.Profiles.Count} of {list.Limit} profiles")</p>
+</div>
 <StatusMessage />
 
-<section class="empty">
-    <BrandMark />
+@if (results is not null)
+{
+    <div class="status @(results.All(r => r.Outcome is ImportOutcome.Added or ImportOutcome.Replaced) ? "ok" : "error")" role="alert">
+        <ul class="results">
+            @foreach (var result in results)
+            {
+                <li>
+                    @Describe(result)
+                    @if (result.Errors.Count > 0)
+                    {
+                        <ul>
+                            @foreach (var error in result.Errors.Take(MaxErrorsShown))
+                            {
+                                <li>@error</li>
+                            }
+                            @if (result.Errors.Count > MaxErrorsShown)
+                            {
+                                <li>@T($"…i jeszcze {result.Errors.Count - MaxErrorsShown}.", $"…and {result.Errors.Count - MaxErrorsShown} more.")</li>
+                            }
+                        </ul>
+                    }
+                </li>
+            }
+        </ul>
+    </div>
+}
+
+@if (list.Profiles.Count == 0)
+{
+    <section class="empty">
+        <BrandMark />
+        <p>
+            @T("Nie masz jeszcze profili. Profil zapisujesz w aplikacji CinemaWatch na Windows: wybierasz seanse i miejsca, a program zapisuje plik .cinemawatch.json. Zaimportuj go poniżej.",
+               "You have no profiles yet. You create a profile in the CinemaWatch Windows app: pick screenings and seats, and the app saves a .cinemawatch.json file. Import it below.")
+        </p>
+    </section>
+}
+else
+{
+    <p class="hint">@T("Serwer jeszcze nie sprawdza miejsc i nie wysyła e-maili: to przyjdzie w kolejnej wersji.", "The server does not check seats or send e-mails yet: that arrives in the next version.")</p>
+    <div class="profiles">
+        @foreach (var profile in list.Profiles)
+        {
+            var document = profile.Document;
+            var opened = profile.Id == OpenProfile;
+            var confirming = opened && Confirm == "delete";
+            <details class="profile" id="profile-@profile.Id" open="@opened">
+                <summary>
+                    <span class="profile-name">@profile.Name</span>
+                    <span class="badge @StateClass(profile)">@StateText(profile)</span>
+                    <span class="profile-meta">@Meta(document)</span>
+                </summary>
+
+                <div class="profile-body">
+                    <div class="table-scroll">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">@T("Seans", "Screening")</th>
+                                    <th scope="col">@T("Kino", "Cinema")</th>
+                                    <th scope="col">@T("Sala", "Hall")</th>
+                                    <th scope="col">@T("Miejsca", "Seats")</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var screening in document.Screenings.OrderBy(s => s.StartsAt))
+                                {
+                                    var past = screening.StartsAt <= polishNow;
+                                    <tr class="@(past ? "past" : null)">
+                                        <td>@screening.StartsAt.ToString("ddd d.MM.yyyy, HH:mm", Culture)@(past ? T(" (już się zaczął)", " (already started)") : "")</td>
+                                        <td>@CinemaText(screening, document)</td>
+                                        <td>@screening.Auditorium</td>
+                                        <td>@screening.SeatKeys.Count</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <p class="hint">
+                        @(document.MinAdjacent <= 1
+                            ? T("Powiadomienie, gdy zwolni się którekolwiek z pilnowanych miejsc.", "Notification when any of the watched seats becomes free.")
+                            : T($"Powiadomienie o co najmniej {document.MinAdjacent} wolnych miejscach obok siebie.",
+                                $"Notification when at least {document.MinAdjacent} watched seats next to each other become free."))
+                        @IntervalText(document.IntervalMinutes)
+                    </p>
+
+                    <div class="actions">
+                        <form action="profiles/@profile.Id/@(profile.Enabled ? "disable" : "enable")" method="post">
+                            <AntiforgeryToken />
+                            <button type="submit" class="button">@(profile.Enabled ? T("Wyłącz", "Disable") : T("Włącz", "Enable"))</button>
+                        </form>
+                        <a class="button" href="profiles/@profile.Id/download" download>@T("Pobierz plik", "Download file")</a>
+                        @if (!confirming)
+                        {
+                            <a class="button danger-outline" href="?profile=@profile.Id&confirm=delete#profile-@profile.Id">@T("Usuń", "Delete")</a>
+                        }
+                    </div>
+
+                    @* The question lives in the address (?profile=…&confirm=delete): a reload keeps it, "Keep" removes it. *@
+                    @if (confirming)
+                    {
+                        <div class="confirm" role="group" aria-label="@T("Potwierdzenie usunięcia", "Confirm deletion")">
+                            <p>@T($"Usunąć profil „{profile.Name}”? Plik w aplikacji na Windows zostaje.", $"Delete the profile \"{profile.Name}\"? The file in the Windows app stays.")</p>
+                            <div class="actions">
+                                <form action="profiles/@profile.Id/delete" method="post">
+                                    <AntiforgeryToken />
+                                    <button type="submit" class="button danger">@T("Tak, usuń profil", "Yes, delete the profile")</button>
+                                </form>
+                                <a class="button" href="?profile=@profile.Id#profile-@profile.Id">@T("Nie usuwaj", "Keep it")</a>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </details>
+        }
+    </div>
+}
+
+<section class="import">
+    <h2>@T("Importuj profile", "Import profiles")</h2>
     <p>
-        @T("Tu pojawią się profile z aplikacji CinemaWatch na Windows: seanse i miejsca, których pilnujesz. Gdy któreś się zwolni, dostaniesz e-mail z linkiem do zakupu.",
-           "Your profiles from the CinemaWatch Windows app will appear here: the screenings and seats you watch. When one frees up, you get an e-mail with a booking link.")
+        @T($"Wybierz pliki .cinemawatch.json z folderu Profiles obok programu CinemaWatch na Windows, najwyżej {ProfileImport.MaxFilesPerImport} naraz. Plik z tą samą nazwą profilu zastępuje profil, który już tu jest.",
+           $"Choose .cinemawatch.json files from the Profiles folder next to the CinemaWatch Windows app, at most {ProfileImport.MaxFilesPerImport} at once. A file with the name of a profile you already have here replaces it.")
     </p>
-    <p class="hint">@T("Import plików .cinemawatch.json będzie dostępny w kolejnej wersji.", "Importing .cinemawatch.json files arrives in the next version.")</p>
+    @if (list.Profiles.Count >= list.Limit)
+    {
+        <p class="hint">@T($"Masz już {list.Profiles.Count} z {list.Limit} profili: nowy dodasz po usunięciu któregoś. Zastępowanie istniejących działa dalej.",
+                           $"You already have {list.Profiles.Count} of {list.Limit} profiles: delete one to add a new one. Replacing existing ones still works.")</p>
+    }
+    <EditForm Model="Input" method="post" enctype="multipart/form-data" OnSubmit="ImportAsync" FormName="import" class="form">
+        <label for="files">@T("Pliki profili", "Profile files")</label>
+        <input id="files" type="file" name="Input.Files" multiple accept=".json,application/json" required />
+        <button type="submit" class="button primary">@T("Importuj", "Import")</button>
+    </EditForm>
 </section>
+
+@code {
+    private const int MaxErrorsShown = 8;
+
+    private ProfileList list = new([], 0);
+    private IReadOnlyList<ImportResult>? results;
+    private DateTime polishNow;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    /// <summary>?profile=… opens that profile (after enabling, disabling or "Keep it"); someone else's id opens nothing.</summary>
+    [SupplyParameterFromQuery(Name = "profile")]
+    private Guid? OpenProfile { get; set; }
+
+    /// <summary>?confirm=delete with ?profile=… shows the deletion question for that profile.</summary>
+    [SupplyParameterFromQuery(Name = "confirm")]
+    private string? Confirm { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        await LoadAsync();
+    }
+
+    private async Task ImportAsync()
+    {
+        var files = Input.Files ?? [];
+        if (files.Count == 0)
+        {
+            results = [new ImportResult("", "", ImportOutcome.Invalid, [T("Wybierz co najmniej jeden plik.", "Choose at least one file.")])];
+            return;
+        }
+        if (files.Count > ProfileImport.MaxFilesPerImport)
+        {
+            results = [new ImportResult("", "", ImportOutcome.Invalid,
+                [T($"Najwyżej {ProfileImport.MaxFilesPerImport} plików naraz.", $"At most {ProfileImport.MaxFilesPerImport} files at once.")])];
+            return;
+        }
+
+        var uploads = new List<ProfileUpload>();
+        try
+        {
+            foreach (var file in files)
+                uploads.Add(new ProfileUpload(file.FileName, file.Length, file.OpenReadStream()));
+            results = await Profiles.ImportAsync(UserManager.GetUserId(HttpContext.User)!, uploads);
+        }
+        finally
+        {
+            foreach (var upload in uploads)
+                await upload.Content.DisposeAsync();
+        }
+
+        // Everything stored: back to the list with a short message (a reload does not post the files again).
+        if (results.All(r => r.Outcome is ImportOutcome.Added or ImportOutcome.Replaced))
+        {
+            RedirectManager.RedirectToWithStatus("/", StatusMessageKind.Success, Summary(results), HttpContext);
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        list = await Profiles.ListAsync(UserManager.GetUserId(HttpContext.User)!);
+        polishNow = PolishTime.Now();
+    }
+
+    private string Describe(ImportResult result) => result.Outcome switch
+    {
+        ImportOutcome.Added => T($"Dodano profil „{result.ProfileName}”.", $"Added the profile \"{result.ProfileName}\"."),
+        ImportOutcome.Replaced => T($"Zaktualizowano profil „{result.ProfileName}” (poprzednia wersja zastąpiona).", $"Updated the profile \"{result.ProfileName}\" (previous version replaced)."),
+        ImportOutcome.LimitReached => T($"Nie dodano „{result.ProfileName}”: masz już {list.Limit} z {list.Limit} profili. Usuń któryś, żeby dodać nowy.",
+                                        $"\"{result.ProfileName}\" not added: you already have {list.Limit} of {list.Limit} profiles. Delete one to add a new one."),
+        _ when result.FileName.Length == 0 => "",
+        _ => T($"Plik {result.FileName} odrzucony:", $"File {result.FileName} refused:"),
+    };
+
+    private static string Summary(IReadOnlyList<ImportResult> results)
+    {
+        if (results.Count == 1)
+            return results[0].Outcome == ImportOutcome.Added
+                ? T($"Dodano profil „{results[0].ProfileName}”.", $"Added the profile \"{results[0].ProfileName}\".")
+                : T($"Zaktualizowano profil „{results[0].ProfileName}”.", $"Updated the profile \"{results[0].ProfileName}\".");
+        var added = results.Count(r => r.Outcome == ImportOutcome.Added);
+        var replaced = results.Count - added;
+        return T($"Zaimportowano pliki: {results.Count} (nowe profile: {added}, zaktualizowane: {replaced}).",
+                 $"Imported files: {results.Count} (new profiles: {added}, updated: {replaced}).");
+    }
+
+    private string IntervalText(int profileInterval)
+    {
+        var effective = Profiles.Limits.EffectiveInterval(profileInterval);
+        return effective == profileInterval
+            ? T($"Sprawdzanie co {effective} min.", $"Checked every {effective} min.")
+            : T($"Sprawdzanie co {effective} min (profil prosi o {profileInterval} min, serwer sprawdza najczęściej co {effective}).",
+                $"Checked every {effective} min (the profile asks for {profileInterval} min; the server checks at most every {effective}).");
+    }
+
+    /// <summary>"Diuna: Część trzecia, 2 seanse, 4 pilnowane miejsca"</summary>
+    private static string Meta(WatchProfile document) => string.Join(", ", new[]
+    {
+        document.FilmName,
+        Count(document.Screenings.Count, "seans", "seanse", "seansów", "screening", "screenings"),
+        Count(document.Screenings.Sum(s => s.SeatKeys.Count), "pilnowane miejsce", "pilnowane miejsca", "pilnowanych miejsc", "watched seat", "watched seats"),
+    }.Where(part => part.Length > 0));
+
+    /// <summary>
+    /// "Warszawa, Sadyba" from the IMAX cinema list (city in the UI language); profiles saved before desktop 1.4 have no
+    /// city per screening, so the list is the first source and the file's texts only the fallback.
+    /// </summary>
+    private static string CinemaText(WatchedScreening screening, WatchProfile document)
+    {
+        var cinemaId = screening.CinemaId.Length > 0 ? screening.CinemaId : document.CinemaId;
+        if (Locations.FindCinema(cinemaId) is { } cinema)
+            return $"{cinema.DisplayCity}, {ShortCinemaName(cinema.Name)}";
+        return string.Join(", ", new[] { screening.City, ShortCinemaName(document.CinemaName) }.Where(part => part.Length > 0));
+    }
+
+    private static string ShortCinemaName(string name) =>
+        name.StartsWith("Cinema City ", StringComparison.Ordinal) ? name["Cinema City ".Length..] : name;
+
+    private static string StateClass(ProfileView profile) => profile.Ended ? "ended" : profile.Enabled ? "active" : "off";
+
+    private static string StateText(ProfileView profile) =>
+        profile.Ended ? T("zakończony", "ended") : profile.Enabled ? T("włączony", "enabled") : T("wyłączony", "disabled");
+
+    private sealed class InputModel
+    {
+        public IReadOnlyList<IFormFile>? Files { get; set; }
+    }
+}

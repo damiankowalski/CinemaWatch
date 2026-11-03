@@ -1,6 +1,7 @@
 @page "/admin/users"
 @attribute [Authorize(Policy = OwnerAuthorizationHandler.Policy)]
 @inject AccountService Accounts
+@inject ProfileService Profiles
 @inject IdentityRedirectManager RedirectManager
 
 <PageTitle>@T("Użytkownicy", "Users") – CinemaWatch</PageTitle>
@@ -43,6 +44,8 @@ else
                     <th scope="col">@T("Stan", "Status")</th>
                     <th scope="col">@T("Utworzone", "Created")</th>
                     <th scope="col">@T("Ostatnie zaproszenie", "Last invitation")</th>
+                    <th scope="col">@T("Profile", "Profiles")</th>
+                    <th scope="col">@T("Limit profili", "Profile limit")</th>
                     <th scope="col"><span class="visually-hidden">@T("Akcje", "Actions")</span></th>
                 </tr>
             </thead>
@@ -63,6 +66,17 @@ else
                         </td>
                         <td>@Format(account.CreatedAt)</td>
                         <td>@(account.InvitedAt is { } invited ? Format(invited) : "")</td>
+                        <td>@profileCounts.GetValueOrDefault(account.Id)</td>
+                        <td>
+                            <form action="admin/users/limit" method="post" class="limit">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="userId" value="@account.Id" />
+                                <label class="visually-hidden" for="limit-@account.Id">@T($"Limit profili: {account.Email}", $"Profile limit: {account.Email}")</label>
+                                <input id="limit-@account.Id" type="number" name="maxProfiles" min="1" max="@LimitOptions.ProfileLimitCeiling"
+                                       value="@account.MaxProfiles" placeholder="@Profiles.Limits.MaxProfiles" />
+                                <button type="submit" class="link">@T("Zapisz", "Save")</button>
+                            </form>
+                        </td>
                         <td>
                             @if (account.IsPending)
                             {
@@ -78,10 +92,13 @@ else
             </tbody>
         </table>
     </div>
+    <p class="hint">@T($"Limit profili: puste pole oznacza domyślny ({Profiles.Limits.MaxProfiles}). Obniżenie limitu niczego nie usuwa, tylko blokuje dodawanie nowych profili.",
+                       $"Profile limit: an empty field means the default ({Profiles.Limits.MaxProfiles}). Lowering a limit deletes nothing; it only blocks new profiles.")</p>
 }
 
 @code {
     private IReadOnlyList<AccountSummary> accounts = [];
+    private IReadOnlyDictionary<string, int> profileCounts = new Dictionary<string, int>();
     private string? error;
 
     [CascadingParameter]
@@ -94,6 +111,7 @@ else
     {
         Input ??= new();
         accounts = await Accounts.ListAccountsAsync();
+        profileCounts = await Profiles.CountByAccountAsync();
     }
 
     private async Task InviteAsync()
