@@ -172,7 +172,7 @@ nav a:hover { text-decoration: underline; }
 .form .hint { margin: 0; }
 .form button { margin-top: 1.1rem; justify-self: start; }
 
-input[type=email], input[type=password], input[type=text], select {
+input[type=email], input[type=password], input[type=text], input[type=number], select {
     width: 100%;
     padding: 0.55rem 0.7rem;
     border: 1px solid var(--line);
@@ -295,6 +295,87 @@ td form { margin: 0; }
 }
 
 .badge.active::before { background: var(--free); }
+.badge.ended::before { background: transparent; box-shadow: inset 0 0 0 1px var(--seat); }
+
+/* Owner's account list: the profile limit is a small inline form. */
+
+.limit { display: flex; align-items: center; gap: 0.5rem; }
+.limit input[type=number] { width: 4.5rem; padding: 0.3rem 0.45rem; }
+
+/* Profiles: a plain list, one row per profile; the row opens to show its screenings and actions. */
+
+.page-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0 1rem;
+}
+
+.page-head .count { margin: 0 0 0.75rem; color: var(--muted); }
+
+.profiles { margin: 1rem 0 0; border-top: 1px solid var(--line); }
+
+.profile { border-bottom: 1px solid var(--line); }
+
+.profile > summary {
+    display: grid;
+    grid-template-columns: 1rem 1fr auto;
+    align-items: baseline;
+    gap: 0.15rem 0.5rem;
+    padding: 0.85rem 0;
+    cursor: pointer;
+    list-style: none;
+}
+
+.profile > summary::-webkit-details-marker { display: none; }
+
+.profile > summary::before {
+    content: "";
+    width: 0.45rem;
+    height: 0.45rem;
+    border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted);
+    transform: translateY(-0.15rem) rotate(-45deg);
+}
+
+.profile[open] > summary::before { transform: translateY(-0.25rem) rotate(45deg); }
+
+@media (prefers-reduced-motion: no-preference) {
+    .profile > summary::before { transition: transform 0.15s ease-out; }
+}
+
+.profile-name { font-weight: 600; overflow-wrap: anywhere; }
+.profile-meta { grid-column: 2 / -1; color: var(--muted); font-size: 0.9rem; }
+.profile-body { padding: 0 0 1.25rem 1.5rem; }
+.profile-body .hint { margin: 0.75rem 0 1rem; }
+
+tr.past td { color: var(--muted); }
+
+/* Deletion question under the actions: the danger is marked by the line on the left, like an error message. */
+.confirm {
+    margin-top: 1rem;
+    padding: 0.75rem 0 0.25rem 0.9rem;
+    border-left: 4px solid var(--danger);
+}
+
+.confirm p { margin: 0 0 0.75rem; }
+
+.import { max-width: 40rem; margin-top: 2.5rem; }
+.import .form { margin-top: 0.5rem; }
+
+input[type=file] {
+    width: 100%;
+    padding: 0.9rem;
+    border: 1px dashed var(--seat);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+}
+
+.results, .results ul { margin: 0; padding-left: 1.1rem; }
+.results > li + li { margin-top: 0.35rem; }
 
 .visually-hidden {
     position: absolute;
@@ -306,6 +387,7 @@ td form { margin: 0; }
 }
 
 @media (max-width: 40rem) {
+    .profile-body { padding-left: 0; }
     .bar { padding: 0.6rem 1rem; }
     .content { padding: 1.5rem 1rem 2.5rem; }
     .languages { padding-left: 0; border-left: 0; }

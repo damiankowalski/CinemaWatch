@@ -210,6 +210,40 @@ TestRunner.Add("Profile: JSON round trip keeps Polish text readable", () =>
     Assert.Equal("Diuna Część trzecia 15.12–16.12", ProfileStore.ToFileName("Diuna: Część trzecia 15.12–16.12"));
 });
 
+TestRunner.Add("Profile: Parse and Serialize match Load and Save; unknown fields ignored, broken profiles refused", () =>
+{
+    var json = ProfileStore.Serialize(SampleProfile("1_18_4"));
+    var path = Path.Combine(Path.GetTempPath(), $"cw-{Guid.NewGuid():N}{ProfileStore.FileExtension}");
+    try
+    {
+        ProfileStore.Save(path, SampleProfile("1_18_4"));
+        Assert.Equal(json, File.ReadAllText(path));
+    }
+    finally
+    {
+        File.Delete(path);
+    }
+    Assert.Equal(json, ProfileStore.Serialize(ProfileStore.Parse(json)));
+    Assert.Equal("8105s2r", ProfileStore.Parse(json.Replace("\"version\": 1,", "\"version\": 1, \"futureField\": [1, 2],")).FilmId);
+
+    using (Localizer.Use(AppLanguage.English))
+    {
+        foreach (var broken in new[] { "null", """{"cinemaId":"1060","screenings":null}""", """{"cinemaId":"","screenings":[{}]}""", """{"version":2,"cinemaId":"1060"}""" })
+        {
+            var threw = false;
+            try
+            {
+                ProfileStore.Parse(broken);
+            }
+            catch (InvalidDataException)
+            {
+                threw = true;
+            }
+            Assert.True(threw);
+        }
+    }
+});
+
 TestRunner.Add("Checker: available seats per screening, past screenings skipped", async () =>
 {
     using var client = new CinemaCityClient(new FixtureHttpHandler());

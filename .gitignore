@@ -481,5 +481,5 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-# Profiles created next to a locally run exe
-Profiles/
+# Profiles created next to a locally run exe: the profile files only, so source folders named Profiles stay tracked
+*.cinemawatch.json

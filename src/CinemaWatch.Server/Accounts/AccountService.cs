@@ -30,8 +30,8 @@ public enum InvitationOutcome
 
 public sealed record InvitationResult(InvitationOutcome Outcome, IReadOnlyList<string> Errors);
 
-/// <summary>One row of the owner's account list.</summary>
-public sealed record AccountSummary(string Id, string Email, bool IsPending, string Language, DateTimeOffset CreatedAt, DateTimeOffset? InvitedAt);
+/// <summary>One row of the owner's account list. <see cref="MaxProfiles"/>: own profile limit, null = the default.</summary>
+public sealed record AccountSummary(string Id, string Email, bool IsPending, string Language, DateTimeOffset CreatedAt, DateTimeOffset? InvitedAt, int? MaxProfiles);
 
 /// <summary>
 /// Accounts by invitation only (docs/SAAS.md §5.1): the owner invites an e-mail address, the invited person sets a
@@ -93,7 +93,7 @@ public sealed class AccountService(
     public async Task<IReadOnlyList<AccountSummary>> ListAccountsAsync(CancellationToken cancellationToken = default) =>
         (await users.Users.ToListAsync(cancellationToken))
             .OrderBy(u => u.CreatedAt)
-            .Select(u => new AccountSummary(u.Id, u.Email ?? "", u.IsPending, u.Language, u.CreatedAt, u.InvitedAt))
+            .Select(u => new AccountSummary(u.Id, u.Email ?? "", u.IsPending, u.Language, u.CreatedAt, u.InvitedAt, u.MaxProfiles))
             .ToList();
 
     /// <summary>

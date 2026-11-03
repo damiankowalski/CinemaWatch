@@ -9,9 +9,10 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 2 November 2026. Status: **stage 3 in progress** - MVP 0 on the development PC; increment 1
-> (`saas-skeleton`: accounts by invitation, e-mail, Polish/English UI) built and tested. `CinemaWatch.Probe` 0.1.0 keeps
-> running on the VPS; risk test R1 provisionally green (full check before stage 4). Next: increment 2 (profiles).
+> Last updated: 3 November 2026. Status: **stage 3 in progress** - MVP 0 on the development PC; increments 1
+> (`saas-skeleton`: accounts by invitation, e-mail, Polish/English UI) and 2 (`saas-profiles`: profile import, list,
+> profile limit per account) built and tested. `CinemaWatch.Probe` 0.1.0 keeps running on the VPS; risk test R1
+> provisionally green (full check before stage 4). Next: increment 3 (poller).
 
 ---
 
@@ -104,9 +105,12 @@ Stripe (later): Checkout, Billing, webhooks                       --> web app
 
 ### 4.2 Data model (sketch)
 
-- `users` - ASP.NET Core Identity tables (e-mail, password hash, confirmation).
-- `profiles` - `id`, `user_id`, `enabled`, `created_at`, `updated_at`, `document` (JSONB: profile format v1,
-  unchanged, so import and export with desktop and Android stay free).
+- `users` - ASP.NET Core Identity tables (e-mail, password hash, confirmation); `max_profiles` = the account's own
+  profile limit set by the owner (null = the default from configuration).
+- `profiles` - `id` (UUID v7), `user_id` (cascade on account deletion), `name` (unique per account: re-importing a
+  profile with the same name replaces it), `enabled`, `ends_at` (start of the last screening, UTC), `created_at`,
+  `updated_at`, `document` (JSONB: profile format v1, normalised as the desktop saves it, so import and export with
+  desktop and Android stay free).
 - `watched_screenings` - one row per unique screening id: `cinema_id`, `starts_at` (Europe/Warsaw), cached
   `venue_id`, `seatplan_id`, `venue_type_id`, `is_reserved`, `next_check_at`, last result. The poller works on this
   table, not on profiles.
@@ -157,8 +161,9 @@ safety net against application bugs.
   as self-tests.
 - **Free plan vs trial:** CinemaWatch is used around premieres, so a permanent free plan with limits fits better than
   a time-limited trial.
-- **Entitlements:** a plan defines limits - active profiles, screenings per profile, date range, watched seats,
-  minimum interval, channels. Enforced on the server (API and worker), never only in the UI. The interval is the
+- **Entitlements:** a plan defines limits - profiles, screenings per profile, date range, watched seats,
+  minimum interval, channels. The first exists since increment 2: profiles per account, default from configuration,
+  set per account by the owner (`users.max_profiles`); a plan would set the same value. Enforced on the server (API and worker), never only in the UI. The interval is the
   most expensive limit (request budget).
 - **Payments:** Stripe in test mode - Checkout (card data never touches our server), Billing, Customer Portal,
   webhooks. Build both a one-time "pass" (e.g. 30 days around a premiere) and a subscription to learn both. Stripe is
@@ -229,7 +234,8 @@ In scope:
 - E-mail "Wolne miejsca: {film}" with one line per screening and the booking link; a "send a test e-mail" button
   to check delivery and spam placement.
 - Notification history per profile.
-- Fixed limits in configuration (e.g. 3 active profiles per account, minimum interval 10 minutes).
+- Limits in configuration (`Saas:Limits`): 5 profiles per account (enabled, disabled and ended alike; the owner can
+  set another limit per account, 1-50), 20 screenings per profile, minimum interval 10 minutes.
 - Privacy notice page; UI in Polish and English like the desktop app.
 - Operator view (owner only): requests per hour, HTTP status breakdown, last errors.
 
@@ -259,7 +265,7 @@ interchangeable.
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
-  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.1.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.2.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
   database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
@@ -321,12 +327,17 @@ Every increment ends with something testable in the browser on the PC (`src/Cine
       sign-in with lockout, account page, password change, data download, account deletion); e-mail over SMTP to a
       local test inbox (smtp4dev); Polish/English UI; privacy page (draft); `Localizer.Use` in Core (language per
       request / e-mail); tests incl. the whole web flow on a real database; CI with PostgreSQL.
-- [ ] 2 `saas-profiles`: import of `*.cinemawatch.json` (validation as KB §5.3), profile list, enable / disable /
-      delete / download, limit of active profiles.
+- [x] 2 `saas-profiles` (3 Nov 2026): import of one or more `*.cinemawatch.json` files with a server-side check
+      (`ProfileImport`, rules in §9), a file with the name of an existing profile replaces it; profile list with
+      screenings (cinema from the IMAX list, so profiles from before desktop 1.4 show it too) and watched-seat counts;
+      enable / disable / delete (question with "Keep it") / download (the desktop's file and file name); 5 profiles per
+      account, the owner sets a different limit per account on the users page; profiles in the
+      personal data download, deleted with the account; privacy text; SaaS 0.2.0. No Cinema City requests.
 - [ ] 3 `saas-poller`: `watched_screenings` from the enabled profiles, scheduling (profile interval, server minimum
       10 min, jitter), global rate limit, stop on 403 / 429 / challenge, notification state in the database, e-mail
-      "Wolne miejsca", history, "check now", "send a test e-mail", `check_log`. Development uses a fake Cinema City
-      client with captured responses; the real API only on demand.
+      "Wolne miejsca", history, "check now", "send a test e-mail", `check_log`; retention for `check_log` and the history
+      (e.g. 30 and 90 days: they, not the profiles, grow the disk); seat names in the profile list from the cached
+      layouts. Development uses a fake Cinema City client with captured responses; the real API only on demand.
 - [ ] 4 `saas-operator`: operator view (requests per hour, statuses, errors), polish, privacy text reviewed, docs.
 - Done when: the whole flow (invitation → import → freed seat → e-mail with the booking link) works on the PC, one
       manual check against the real API passes, and the SaaS and desktop tests are green in CI.
@@ -454,6 +465,14 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Passwords: at least 12 characters, no character rules; 5 failed sign-ins lock the account for 15 minutes | Length beats composition rules, passwords come from a password manager; slows down guessing |
 | Nov 2026 | Database names in snake_case (`users`, `user_tokens`); data-protection keys in the database | No quoting in psql; sign-in cookies and e-mail links survive restarts and redeployments |
 | Nov 2026 | Development over `http://localhost:5180`, no development certificate | Nothing to install or trust on the PC; HTTPS comes from Cloudflare in stage 4 |
+| Nov 2026 | Profile identity in the SaaS = the profile's `name` within an account: importing a profile with the same name replaces it (id and enabled state stay; later its notification state and history) | Same as the desktop (re-adding overwrites the scheduled task) and the Android concept ("re-import replaces"); no `profileId` needed yet |
+| Nov 2026 | Profiles stored normalised: read into `WatchProfile` and written as the desktop saves it (`ProfileStore.Serialize`); a download is that JSON with the desktop's file name | JSONB keeps neither key order nor formatting anyway; the download opens in the desktop app; unknown fields of a newer desktop are dropped, exactly as when desktop 1.4 opens and saves such a file |
+| Nov 2026 | One limit: 5 profiles per account, counting enabled, disabled and ended ones; a new profile over the limit is refused ("delete one"), replacing an existing one always works; count and insert under a row lock on the account | Bounds the disk per account (5 × 256 KB at worst); simpler than separate "stored" and "active" limits; two browser tabs cannot both take the last place |
+| Nov 2026 | The owner sets an account's own profile limit (1-50, empty = the default) on the users page: the first entitlement; roles stay as they are (owner by e-mail, everyone else a user) | A paid plan would later set the same value; the ceiling stops typos; lowering a limit deletes nothing, it only blocks new profiles |
+| Nov 2026 | Uploaded profiles are checked more strictly than the desktop's `Load`: at most 10 files of 256 KB per import (2.6 MB per request, larger requests refused with 400); identifiers letters and digits only (they go into request URLs); seat keys `a_b_c`, 1-500 per screening; booking links https on `cinema-city.pl` or a subdomain (they go into e-mails); texts at most 200 characters without control characters; times without an offset; at least one future screening; all problems of a file reported together | The file comes from a browser, not from the user's own disk; nothing from it can reach a URL, an e-mail header or a link unchecked |
+| Nov 2026 | The import is a Blazor form on the profile page (static SSR binds uploaded files); enable / disable / delete are form endpoints with a redirect; someone else's profile id answers 404 | The page can show the full result of every file; a successful import redirects, so a reload does not post the files again |
+| Nov 2026 | Page state that must survive a reload lives in the address: `?profile=<id>` opens a profile (after enable / disable), `&confirm=delete` adds the deletion question with "Yes, delete" and "Keep it" | No JavaScript (decision above): an open `<details>` exists only in the browser and cannot be closed by a button; a reload keeps the question; someone else's id opens nothing |
+| Nov 2026 | Light / dark theme follows the system (`prefers-color-scheme`), no switch in the web app | Same as the desktop app; nothing to store; can be added later as a per-device cookie |
 
 ---
 

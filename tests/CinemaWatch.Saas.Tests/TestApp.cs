@@ -160,6 +160,24 @@ internal static class Browser
         return await client.PostAsync(path, new FormUrlEncodedContent(values));
     }
 
+    /// <summary>A file upload the way a browser sends it (multipart/form-data) from a Blazor form.</summary>
+    public static async Task<HttpResponseMessage> PostFilesAsync(
+        this HttpClient client, string path, string page, string formName, string field, IEnumerable<(string FileName, byte[] Content)> files)
+    {
+        var content = new MultipartFormDataContent
+        {
+            { new StringContent(AntiforgeryToken(page)), "__RequestVerificationToken" },
+            { new StringContent(formName), "_handler" },
+        };
+        foreach (var (fileName, bytes) in files)
+        {
+            var file = new ByteArrayContent(bytes);
+            file.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+            content.Add(file, field, fileName);
+        }
+        return await client.PostAsync(path, content);
+    }
+
     /// <summary>The page as text, HTML entities decoded, so assertions can use plain Polish text.</summary>
     public static async Task<string> PageAsync(this HttpClient client, string path)
     {

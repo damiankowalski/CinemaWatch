@@ -1,13 +1,13 @@
 # CinemaWatch.Web - SaaS web app (MVP 0)
 
 Private web app for the owner and invited friends (plan: [`docs/SAAS.md`](../../docs/SAAS.md) §5.1). Today
-(increment 1): accounts by invitation, sign-in, password reset, account page, data download, account deletion,
-Polish/English UI, privacy page (draft). Profiles, background checks and notification e-mails follow in the next
-increments.
+(increments 1 and 2): accounts by invitation, sign-in, password reset, account page, data download, account deletion,
+Polish/English UI, privacy page (draft); import of desktop profiles (`*.cinemawatch.json`), the profile list, a profile
+limit per account. Background checks and notification e-mails follow in the next increment.
 
 | Project | Contents |
 | --- | --- |
-| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), e-mail over SMTP; later the poller and the notifier |
+| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP; later the poller and the notifier |
 | `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms, no JavaScript); hosts the background services in MVP 0 |
 | `tests/CinemaWatch.Saas.Tests` | Logic tests, database tests and the whole web flow (real app in memory, e-mails recorded) |
 
@@ -22,6 +22,15 @@ How it works:
 - Language: the PL / EN switch (cookie, saved to the account when signed in), otherwise the browser's preference
   (Polish if preferred, English for any other language). E-mails use the account's language.
 - The database also stores the keys that protect sign-in cookies and links (`data_protection_keys`).
+- Profiles: the home page lists the account's profiles and imports up to 10 files at once. Each file is checked
+  (format, identifiers, seat keys, booking links on `cinema-city.pl`, sizes; `ProfileImport`) and stored as the
+  desktop app saves it; a file with the name of an existing profile replaces it. A profile can be enabled, disabled,
+  downloaded and deleted (after a question with "Nie usuwaj"). Someone else's profile id answers 404. No Cinema City
+  requests yet.
+- Page state that must survive a reload is in the address: `/?profile=<id>` opens a profile, `&confirm=delete` shows
+  the deletion question. No JavaScript anywhere; light / dark follows the system setting.
+- Profile limit: 5 per account (enabled, disabled and ended alike). The owner sets another limit per account (1-50)
+  in the **Users** list; an empty field means the default. Lowering a limit deletes nothing.
 
 ## Configuration
 
@@ -30,6 +39,7 @@ How it works:
 | `ConnectionStrings:CinemaWatch` | user secrets | PostgreSQL; contains a password |
 | `Saas:OwnerEmail` | user secrets | personal data: never in a file in the repository |
 | `Saas:BaseUrl` | `appsettings.Development.json`: `http://localhost:5180` | start-up fails without an absolute address |
+| `Saas:Limits:MaxProfiles`, `Saas:Limits:MaxScreeningsPerProfile`, `Saas:Limits:MinIntervalMinutes` | `appsettings.json`: `5`, `20`, `10` | start-up fails outside 1-50 profiles or below 1 |
 | `Mail:Host`, `Mail:Port`, `Mail:Security`, `Mail:UserName`, `Mail:Password`, `Mail:FromAddress`, `Mail:FromName` | `appsettings.json`: `localhost`, `2525`, `None` (smtp4dev) | the provider is chosen in stage 4; its password only in secrets |
 
 User secrets are a .NET development feature: a JSON file outside the repository,
@@ -71,6 +81,8 @@ PostgreSQL `localhost:5432` - all on this PC only.
    ```
    The first run prints one `fail: ... Failed executing DbCommand` about `__EFMigrationsHistory` (EF looks for its
    bookkeeping table before creating it), then `Applying migration '..._InitialAccounts'` and `Done.`
+   Run the same command after every update that brings a new migration: the app refuses to start on a database without
+   it and names the missing migration.
 
 ### Every time
 
@@ -114,7 +126,9 @@ Remove-Item Env:CINEMAWATCH_TEST_DB
 dotnet ef migrations add <Name> --project src\CinemaWatch.Server --startup-project src\CinemaWatch.Web --output-dir Data/Migrations
 dotnet ef database update --project src\CinemaWatch.Server --startup-project src\CinemaWatch.Web
 ```
-The test "the migrations match the code" fails when a model change has no migration.
+The test "the migrations match the code" fails when a model change has no migration. Undo a migration that is already
+applied: `dotnet ef database update <previous migration>` (its `Down` runs), then
+`dotnet ef migrations remove` (same `--project` / `--startup-project` arguments).
 
 ### What lands outside the repository, and how to remove it
 

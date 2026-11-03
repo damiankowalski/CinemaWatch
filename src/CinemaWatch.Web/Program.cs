@@ -2,11 +2,13 @@ using CinemaWatch.Server;
 using CinemaWatch.Server.Accounts;
 using CinemaWatch.Server.Data;
 using CinemaWatch.Server.Mail;
+using CinemaWatch.Server.Profiles;
 using CinemaWatch.Web;
 using CinemaWatch.Web.Components;
 using CinemaWatch.Web.Components.Account;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.WebEncoders;
 using System.Text.Encodings.Web;
@@ -24,6 +26,15 @@ builder.Services.AddOptions<SaasOptions>()
     .Validate(o => Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out _), "Saas:BaseUrl must be an absolute address, e.g. http://localhost:5180")
     .ValidateOnStart();
 builder.Services.AddOptions<MailOptions>().Bind(builder.Configuration.GetSection(MailOptions.Section));
+builder.Services.AddOptions<LimitOptions>()
+    .Bind(builder.Configuration.GetSection(LimitOptions.Section))
+    .Validate(o => o.IsValid(), $"Saas:Limits: MaxProfiles must be 1-{LimitOptions.ProfileLimitCeiling}, MaxScreeningsPerProfile and MinIntervalMinutes at least 1")
+    .ValidateOnStart();
+
+// Uploads: at most 10 profile files of 256 KB in one request; anything bigger is refused before it is read.
+const long maxRequestBytes = ProfileImport.MaxFilesPerImport * ProfileImport.MaxFileBytes + 64 * 1024;
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.MaxRequestBodySize = maxRequestBytes);
+builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = maxRequestBytes);
 
 // Database; the data-protection keys (sign-in cookies, e-mail links) are kept there too.
 builder.Services.AddDbContext<AppDbContext>(options => options.UseCinemaWatchDatabase(connectionString));
@@ -77,6 +88,7 @@ builder.Services.AddScoped<IdentityRedirectManager>();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IMailSender, SmtpMailSender>();
 builder.Services.AddScoped<AccountService>();
+builder.Services.AddScoped<ProfileService>();
 
 var app = builder.Build();
 
@@ -92,6 +104,7 @@ app.UseAntiforgery();
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>();
 app.MapAccountEndpoints();
+app.MapProfileEndpoints();
 app.MapLanguageEndpoint();
 
 await app.PrepareDatabaseAsync();
