@@ -26,4 +26,10 @@ public sealed class StoredProfile
     public DateTimeOffset CreatedAt { get; set; }
 
     public DateTimeOffset UpdatedAt { get; set; }
+
+    /// <summary>Last time "Check now" was accepted for this profile (the button's cooldown).</summary>
+    public DateTimeOffset? LastManualCheckAt { get; set; }
+
+    /// <summary>"Check now" was pressed and the poller has not picked it up yet.</summary>
+    public bool CheckPending { get; set; }
 }

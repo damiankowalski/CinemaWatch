@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using CinemaWatch.Server.Data;
 using CinemaWatch.Server.Mail;
+using CinemaWatch.Server.Polling;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -14,7 +15,10 @@ namespace CinemaWatch.Saas.Tests;
 
 /// <summary>
 /// The real web app in memory, on its own test database, with e-mails recorded instead of sent. The type argument
-/// only identifies the web app's assembly (its Program class is internal).
+/// only identifies the web app's assembly (its Program class is internal). The poller is enabled but its background
+/// loop is removed: the tests run the cycles themselves, against the development fake of Cinema City in a temporary
+/// folder, on a clock that moves only when a test moves it, and without pauses between requests. Nothing reaches the
+/// real Cinema City.
 /// </summary>
 internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components.App>
 {
@@ -23,12 +27,26 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
 
     public RecordingMailSender Mail { get; } = new();
 
+    /// <summary>The app's clock: starts at the real time, moves only with <see cref="ManualTime.Advance"/>.</summary>
+    public ManualTime Time { get; } = new(DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+
+    /// <summary>Folder that steers the fake (free-*.txt, block.txt, error500*.txt).</summary>
+    public string FakeFolder { get; } = Path.Combine(Path.GetTempPath(), "cinemawatch-test-fake-" + Guid.NewGuid().ToString("N")[..8]);
+
+    public TestNetwork Network { get; }
+
+    public RecordingPacer Pacer { get; } = new();
+
     public TestApp(string connectionString)
     {
+        Directory.CreateDirectory(FakeFolder);
+        Network = new TestNetwork(FakeFolder);
         // Read by WebApplication.CreateBuilder in Program.cs (environment variables beat appsettings.json).
         Environment.SetEnvironmentVariable($"ConnectionStrings__{DatabaseSetup.ConnectionStringName}", connectionString);
         Environment.SetEnvironmentVariable("Saas__BaseUrl", "http://localhost");
         Environment.SetEnvironmentVariable("Saas__OwnerEmail", OwnerEmail);
+        Environment.SetEnvironmentVariable("Saas__Poller__Source", "Fake");
+        Environment.SetEnvironmentVariable("Saas__Poller__FakeDirectory", FakeFolder);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -37,7 +55,31 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
         builder.UseEnvironment("Testing");
         builder.UseContentRoot(WebProjectFolder());
         builder.ConfigureLogging(logging => logging.ClearProviders());
-        builder.ConfigureTestServices(services => services.AddSingleton<IMailSender>(Mail));
+        builder.ConfigureTestServices(services =>
+        {
+            services.Remove(services.Single(d => d.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService) && d.ImplementationType == typeof(PollerHostedService)));
+            services.AddSingleton<IMailSender>(Mail);
+            services.AddSingleton<TimeProvider>(Time);
+            services.AddSingleton<ICinemaCityNetwork>(Network);
+            services.AddSingleton<IRequestPacer>(Pacer);
+        });
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        base.Dispose(disposing);
+        if (disposing && Directory.Exists(FakeFolder))
+            Directory.Delete(FakeFolder, recursive: true);
+    }
+
+    /// <summary>Writes (content) or deletes (null) a file in the fake's folder.</summary>
+    public void Fake(string fileName, string? content)
+    {
+        var path = Path.Combine(FakeFolder, fileName);
+        if (content is null)
+            File.Delete(path);
+        else
+            File.WriteAllText(path, content);
     }
 
     /// <summary>src/CinemaWatch.Web, found from the test's output folder (wwwroot and appsettings.json live there).</summary>
@@ -61,6 +103,69 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
 
     public static string QueryValue(string pathAndQuery, string name) =>
         Uri.UnescapeDataString(Regex.Match(pathAndQuery, $@"[?&]{name}=([^&]+)").Groups[1].Value);
+}
+
+/// <summary>A clock for the tests: fixed until a test moves it.</summary>
+internal sealed class ManualTime(DateTimeOffset start) : TimeProvider
+{
+    private DateTimeOffset _now = start;
+
+    public override DateTimeOffset GetUtcNow() => _now;
+
+    public void Advance(TimeSpan by) => _now += by;
+}
+
+/// <summary>Pauses between screenings are only recorded (manual or not), never waited for.</summary>
+internal sealed class RecordingPacer : IRequestPacer
+{
+    private readonly List<bool> _pauses = [];
+
+    public int Pauses
+    {
+        get { lock (_pauses) return _pauses.Count; }
+    }
+
+    /// <summary>Per pause: true when it came before a "Check now" screening.</summary>
+    public IReadOnlyList<bool> Manual
+    {
+        get { lock (_pauses) return _pauses.ToList(); }
+    }
+
+    public Task PauseAsync(bool manual, CancellationToken cancellationToken)
+    {
+        lock (_pauses)
+            _pauses.Add(manual);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// The development fake (<see cref="FakeCinemaCityHandler"/>) with every request recorded; <see cref="Override"/> can
+/// answer a request instead of the fake (e.g. HTML instead of JSON).
+/// </summary>
+internal sealed class TestNetwork(string folder) : ICinemaCityNetwork
+{
+    private readonly List<(HttpMethod Method, Uri Uri, string? UserAgent, string? Uuid)> _requests = [];
+
+    public Func<HttpRequestMessage, HttpResponseMessage?>? Override { get; set; }
+
+    public IReadOnlyList<(HttpMethod Method, Uri Uri, string? UserAgent, string? Uuid)> Requests
+    {
+        get { lock (_requests) return _requests.ToList(); }
+    }
+
+    public HttpMessageHandler CreateHandler() => new Recording(this, new FakeCinemaCityHandler(folder));
+
+    private sealed class Recording(TestNetwork owner, HttpMessageHandler fake) : DelegatingHandler(fake)
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            lock (owner._requests)
+                owner._requests.Add((request.Method, request.RequestUri!, request.Headers.UserAgent.ToString(),
+                    request.Headers.TryGetValues("uuid", out var uuid) ? uuid.FirstOrDefault() : null));
+            return owner.Override?.Invoke(request) is { } answer ? Task.FromResult(answer) : base.SendAsync(request, cancellationToken);
+        }
+    }
 }
 
 /// <summary>Records e-mails; <see cref="FailNext"/> simulates an unreachable mail server once.</summary>

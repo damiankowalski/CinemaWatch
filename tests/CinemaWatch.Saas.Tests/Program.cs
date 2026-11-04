@@ -5,6 +5,7 @@ using CinemaWatch.Core;
 using CinemaWatch.Saas.Tests;
 using CinemaWatch.Server.Accounts;
 using CinemaWatch.Server.Data;
+using CinemaWatch.Server.Polling;
 using CinemaWatch.Server.Profiles;
 using CinemaWatch.Tests;
 using CinemaWatch.Web;
@@ -179,7 +180,125 @@ TestRunner.Add("Limits: defaults are valid; the server minimum wins over a short
     Assert.Equal(10, limits.EffectiveInterval(5));
     Assert.Equal(15, limits.EffectiveInterval(15));
     Assert.True(!new LimitOptions { MaxProfiles = LimitOptions.ProfileLimitCeiling + 1 }.IsValid());
+    Assert.True(!new LimitOptions { MinIntervalMinutes = LimitOptions.MinIntervalFloor - 1 }.IsValid());
+    Assert.True(new LimitOptions { MinIntervalMinutes = LimitOptions.MinIntervalFloor }.IsValid());
     Assert.Equal("Diuna Część trzecia.cinemawatch.json", ProfileImport.FileNameFor("Diuna: Część trzecia"));
+});
+
+TestRunner.Add("Poller settings: defaults are valid; the block pause doubles up to the maximum; the fake needs a folder", () =>
+{
+    var settings = new PollerOptions();
+    Assert.True(settings.IsValid());
+    Assert.Equal((CinemaCitySource.CinemaCity, 120, 3.0, 6.0, 1, false),
+        (settings.Source, settings.RequestsPerHour, settings.RequestGapMinSeconds, settings.RequestGapMaxSeconds, settings.ManualFreshMinutes, settings.ReuseScreeningDetails));
+    Assert.SequenceEqual([60.0, 120.0, 240.0, 480.0, 960.0, 1440.0, 1440.0], Enumerable.Range(1, 7).Select(n => settings.BlockPause(n).TotalMinutes));
+    Assert.True(!new PollerOptions { Source = CinemaCitySource.Fake }.IsValid());
+    Assert.True(new PollerOptions { Source = CinemaCitySource.Fake, FakeDirectory = "x" }.IsValid());
+    Assert.True(!new PollerOptions { RequestGapMinSeconds = 5, RequestGapMaxSeconds = 3 }.IsValid());
+    Assert.True(!new PollerOptions { RequestsPerHour = 5 }.IsValid());
+    Assert.True(PollerInfo.UserAgent.StartsWith("Mozilla/5.0 (") && PollerInfo.UserAgent.Contains($") CinemaWatch-Server/{PollerInfo.Version} (+https://github.com/damiankowalski/CinemaWatch)"));
+    Assert.True(new CinemaWatch.Server.Mail.MailOptions().IsLocal && !new CinemaWatch.Server.Mail.MailOptions { Host = "smtp.example.com" }.IsLocal);
+});
+
+TestRunner.Add("Block detection: 403, 429, a Cloudflare challenge and HTML instead of JSON are blocks; 500 and 404 are not", () =>
+{
+    Assert.True(RequestGuard.IsBlock(403, null, "application/json"));
+    Assert.True(RequestGuard.IsBlock(429, null, null));
+    Assert.True(RequestGuard.IsBlock(503, "challenge", "text/html"));
+    Assert.True(RequestGuard.IsBlock(200, null, "text/html"));
+    Assert.True(!RequestGuard.IsBlock(200, null, "application/json"));
+    Assert.True(!RequestGuard.IsBlock(500, null, "text/html"));
+    Assert.True(!RequestGuard.IsBlock(404, null, "application/json"));
+});
+
+TestRunner.Add("Request budget: a sixth of the hourly budget saved up at most, refilled steadily", () =>
+{
+    var time = new ManualTime(new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero));
+    var budget = new RequestBudget(Microsoft.Extensions.Options.Options.Create(new PollerOptions { RequestsPerHour = 120 }), time);
+    Assert.Equal(20, budget.Available);
+    Assert.True(budget.TryTake(20));
+    Assert.True(!budget.TryTake());
+    time.Advance(TimeSpan.FromSeconds(30)); // 120 an hour = one every 30 seconds
+    Assert.Equal(1, budget.Available);
+    time.Advance(TimeSpan.FromHours(5));
+    Assert.Equal(20, budget.Available);
+});
+
+TestRunner.Add("Fake Cinema City: free seats from a file, sold out without it; block.txt (403 challenge, 429 + Retry-After) and error500 files", async () =>
+{
+    var folder = Path.Combine(Path.GetTempPath(), "cinemawatch-fake-" + Guid.NewGuid().ToString("N")[..8]);
+    FakeCinemaCityHandler.PrepareFolder(folder);
+    try
+    {
+        Assert.True(File.Exists(Path.Combine(folder, FakeCinemaCityHandler.ReadmeFile)));
+        using var client = new CinemaCityClient(new FakeCinemaCityHandler(folder));
+        var presentation = await client.GetPresentationAsync("1234567");
+        Assert.Equal(("1234567", 13, 1), (presentation.Id, presentation.VenueId, presentation.SeatplanId));
+        Assert.Equal(385, (await client.GetSeatPlanAsync(13, 1)).Seats.Count);
+        Assert.Equal(0, (await client.GetFreeSeatsAsync("1234567", 1, 0)).Count);
+        File.WriteAllText(Path.Combine(folder, "free-1234567.txt"), "1_18_4, 1_19_4\n1_20_4");
+        Assert.SequenceEqual(["1_18_4", "1_19_4", "1_20_4"], (await client.GetFreeSeatsAsync("1234567", 1, 0)).Order());
+
+        using var raw = new HttpClient(new FakeCinemaCityHandler(folder));
+        File.WriteAllText(Path.Combine(folder, "error500-1234567.txt"), "");
+        Assert.Equal(HttpStatusCode.InternalServerError, (await raw.GetAsync("https://tickets.cinema-city.pl/api/presentations/1234567")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await raw.GetAsync("https://tickets.cinema-city.pl/api/presentations/7654321")).StatusCode);
+        File.WriteAllText(Path.Combine(folder, "block.txt"), "");
+        var challenge = await raw.GetAsync("https://tickets.cinema-city.pl/api/presentations/7654321");
+        Assert.Equal((HttpStatusCode.Forbidden, "challenge", "text/html"), (challenge.StatusCode, challenge.Headers.GetValues("cf-mitigated").Single(), challenge.Content.Headers.ContentType?.MediaType));
+        File.WriteAllText(Path.Combine(folder, "block.txt"), "429 120");
+        var tooMany = await raw.GetAsync("https://tickets.cinema-city.pl/api/presentations/7654321");
+        Assert.Equal((HttpStatusCode.TooManyRequests, TimeSpan.FromSeconds(120)), (tooMany.StatusCode, tooMany.Headers.RetryAfter?.Delta));
+    }
+    finally
+    {
+        Directory.Delete(folder, recursive: true);
+    }
+});
+
+TestRunner.Add("Poller e-mails: one block per screening with its booking link, the profile link; test e-mail; owner's alerts", () =>
+{
+    var plan = CinemaCityParser.ParseSeatPlan(FakePlanJson());
+    var profile = SampleProfile("Diuna IMAX", screenings: 2);
+    var seats = plan.Seats.Where(s => s.Key is "1_18_4" or "1_19_4").ToList();
+    var news = new List<(WatchedScreening, IReadOnlyList<CinemaWatch.Core.Seat>)> { (profile.Screenings[1], seats), (profile.Screenings[0], [seats[0]]) };
+    var profileLink = SiteLinks.Profile("http://localhost:5180/ignored", Guid.Empty);
+    Assert.Equal($"http://localhost:5180/?profile={Guid.Empty}#profile-{Guid.Empty}", profileLink);
+    using (Localizer.Use(AppLanguage.Polish))
+    {
+        var mail = PollerMails.SeatsAvailable("a@example.test", profile, "Diuna IMAX", news, profileLink);
+        Assert.Equal("Wolne miejsca: Diuna: Część trzecia", mail.Subject);
+        Assert.True(mail.Text.StartsWith("Zwolniły się pilnowane miejsca (profil „Diuna IMAX”):"));
+        // Ordered by start time; each screening with its own link.
+        var first = mail.Text.IndexOf("Kup bilet: https://tickets.cinema-city.pl/api/order/1765592?lang=pl", StringComparison.Ordinal);
+        var second = mail.Text.IndexOf("Kup bilet: https://tickets.cinema-city.pl/api/order/1765593?lang=pl", StringComparison.Ordinal);
+        Assert.True(first > 0 && second > first);
+        Assert.True(mail.Text.Contains("Warszawa · ") && mail.Text.Contains("rząd 4: 18, 19") && mail.Text.Contains(profileLink));
+        Assert.True(mail.Html.Contains("<a href=\"https://tickets.cinema-city.pl/api/order/1765592?lang=pl\">Kup bilet</a>"));
+
+        var test = PollerMails.Test("a@example.test", new DateTime(2026, 11, 3, 12, 0, 0), "http://localhost/");
+        Assert.Equal("[TEST] Wolne miejsca: Przykładowy film", test.Subject);
+        Assert.True(test.Text.Contains("Kup bilet: https://www.cinema-city.pl/") && test.Text.Contains("śr. 4.11, 19:00"));
+
+        var blocked = PollerMails.Blocked("o@example.test", "HTTP 403 (cf-mitigated: challenge) on GET x", new DateTimeOffset(2026, 11, 3, 13, 0, 0, TimeSpan.Zero), 2, "http://localhost/");
+        Assert.Equal("CinemaWatch: sprawdzanie wstrzymane", blocked.Subject);
+        Assert.True(blocked.Text.Contains("do 3.11.2026 14:00 (czasu polskiego)") && blocked.Text.Contains("blokada nr 2 z rzędu"));
+        Assert.Equal("CinemaWatch: sprawdzanie wznowione", PollerMails.Resumed("o@example.test", null, "http://localhost/").Subject);
+    }
+    using (Localizer.Use(AppLanguage.English))
+    {
+        var mail = PollerMails.SeatsAvailable("a@example.test", profile, "Diuna IMAX", news, profileLink);
+        Assert.Equal("Seats available: Diuna: Część trzecia", mail.Subject);
+        Assert.True(mail.Text.Contains("Warsaw · ") && mail.Text.Contains("row 4: 18, 19") && mail.Text.Contains("Buy a ticket: "));
+    }
+});
+
+TestRunner.Add("Time: Polish screening times become UTC (winter, summer, the hour skipped in spring)", () =>
+{
+    Assert.Equal(new DateTimeOffset(2027, 1, 15, 15, 0, 0, TimeSpan.Zero), PollerTime.ToUtc(new DateTime(2027, 1, 15, 16, 0, 0)));
+    Assert.Equal(new DateTimeOffset(2027, 7, 15, 14, 0, 0, TimeSpan.Zero), PollerTime.ToUtc(new DateTime(2027, 7, 15, 16, 0, 0)));
+    Assert.Equal(new DateTimeOffset(2027, 3, 28, 1, 30, 0, TimeSpan.Zero), PollerTime.ToUtc(new DateTime(2027, 3, 28, 2, 30, 0)));
+    Assert.Equal("16:00", PollerTime.ClockText(new DateTimeOffset(2027, 1, 15, 15, 0, 0, TimeSpan.Zero)));
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -244,6 +363,22 @@ static WatchProfile SampleProfile(string name = "Diuna IMAX", int screenings = 1
     };
 }
 
+// The captured Sadyba IMAX hall (13/1), as the fake serves it.
+static string FakePlanJson()
+{
+    var folder = Path.Combine(Path.GetTempPath(), "cinemawatch-plan-" + Guid.NewGuid().ToString("N")[..8]);
+    try
+    {
+        using var client = new CinemaCityClient(new FakeCinemaCityHandler(folder));
+        return client.GetSeatPlanJsonAsync(13, 1).GetAwaiter().GetResult();
+    }
+    finally
+    {
+        if (Directory.Exists(folder))
+            Directory.Delete(folder, recursive: true);
+    }
+}
+
 static void RegisterDatabaseTests(TestApp app, TestDatabase database)
 {
     const string password = TestApp.Password;
@@ -285,7 +420,8 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
     TestRunner.Add("Database: the migration creates the snake_case tables", async () =>
     {
         Assert.SequenceEqual(
-            ["__EFMigrationsHistory", "data_protection_keys", "profiles", "user_claims", "user_logins", "user_tokens", "users"],
+            ["__EFMigrationsHistory", "check_log", "data_protection_keys", "notification_state", "notifications", "poller_state", "profiles",
+             "seat_plans", "service_events", "user_claims", "user_logins", "user_tokens", "users", "watched_screenings"],
             await database.TablesAsync());
     });
 
@@ -572,7 +708,7 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         Assert.True(page.Contains("1 z 5 profili") && page.Contains("Diuna: Część trzecia, 2 seanse, 4 pilnowane miejsca") && page.Contains("włączony"));
         var id = Regex.Match(page, "profiles/([0-9a-f-]{36})/download").Groups[1].Value;
         Assert.True(page.Contains("<td>Warszawa, Sadyba</td>"));
-        Assert.True(page.Contains($"<details class=\"profile\" id=\"profile-{id}\">")); // closed
+        Assert.True(page.Contains($"<section class=\"profile\" id=\"profile-{id}\">") && page.Contains($"id=\"profile-body-{id}\" hidden")); // closed
 
         // A broken file next to a good one: the page shows what happened to each.
         response = await browser.PostFilesAsync("/", page, "import", "Input.Files",
@@ -594,13 +730,13 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         Assert.Equal(opened, Location(await browser.PostFormAsync($"/profiles/{id}/disable", page, null, [])));
         page = await browser.PageAsync($"/?profile={id}");
         Assert.True(page.Contains("Profil „Diuna IMAX” wyłączony.") && page.Contains("wyłączony") && page.Contains("Włącz"));
-        Assert.True(page.Contains($"<details class=\"profile\" id=\"profile-{id}\" open>"));
+        Assert.True(page.Contains($"<section class=\"profile open\" id=\"profile-{id}\">") && !page.Contains($"id=\"profile-body-{id}\" hidden"));
 
         // "Delete" asks first; the question lives in the address and "Keep it" goes back to the opened profile.
-        Assert.True(!page.Contains("Tak, usuń profil") && page.Contains($"href=\"?profile={id}&confirm=delete#profile-{id}\""));
+        Assert.True(!page.Contains("Tak, usuń profil") && page.Contains($"href=\"/?profile={id}&confirm=delete#profile-{id}\""));
         page = await browser.PageAsync($"/?profile={id}&confirm=delete");
         Assert.True(page.Contains("Usunąć profil „Diuna IMAX”? Plik w aplikacji na Windows zostaje.") && page.Contains("Tak, usuń profil"));
-        Assert.True(page.Contains($"href=\"?profile={id}#profile-{id}\">Nie usuwaj</a>"));
+        Assert.True(page.Contains($"href=\"/?profile={id}#profile-{id}\">Nie usuwaj</a>"));
 
         // Someone else: the profile does not exist for them.
         var stranger = await SignedInAsync("stranger@example.test", AppLanguage.Polish);
@@ -643,5 +779,529 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         var memberPage = await member.PageAsync("/");
         Assert.True(Location(await member.PostFormAsync("/admin/users/limit", memberPage, null, new() { ["userId"] = memberId, ["maxProfiles"] = "50" })).StartsWith("/Account/AccessDenied"));
         Assert.True((await member.PageAsync("/")).Contains("0 z 5 profili"));
+    });
+
+    // -----------------------------------------------------------------------------------------------------------
+    // Poller: the cycles run here, on the test clock, against the fake (TestApp); nothing reaches Cinema City.
+    // -----------------------------------------------------------------------------------------------------------
+
+    Task<CycleReport> CycleAsync() => app.Services.GetRequiredService<PollerCycle>().RunAsync();
+
+    TimeSpan afterInterval = TimeSpan.FromMinutes(12) + TimeSpan.FromSeconds(1); // interval 10 min + at most 20%
+
+    // A clean poller for every test: no profiles, no state; two hours later, so the request budget is full again.
+    async Task ResetPollerAsync()
+    {
+        app.Time.Advance(TimeSpan.FromHours(2));
+        foreach (var file in Directory.GetFiles(app.FakeFolder))
+            File.Delete(file);
+        app.Network.Override = null;
+        await WithService(async services =>
+        {
+            var db = services.GetRequiredService<AppDbContext>();
+            await db.Profiles.ExecuteDeleteAsync(); // the database cascade removes their state and history
+            await db.WatchedScreenings.ExecuteDeleteAsync();
+            await db.PollerState.ExecuteDeleteAsync();
+            await db.CheckLog.ExecuteDeleteAsync();
+            await db.ServiceEvents.ExecuteDeleteAsync();
+            await db.SeatPlans.ExecuteDeleteAsync();
+            return 0;
+        });
+    }
+
+    static WatchProfile PollProfile(string name, IReadOnlyList<string> ids, int minAdjacent = 1)
+    {
+        var profile = SampleProfile(name, screenings: ids.Count);
+        profile.MinAdjacent = minAdjacent;
+        for (var i = 0; i < ids.Count; i++)
+        {
+            profile.Screenings[i].Id = ids[i];
+            profile.Screenings[i].BookingLink = $"https://tickets.cinema-city.pl/api/order/{ids[i]}?lang=pl";
+        }
+        return profile;
+    }
+
+    async Task<Guid> ImportAsync(string userId, WatchProfile profile) => await WithService(async services =>
+    {
+        var result = (await services.GetRequiredService<ProfileService>().ImportAsync(userId, [Upload("p.json", ProfileStore.Serialize(profile))])).Single();
+        Assert.True(result.Outcome is ImportOutcome.Added or ImportOutcome.Replaced, result.Outcome.ToString());
+        return (await services.GetRequiredService<AppDbContext>().Profiles.SingleAsync(p => p.UserId == userId && p.Name == profile.Name)).Id;
+    });
+
+    async Task<WatchedScreeningRow> RowAsync(string id) =>
+        await WithService(async services => await services.GetRequiredService<AppDbContext>().WatchedScreenings.AsNoTracking().SingleAsync(r => r.Id == id));
+
+    async Task<PollerStateRow> PollerStateAsync() =>
+        await WithService(async services => await services.GetRequiredService<AppDbContext>().PollerState.AsNoTracking().SingleAsync());
+
+    async Task<List<ServiceEvent>> EventsAsync(ServiceEventKind kind) =>
+        await WithService(async services => await services.GetRequiredService<AppDbContext>().ServiceEvents.AsNoTracking().Where(e => e.Kind == kind).ToListAsync());
+
+    // E-mails to an address, without the invitation every test account gets.
+    List<CinemaWatch.Server.Mail.OutgoingMail> MailsTo(string email) =>
+        app.Mail.Sent.Where(m => m.To == email && !m.Subject.StartsWith("Zaproszenie") && !m.Subject.StartsWith("Your invitation")).ToList();
+
+    List<string> EndpointsSince(int mark) => app.Network.Requests.Skip(mark).Select(r => RequestRecord.EndpointOf(r.Uri)).ToList();
+
+    // Rows appear at the first cycle and are due within a minute; the second cycle checks them.
+    async Task<CycleReport> FirstChecksAsync()
+    {
+        await CycleAsync();
+        app.Time.Advance(TimeSpan.FromSeconds(61));
+        return await CycleAsync();
+    }
+
+    void AssertNextCheckInRhythm(WatchedScreeningRow row)
+    {
+        var now = app.Time.GetUtcNow();
+        Assert.True(row.NextCheckAt >= now + TimeSpan.FromMinutes(10) && row.NextCheckAt <= now + TimeSpan.FromMinutes(12), $"next check {row.NextCheckAt:O}, now {now:O}");
+    }
+
+    TestRunner.Add("Poller: new screenings are checked within a minute (details, hall layout once, free seats, pauses between requests); next check in 10-12 minutes", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("poll-first@example.test", AppLanguage.Polish);
+        var profile = await ImportAsync(await UserIdAsync("poll-first@example.test"), PollProfile("Pierwszy", ["2000001", "2000002"]));
+        var mark = app.Network.Requests.Count;
+        var pauses = app.Pacer.Pauses;
+
+        Assert.Equal(CycleResult.Idle, (await CycleAsync()).Result); // rows exist now, due within a minute
+        Assert.Equal(mark, app.Network.Requests.Count);
+        app.Time.Advance(TimeSpan.FromSeconds(61));
+        var report = await CycleAsync();
+        Assert.Equal((2, 0, 5, false), (report.Checked, report.Failed, report.Requests, report.Blocked));
+        Assert.SequenceEqual(["presentation", "seatplan", "seats-status", "presentation", "seats-status"], EndpointsSince(mark));
+        // One pause, before the second screening: the requests of one screening follow each other directly.
+        Assert.SequenceEqual([false], app.Pacer.Manual.Skip(pauses));
+        var requests = app.Network.Requests.Skip(mark).ToList();
+        Assert.True(requests.All(r => r.UserAgent!.Contains($"CinemaWatch-Server/{PollerInfo.Version}")));
+        Assert.Equal(1, requests.Select(r => r.Uuid).Distinct().Count()); // one session per cycle
+
+        foreach (var id in new[] { "2000001", "2000002" })
+        {
+            var row = await RowAsync(id);
+            Assert.Equal((CheckOutcome.Ok, 0, 383), (row.LastOutcome!.Value, row.FreeCount!.Value, row.TotalCount!.Value));
+            Assert.Equal((13, 1), (row.VenueId!.Value, row.SeatplanId!.Value));
+            AssertNextCheckInRhythm(row);
+        }
+        var logged = await WithService(async services => await services.GetRequiredService<AppDbContext>().CheckLog.AsNoTracking().ToListAsync());
+        Assert.Equal(5, logged.Count);
+        Assert.True(logged.All(e => e.Status == 200 && e.ScreeningId is "2000001" or "2000002" && !e.Manual && e.Cycle.EndsWith('Z')));
+        Assert.Equal(0, MailsTo("poll-first@example.test").Count); // sold out: nothing to say
+
+        app.Time.Advance(TimeSpan.FromMinutes(9));
+        Assert.Equal(CycleResult.Idle, (await CycleAsync()).Result);
+
+        // "Check now": the same pattern, with the shorter pause meant for somebody waiting.
+        pauses = app.Pacer.Pauses;
+        await browser.PostFormAsync($"/profiles/{profile}/check", await browser.PageAsync("/"), null, []);
+        Assert.Equal((2, 4), ((report = await CycleAsync()).Checked, report.Requests));
+        Assert.SequenceEqual([true], app.Pacer.Manual.Skip(pauses));
+    });
+
+    TestRunner.Add("Poller: a freed seat is e-mailed once per profile (adjacent-seat rule, language, links); freed again = e-mailed again; history; account deletion removes it", async () =>
+    {
+        await ResetPollerAsync();
+        var anna = await SignedInAsync("poll-anna@example.test", AppLanguage.Polish);
+        await SignedInAsync("poll-ben@example.test", AppLanguage.English);
+        var annaProfile = await ImportAsync(await UserIdAsync("poll-anna@example.test"), PollProfile("Anna", ["2000011"]));
+        await ImportAsync(await UserIdAsync("poll-ben@example.test"), PollProfile("Ben", ["2000011"], minAdjacent: 2));
+
+        app.Fake("free-2000011.txt", "1_18_4");
+        var mark = app.Network.Requests.Count;
+        var report = await FirstChecksAsync();
+        Assert.Equal((1, 1), (report.Checked, report.MailsSent));
+        Assert.Equal(1, EndpointsSince(mark).Count(e => e == "presentation")); // one check serves both profiles
+        var mail = MailsTo("poll-anna@example.test").Single();
+        Assert.Equal("Wolne miejsca: Diuna: Część trzecia", mail.Subject);
+        Assert.True(mail.Text.Contains("Warszawa · ") && mail.Text.Contains("· rząd 4: 19\n"));
+        Assert.True(mail.Text.Contains("Kup bilet: https://tickets.cinema-city.pl/api/order/2000011?lang=pl"));
+        Assert.True(mail.Text.Contains($"http://localhost/?profile={annaProfile}#profile-{annaProfile}"));
+        Assert.Equal(0, MailsTo("poll-ben@example.test").Count); // Ben wants two seats next to each other
+
+        // The same seat at the next check: nothing new.
+        app.Time.Advance(afterInterval);
+        Assert.Equal(0, (await CycleAsync()).MailsSent);
+
+        // A second seat next to it: Anna hears about the new seat only, Ben (English) about both.
+        app.Fake("free-2000011.txt", "1_18_4 1_19_4");
+        app.Time.Advance(afterInterval);
+        Assert.Equal(2, (await CycleAsync()).MailsSent);
+        Assert.True(MailsTo("poll-anna@example.test")[^1].Text.Contains("· rząd 4: 18\n"));
+        var ben = MailsTo("poll-ben@example.test").Single();
+        Assert.Equal("Seats available: Diuna: Część trzecia", ben.Subject);
+        Assert.True(ben.Text.Contains("Warsaw · ") && ben.Text.Contains("row 4: 18, 19") && ben.Text.Contains("Buy a ticket: "));
+
+        // Taken again, then freed again: notified again.
+        app.Fake("free-2000011.txt", null);
+        app.Time.Advance(afterInterval);
+        Assert.Equal(0, (await CycleAsync()).MailsSent);
+        app.Fake("free-2000011.txt", "1_18_4");
+        app.Time.Advance(afterInterval);
+        Assert.Equal(1, (await CycleAsync()).MailsSent);
+        Assert.Equal(3, MailsTo("poll-anna@example.test").Count);
+
+        // The page: free seats now, the check, the history.
+        var page = await anna.PageAsync($"/?profile={annaProfile}");
+        Assert.True(page.Contains("są wolne miejsca") && page.Contains("wolne: rząd 4: 19") && page.Contains("sprawdzono"));
+        Assert.True(page.Contains("Powiadomienia") && page.Contains("Warszawa · ") && !page.Contains("Jeszcze nie było powiadomień"));
+        Assert.True(page.Contains("w sali wolne 1 z 383"));
+
+        // Personal data includes the history; deleting the account removes the state and the history.
+        var data = await (await anna.PostFormAsync("/Account/Manage/DownloadPersonalData", await anna.PageAsync("/Account/Manage"), null, [])).Content.ReadAsStringAsync();
+        Assert.True(data.Contains("\"notifications\"") && data.Contains("\"subject\": \"Wolne miejsca: Diuna: Część trzecia\""));
+        await WithService(async services =>
+        {
+            var users = services.GetRequiredService<UserManager<AppUser>>();
+            Assert.True((await users.DeleteAsync((await users.FindByEmailAsync("poll-anna@example.test"))!)).Succeeded);
+            return 0;
+        });
+        var left = await WithService(async services =>
+        {
+            var db = services.GetRequiredService<AppDbContext>();
+            return await db.NotificationStates.CountAsync(s => s.ProfileId == annaProfile) + await db.Notifications.CountAsync(n => n.ProfileId == annaProfile);
+        });
+        Assert.Equal(0, left);
+    });
+
+    TestRunner.Add("Poller: HTTP 500 is a failed check - no retry, notification state unchanged, next attempt in the normal rhythm, the other screenings go on", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("poll-error@example.test", AppLanguage.Polish);
+        var profile = await ImportAsync(await UserIdAsync("poll-error@example.test"), PollProfile("Błędy", ["2000021", "2000022"]));
+        app.Fake("free-2000021.txt", "1_18_4");
+        app.Fake("free-2000022.txt", "1_18_4");
+        Assert.Equal(1, (await FirstChecksAsync()).MailsSent); // both screenings in one e-mail
+        var mail = MailsTo("poll-error@example.test").Single();
+        Assert.True(mail.Text.Contains("order/2000021") && mail.Text.Contains("order/2000022"));
+        var succeeded = (await RowAsync("2000021")).LastSucceededAt;
+
+        app.Fake("error500-2000021.txt", "");
+        app.Time.Advance(afterInterval);
+        var mark = app.Network.Requests.Count;
+        var report = await CycleAsync();
+        Assert.Equal((1, 1, false), (report.Checked, report.Failed, report.Blocked));
+        Assert.Equal(1, app.Network.Requests.Skip(mark).Count(r => r.Uri.ToString().Contains("2000021"))); // no retry
+        var failed = await RowAsync("2000021");
+        Assert.Equal((CheckOutcome.Failed, 500), (failed.LastOutcome!.Value, failed.LastHttpStatus!.Value));
+        Assert.Equal(succeeded, failed.LastSucceededAt);
+        AssertNextCheckInRhythm(failed);
+        Assert.Equal(1, MailsTo("poll-error@example.test").Count);
+        Assert.True((await browser.PageAsync($"/?profile={profile}")).Contains("błąd Cinema City (HTTP 500)"));
+
+        // The failure kept the state: the seat that was already notified is not notified again.
+        app.Fake("error500-2000021.txt", null);
+        app.Time.Advance(afterInterval);
+        report = await CycleAsync();
+        Assert.Equal((2, 0, 0), (report.Checked, report.Failed, report.MailsSent));
+
+        // Every request answers 500: everything fails, nothing is blocked, the log has the statuses.
+        app.Fake("error500.txt", "");
+        app.Time.Advance(afterInterval);
+        report = await CycleAsync();
+        Assert.Equal((0, 2, false), (report.Checked, report.Failed, report.Blocked));
+        Assert.Equal(null, (await PollerStateAsync()).BlockedUntil);
+        var errors = await WithService(async services => await services.GetRequiredService<AppDbContext>().CheckLog.CountAsync(e => e.Status == 500));
+        Assert.Equal(3, errors);
+    });
+
+    TestRunner.Add("Poller: a block (403 challenge) stops the cycle at the first request, drops pending \"Check now\", pauses everything, alerts the owner; after the pause the blocked screening first", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("poll-block@example.test", AppLanguage.Polish);
+        var profile = await ImportAsync(await UserIdAsync("poll-block@example.test"), PollProfile("Blokada", ["2000031", "2000032", "2000033"]));
+        Assert.Equal(3, (await FirstChecksAsync()).Checked);
+        var firstCheck = app.Time.GetUtcNow();
+
+        // "Check now" runs into a block: the first request is refused, nothing more is sent, the pending check is dropped.
+        app.Fake("block.txt", "");
+        app.Time.Advance(TimeSpan.FromMinutes(2));
+        await browser.PostFormAsync($"/profiles/{profile}/check", await browser.PageAsync("/"), null, []);
+        var ownerMails = MailsTo(TestApp.OwnerEmail).Count;
+        var mark = app.Network.Requests.Count;
+        var report = await CycleAsync();
+        Assert.Equal((true, 0, 1), (report.Blocked, report.Checked, report.Requests));
+        Assert.Equal(mark + 1, app.Network.Requests.Count);
+        var now = app.Time.GetUtcNow();
+        var state = await PollerStateAsync();
+        Assert.Equal((now + TimeSpan.FromMinutes(60), 1), (state.BlockedUntil!.Value, state.BlockCount));
+        var blocked = (await EventsAsync(ServiceEventKind.Blocked)).Single();
+        Assert.True(blocked.Message.Contains("HTTP 403 (cf-mitigated: challenge)") && blocked.Data!.Contains("Fake Cloudflare challenge"));
+        var alert = MailsTo(TestApp.OwnerEmail)[^1];
+        Assert.Equal((ownerMails + 1, "CinemaWatch: sprawdzanie wstrzymane"), (MailsTo(TestApp.OwnerEmail).Count, alert.Subject));
+        Assert.True(alert.Text.Contains("HTTP 403"));
+        var rows = new List<WatchedScreeningRow>();
+        foreach (var id in new[] { "2000031", "2000032", "2000033" })
+            rows.Add(await RowAsync(id));
+        var blockedId = rows.Single(r => r.LastOutcome == CheckOutcome.Blocked).Id;
+        Assert.Equal(2, rows.Count(r => r.LastOutcome == CheckOutcome.Ok));
+        Assert.True(rows.All(r => r.ManualRequestedAt is null));
+
+        // Users see the pause and a greyed-out button, not a check that cannot run; "Check now" is refused.
+        var page = await browser.PageAsync($"/?profile={profile}");
+        Assert.True(page.Contains("Sprawdzanie miejsc jest wstrzymane do") && page.Contains("zablokowane (HTTP 403)"));
+        Assert.True(!page.Contains("Sprawdzam…") && page.Contains("disabled title=\"Sprawdzanie wstrzymane do"));
+        Assert.True(page.Contains($"http-equiv=\"refresh\" content=\"3605; url=/?profile={profile}&refresh=")); // reloads when the pause ends
+        await browser.PostFormAsync($"/profiles/{profile}/check", page, null, []);
+        Assert.True((await browser.PageAsync($"/?profile={profile}")).Contains("Sprawdzanie jest wstrzymane do"));
+
+        // During the pause nothing is sent; a "Check now" that slipped in is dropped.
+        app.Time.Advance(TimeSpan.FromMinutes(30));
+        await WithService(async services =>
+        {
+            var db = services.GetRequiredService<AppDbContext>();
+            (await db.WatchedScreenings.SingleAsync(r => r.Id == blockedId)).ManualRequestedAt = app.Time.GetUtcNow();
+            return await db.SaveChangesAsync();
+        });
+        mark = app.Network.Requests.Count;
+        Assert.Equal(CycleResult.Paused, (await CycleAsync()).Result);
+        Assert.Equal(mark, app.Network.Requests.Count);
+        Assert.Equal(null, (await RowAsync(blockedId)).ManualRequestedAt);
+
+        // After the pause: one request, for the blocked screening, blocked again - the pause doubles.
+        app.Time.Advance(TimeSpan.FromMinutes(31));
+        mark = app.Network.Requests.Count;
+        report = await CycleAsync();
+        Assert.Equal((true, 1), (report.Blocked, report.Requests));
+        Assert.True(app.Network.Requests[mark].Uri.ToString().Contains(blockedId));
+        state = await PollerStateAsync();
+        Assert.Equal((app.Time.GetUtcNow() + TimeSpan.FromMinutes(120), 2), (state.BlockedUntil!.Value, state.BlockCount));
+
+        // The block is over: until the first request gets through, the page says so and reloads every 10 s.
+        app.Fake("block.txt", null);
+        app.Time.Advance(TimeSpan.FromMinutes(121));
+        page = await browser.PageAsync($"/?profile={profile}");
+        Assert.True(page.Contains("Przerwa minęła: serwer wznawia sprawdzanie") && page.Contains("http-equiv=\"refresh\" content=\"10; url="));
+        Assert.True(page.Contains("Sprawdź teraz</button>") && !page.Contains("Sprawdzanie miejsc jest wstrzymane"));
+
+        // The blocked screening is checked first and alone, its red status goes away; then the rest.
+        report = await CycleAsync();
+        Assert.Equal((1, false), (report.Checked, report.Blocked));
+        Assert.Equal(CheckOutcome.Ok, (await RowAsync(blockedId)).LastOutcome!.Value);
+        Assert.Equal(2, (await Task.WhenAll(new[] { "2000031", "2000032", "2000033" }.Where(id => id != blockedId).Select(RowAsync)))
+            .Count(r => r.LastCheckedAt == firstCheck));
+        state = await PollerStateAsync();
+        Assert.Equal((null, 0), (state.BlockedUntil, state.BlockCount));
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.Resumed)).Count);
+        Assert.Equal("CinemaWatch: sprawdzanie wznowione", MailsTo(TestApp.OwnerEmail)[^1].Subject);
+        page = await browser.PageAsync($"/?profile={profile}");
+        Assert.True(!page.Contains("Sprawdzanie miejsc jest wstrzymane") && !page.Contains("zablokowane") && page.Contains("Sprawdź teraz</button>"));
+        Assert.True(!page.Contains("Przerwa minęła") && !page.Contains("http-equiv=\"refresh\""));
+        Assert.Equal(2, (await CycleAsync()).Checked);
+    });
+
+    TestRunner.Add("Poller: a longer Retry-After (429) is respected; HTML instead of JSON is a block too", async () =>
+    {
+        await ResetPollerAsync();
+        await SignedInAsync("poll-429@example.test", AppLanguage.Polish);
+        var userId = await UserIdAsync("poll-429@example.test");
+        await ImportAsync(userId, PollProfile("Limit", ["2000041"]));
+        await FirstChecksAsync();
+        app.Fake("block.txt", "429 7200");
+        app.Time.Advance(afterInterval);
+        Assert.True((await CycleAsync()).Blocked);
+        Assert.Equal(app.Time.GetUtcNow() + TimeSpan.FromHours(2), (await PollerStateAsync()).BlockedUntil!.Value);
+
+        await ResetPollerAsync();
+        await ImportAsync(userId, PollProfile("Limit", ["2000041"]));
+        app.Network.Override = request => request.RequestUri!.AbsolutePath.Contains("/presentations/")
+            ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("<html>Just a moment...</html>", Encoding.UTF8, "text/html") }
+            : null;
+        var report = await FirstChecksAsync();
+        Assert.Equal((true, 1), (report.Blocked, report.Requests));
+        Assert.True((await PollerStateAsync()).BlockReason!.Contains("text/html"));
+    });
+
+    TestRunner.Add("Check now: no cooldown, greyed out only while the profile's check runs; results under a minute old answer at once; the page refreshes itself meanwhile", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("poll-now@example.test", AppLanguage.Polish);
+        var profile = await ImportAsync(await UserIdAsync("poll-now@example.test"), PollProfile("Teraz", ["2000051"]));
+        await FirstChecksAsync();
+        var page = await browser.PageAsync("/");
+        Assert.True(page.Contains("Sprawdź teraz</button>") && page.Contains("brak wolnych") && page.Contains("Następne automatyczne sprawdzenie ok."));
+        Assert.True(!page.Contains("http-equiv=\"refresh\""));
+
+        // While it runs: a greyed-out "Checking…", "checking…" in the row, the page reloads every 3 s; a second click is refused.
+        var opened = $"/?profile={profile}#profile-{profile}";
+        Assert.Equal(opened, Location(await browser.PostFormAsync($"/profiles/{profile}/check", page, null, [])));
+        page = await browser.PageAsync($"/?profile={profile}");
+        Assert.True(page.Contains("Sprawdzam profil „Teraz”") && page.Contains("<button type=\"button\" class=\"button\" disabled>Sprawdzam…</button>"));
+        Assert.True(page.Contains("sprawdzam…") && !page.Contains("Sprawdź teraz</button>"));
+        // A reload to a new address each time (the same address with #profile-… would only scroll), placed in <head>.
+        var refresh = Regex.Match(page, "<meta http-equiv=\"refresh\" content=\"3; url=/\\?profile=" + profile + "&refresh=\\d+#profile-" + profile + "\"");
+        Assert.True(refresh.Success && refresh.Index < page.IndexOf("</head>", StringComparison.Ordinal), "refresh meta");
+        await browser.PostFormAsync($"/profiles/{profile}/check", page, null, []);
+        Assert.True((await browser.PageAsync($"/?profile={profile}")).Contains("Profil „Teraz” jest właśnie sprawdzany."));
+
+        // Checked under a minute ago: the stored result at once, no request; the button is back immediately.
+        var mark = app.Network.Requests.Count;
+        var report = await CycleAsync();
+        Assert.Equal((1, 0), (report.FromStoredResult, report.Requests));
+        page = await browser.PageAsync($"/?profile={profile}");
+        Assert.True(page.Contains("Sprawdź teraz</button>") && !page.Contains("Sprawdzam…") && !page.Contains("http-equiv=\"refresh\""));
+        await browser.PostFormAsync($"/profiles/{profile}/check", page, null, []);
+        Assert.Equal((1, 0), ((report = await CycleAsync()).FromStoredResult, report.Requests));
+
+        // A minute later Cinema City is asked; the freed seat is shown and e-mailed.
+        app.Time.Advance(TimeSpan.FromSeconds(61));
+        app.Fake("free-2000051.txt", "1_18_4");
+        await browser.PostFormAsync($"/profiles/{profile}/check", await browser.PageAsync("/"), null, []);
+        report = await CycleAsync();
+        Assert.Equal((1, 2, 1), (report.Checked, report.Requests, report.MailsSent));
+        Assert.Equal(mark + 2, app.Network.Requests.Count);
+        var manual = await WithService(async services => await services.GetRequiredService<AppDbContext>().CheckLog.CountAsync(e => e.Manual));
+        Assert.Equal(2, manual);
+        Assert.True((await browser.PageAsync($"/?profile={profile}")).Contains("wolne: rząd 4: 19"));
+
+        // A disabled profile has no button and cannot be checked.
+        page = await browser.PageAsync("/");
+        await browser.PostFormAsync($"/profiles/{profile}/disable", page, null, []);
+        page = await browser.PageAsync($"/?profile={profile}");
+        Assert.True(!page.Contains("Sprawdź teraz") && page.Contains("Profil jest wyłączony: serwer go nie sprawdza."));
+        await browser.PostFormAsync($"/profiles/{profile}/check", page, null, []);
+        Assert.True((await browser.PageAsync("/")).Contains("Profil „Teraz” jest wyłączony"));
+    });
+
+    TestRunner.Add("Profiles: several stay open - the header link opens or closes one and keeps the others; actions and the self-refresh keep them", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("poll-open@example.test", AppLanguage.Polish);
+        var userId = await UserIdAsync("poll-open@example.test");
+        var a = await ImportAsync(userId, PollProfile("A", ["2000091"]));
+        var b = await ImportAsync(userId, PollProfile("B", ["2000092"]));
+        var page = await browser.PageAsync("/");
+        Assert.True(page.Contains($"href=\"/?profile={a}#profile-{a}\" aria-expanded=\"false\"") && page.Contains($"id=\"profile-body-{a}\" hidden"));
+
+        // A is open; B's header opens B and keeps A.
+        page = await browser.PageAsync($"/?profile={a}");
+        Assert.True(page.Contains($"href=\"/?profile={b}&open={a}#profile-{b}\" aria-expanded=\"false\""));
+        page = await browser.PageAsync($"/?profile={b}&open={a}");
+        Assert.True(page.Contains($"<section class=\"profile open\" id=\"profile-{a}\">") && page.Contains($"<section class=\"profile open\" id=\"profile-{b}\">"));
+        // Closing B keeps A (and stays at B's place); closing A keeps B in focus.
+        Assert.True(page.Contains($"href=\"/?open={a}#profile-{b}\" aria-expanded=\"true\""));
+        Assert.True(page.Contains($"href=\"/?profile={b}#profile-{a}\" aria-expanded=\"true\""));
+
+        // "Check now" on A with B open: back with both open; the self-refresh keeps both.
+        await FirstChecksAsync();
+        page = await browser.PageAsync($"/?profile={b}&open={a}");
+        Assert.True(page.Contains($"name=\"open\" value=\"{b}\""));
+        Assert.Equal($"/?profile={a}&open={b}#profile-{a}", Location(await browser.PostFormAsync($"/profiles/{a}/check", page, null, new() { ["open"] = b.ToString() })));
+        page = await browser.PageAsync($"/?profile={a}&open={b}");
+        Assert.True(Regex.IsMatch(page, $"content=\"3; url=/\\?profile={a}&open={b}&refresh=\\d+#profile-{a}\""));
+        Assert.True(page.Contains($"<section class=\"profile open\" id=\"profile-{a}\">") && page.Contains($"<section class=\"profile open\" id=\"profile-{b}\">"));
+
+        // Disabling B keeps A open; deleting A keeps B open. Anything that is not an id is dropped.
+        Assert.Equal($"/?profile={b}&open={a}#profile-{b}", Location(await browser.PostFormAsync($"/profiles/{b}/disable", page, null, new() { ["open"] = $"{a},nonsense" })));
+        Assert.Equal($"/?open={b}", Location(await browser.PostFormAsync($"/profiles/{a}/delete", page, null, new() { ["open"] = b.ToString() })));
+    });
+
+    TestRunner.Add("Test e-mail: to the account's own address in its language, at most every 5 minutes, without a Cinema City request", async () =>
+    {
+        var browser = await SignedInAsync("poll-test@example.test", AppLanguage.English);
+        var mark = app.Network.Requests.Count;
+        var page = await browser.PageAsync("/Account/Manage");
+        Assert.Equal("/Account/Manage", Location(await browser.PostFormAsync("/Account/Manage/TestMail", page, null, [])));
+        var mail = MailsTo("poll-test@example.test").Single();
+        Assert.Equal("[TEST] Seats available: Sample film", mail.Subject);
+        Assert.True(mail.Text.Contains("Buy a ticket: https://www.cinema-city.pl/") && mail.Text.Contains("http://localhost/"));
+        page = await browser.PageAsync("/Account/Manage");
+        Assert.True(page.Contains("went to the local test inbox on this computer") && page.Contains("Test mode: the mail server runs on this computer"));
+
+        await browser.PostFormAsync("/Account/Manage/TestMail", page, null, []);
+        Assert.Equal(1, MailsTo("poll-test@example.test").Count);
+        app.Time.Advance(TimeSpan.FromMinutes(5));
+        await browser.PostFormAsync("/Account/Manage/TestMail", page, null, []);
+        Assert.Equal(2, MailsTo("poll-test@example.test").Count);
+        Assert.Equal(mark, app.Network.Requests.Count);
+    });
+
+    TestRunner.Add("Poller: when the request budget is used up, due screenings wait in order (none skipped) and an event is recorded", async () =>
+    {
+        await ResetPollerAsync();
+        await SignedInAsync("poll-budget@example.test", AppLanguage.Polish);
+        var ids = Enumerable.Range(2000061, 15).Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToList();
+        await ImportAsync(await UserIdAsync("poll-budget@example.test"), PollProfile("Budżet", ids));
+        var report = await FirstChecksAsync();
+        Assert.True(report.BudgetExhausted && report.Checked is > 0 and < 15 && report.Requests <= 20, report.ToString());
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.BudgetExhausted)).Count);
+        var notChecked = await WithService(async services => await services.GetRequiredService<AppDbContext>().WatchedScreenings.CountAsync(r => r.LastCheckedAt == null));
+        Assert.Equal(15 - report.Checked, notChecked);
+
+        app.Time.Advance(TimeSpan.FromMinutes(10)); // 20 requests' worth refilled
+        await CycleAsync();
+        notChecked = await WithService(async services => await services.GetRequiredService<AppDbContext>().WatchedScreenings.CountAsync(r => r.LastCheckedAt == null));
+        Assert.Equal(0, notChecked);
+    });
+
+    TestRunner.Add("Poller: old log rows, history and events are deleted; disabled and ended profiles are not checked", async () =>
+    {
+        await ResetPollerAsync();
+        await SignedInAsync("poll-old@example.test", AppLanguage.Polish);
+        var userId = await UserIdAsync("poll-old@example.test");
+        var kept = await ImportAsync(userId, PollProfile("Włączony", ["2000081"]));
+        var off = await ImportAsync(userId, PollProfile("Wyłączony", ["2000082"]));
+        var ended = await ImportAsync(userId, PollProfile("Zakończony", ["2000083"]));
+        var now = app.Time.GetUtcNow();
+        await WithService(async services =>
+        {
+            var db = services.GetRequiredService<AppDbContext>();
+            await services.GetRequiredService<ProfileService>().SetEnabledAsync(userId, off, false);
+            (await db.Profiles.SingleAsync(p => p.Id == ended)).EndsAt = now - TimeSpan.FromMinutes(1);
+            db.CheckLog.AddRange(
+                new CheckLogEntry { At = now - TimeSpan.FromDays(31), Cycle = "old", Method = "GET", Host = "x", Endpoint = "x", Target = "/" },
+                new CheckLogEntry { At = now - TimeSpan.FromDays(1), Cycle = "new", Method = "GET", Host = "x", Endpoint = "x", Target = "/" });
+            db.Notifications.AddRange(
+                new NotificationRecord { Id = Guid.NewGuid(), ProfileId = kept, CreatedAt = now - TimeSpan.FromDays(91), Subject = "old", Summary = "" },
+                new NotificationRecord { Id = Guid.NewGuid(), ProfileId = kept, CreatedAt = now - TimeSpan.FromDays(1), Subject = "new", Summary = "" });
+            db.ServiceEvents.Add(new ServiceEvent { At = now - TimeSpan.FromDays(91), Kind = ServiceEventKind.Resumed, Message = "old" });
+            await db.SaveChangesAsync();
+            return 0;
+        });
+
+        await CycleAsync();
+        var (logs, notifications, events, watched) = await WithService(async services =>
+        {
+            var db = services.GetRequiredService<AppDbContext>();
+            return (await db.CheckLog.Select(e => e.Cycle).ToListAsync(), await db.Notifications.Select(n => n.Subject).ToListAsync(),
+                await db.ServiceEvents.CountAsync(), await db.WatchedScreenings.Select(r => r.Id).ToListAsync());
+        });
+        Assert.SequenceEqual(["new"], logs);
+        Assert.SequenceEqual(["new"], notifications);
+        Assert.Equal(0, events);
+        Assert.SequenceEqual(["2000081"], watched);
+    });
+    TestRunner.Add("Background loop: records its start, runs a cycle at once, wakes up early on \"Check now\", stops cleanly", async () =>
+    {
+        await ResetPollerAsync();
+        async Task<DateTimeOffset?> LastCycleAsync() =>
+            await WithService(async services => await services.GetRequiredService<AppDbContext>().PollerState.AsNoTracking().Select(s => s.LastCycleAt).SingleOrDefaultAsync());
+        async Task<DateTimeOffset?> WaitForCycleAfterAsync(DateTimeOffset? after)
+        {
+            for (var i = 0; i < 100; i++)
+            {
+                if (await LastCycleAsync() is { } last && (after is null || last > after))
+                    return last;
+                await Task.Delay(50);
+            }
+            return null;
+        }
+
+        var loop = ActivatorUtilities.CreateInstance<PollerHostedService>(app.Services);
+        await loop.StartAsync(CancellationToken.None);
+        try
+        {
+            var first = await WaitForCycleAfterAsync(null);
+            Assert.True(first is not null, "no cycle after the start");
+            app.Time.Advance(TimeSpan.FromSeconds(1));
+            app.Services.GetRequiredService<PollerSignal>().Wake(); // the tick is 30 s; the signal must not wait for it
+            Assert.True(await WaitForCycleAfterAsync(first) is not null, "the signal did not wake the loop");
+        }
+        finally
+        {
+            await loop.StopAsync(CancellationToken.None);
+        }
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.PollerStarted)).Count);
+        Assert.True(File.Exists(Path.Combine(app.FakeFolder, FakeCinemaCityHandler.ReadmeFile)));
     });
 }

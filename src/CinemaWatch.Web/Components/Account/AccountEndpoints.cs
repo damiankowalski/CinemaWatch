@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using CinemaWatch.Core;
 using CinemaWatch.Server.Accounts;
 using CinemaWatch.Server.Data;
+using CinemaWatch.Server.Polling;
 using CinemaWatch.Server.Profiles;
 using CinemaWatch.Web.Components.Account;
 using Microsoft.AspNetCore.Antiforgery;
@@ -12,7 +13,10 @@ using static CinemaWatch.Core.Localizer;
 
 namespace Microsoft.AspNetCore.Routing;
 
-/// <summary>Form endpoints that are not pages: sign-out, the personal-data download, the owner's "send again" and profile limit.</summary>
+/// <summary>
+/// Form endpoints that are not pages: sign-out, the personal-data download, the test e-mail, the owner's "send again"
+/// and profile limit.
+/// </summary>
 internal static class AccountEndpoints
 {
     public static void MapAccountEndpoints(this IEndpointRouteBuilder endpoints)
@@ -26,7 +30,7 @@ internal static class AccountEndpoints
         });
 
         endpoints.MapPost("/Account/Manage/DownloadPersonalData", async (
-            HttpContext context, IAntiforgery antiforgery, UserManager<AppUser> users, ProfileService profiles, ILoggerFactory loggerFactory) =>
+            HttpContext context, IAntiforgery antiforgery, UserManager<AppUser> users, ProfileService profiles, CheckService checks, ILoggerFactory loggerFactory) =>
         {
             await antiforgery.ValidateRequestAsync(context);
             var user = await users.GetUserAsync(context.User);
@@ -35,6 +39,7 @@ internal static class AccountEndpoints
 
             loggerFactory.CreateLogger("PersonalData").LogInformation("User {UserId} downloaded their personal data", user.Id);
             var list = await profiles.ListAsync(user.Id);
+            var history = await checks.HistoryAsync(user.Id);
             var data = new JsonObject
             {
                 ["id"] = user.Id,
@@ -50,6 +55,13 @@ internal static class AccountEndpoints
                     ["createdAt"] = p.CreatedAt.ToString("O"),
                     ["updatedAt"] = p.UpdatedAt.ToString("O"),
                     ["document"] = JsonNode.Parse(ProfileStore.Serialize(p.Document)),
+                    ["notifications"] = new JsonArray((history.TryGetValue(p.Id, out var sent) ? sent : []).Select(n => (JsonNode)new JsonObject
+                    {
+                        ["at"] = n.At.ToString("O"),
+                        ["delivered"] = n.Delivered,
+                        ["subject"] = n.Subject,
+                        ["summary"] = n.Summary,
+                    }).ToArray()),
                 }).ToArray()),
             };
             var json = JsonSerializer.SerializeToUtf8Bytes(data, new JsonSerializerOptions
@@ -58,6 +70,30 @@ internal static class AccountEndpoints
                 Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping, // Polish letters stay readable
             });
             return Results.File(json, "application/json", "cinemawatch-personal-data.json");
+        });
+
+        endpoints.MapPost("/Account/Manage/TestMail", async (
+            HttpContext context, IAntiforgery antiforgery, UserManager<AppUser> users, CheckService checks, Microsoft.Extensions.Options.IOptions<CinemaWatch.Server.Mail.MailOptions> mail) =>
+        {
+            await antiforgery.ValidateRequestAsync(context);
+            var user = await users.GetUserAsync(context.User);
+            if (user is null)
+                return Results.NotFound();
+            var result = await checks.SendTestMailAsync(user.Id);
+            var (kind, message) = result.Outcome switch
+            {
+                TestMailOutcome.Sent when mail.Value.IsLocal => (StatusMessageKind.Success,
+                    T($"Testowy e-mail do {user.Email} trafił do lokalnej skrzynki testowej na tym komputerze (tryb testowy): do prawdziwej skrzynki nie wychodzi.",
+                      $"The test e-mail to {user.Email} went to the local test inbox on this computer (test mode): it does not reach the real mailbox.")),
+                TestMailOutcome.Sent => (StatusMessageKind.Success,
+                    T($"Testowy e-mail wysłany na {user.Email}. Sprawdź skrzynkę i folder spam.", $"Test e-mail sent to {user.Email}. Check your inbox and the spam folder.")),
+                TestMailOutcome.TooSoon => (StatusMessageKind.Error,
+                    T($"Testowy e-mail wyszedł przed chwilą. Kolejny możesz wysłać o {PollerTime.ClockText(result.AvailableAt!.Value)}.",
+                      $"A test e-mail went out a moment ago. You can send another one at {PollerTime.ClockText(result.AvailableAt!.Value)}.")),
+                _ => (StatusMessageKind.Error, T($"E-mail nie wyszedł: {result.Error}", $"The e-mail was not sent: {result.Error}")),
+            };
+            IdentityRedirectManager.SetStatus(context, kind, message);
+            return Results.LocalRedirect("/Account/Manage");
         });
 
         endpoints.MapPost("/admin/users/resend", async (

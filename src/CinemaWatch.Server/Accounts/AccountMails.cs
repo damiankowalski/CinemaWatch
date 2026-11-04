@@ -1,5 +1,3 @@
-using System.Text.Encodings.Web;
-using System.Text.Unicode;
 using CinemaWatch.Server.Mail;
 using static CinemaWatch.Core.Localizer;
 
@@ -32,37 +30,15 @@ public static class AccountMails
     private static string Hours(TimeSpan span) =>
         Count((int)Math.Round(span.TotalHours), "godzinę", "godziny", "godzin", "hour", "hours");
 
-    // Keeps Polish letters readable in the HTML part instead of turning them into numeric entities.
-    private static readonly HtmlEncoder Encoder = HtmlEncoder.Create(UnicodeRanges.All);
-
     private static OutgoingMail Build(string to, string subject, string intro, string action, string button, string link, string footer)
     {
         var text = $"{intro}\n\n{action}\n{link}\n\n{footer}\n";
-        var html = new HtmlBuilder()
+        var html = new MailHtml()
             .Paragraph(intro)
             .Paragraph(action)
-            .Raw($"<p><a href=\"{Encoder.Encode(link)}\">{Encoder.Encode(button)}</a></p>")
+            .Raw($"<p>{MailHtml.Link(link, button)}</p>")
             .Paragraph(footer)
             .ToString();
         return new OutgoingMail(to, subject, text, html);
-    }
-
-    private sealed class HtmlBuilder
-    {
-        private readonly System.Text.StringBuilder _html = new();
-
-        public HtmlBuilder Paragraph(string text)
-        {
-            _html.Append("<p>").Append(Encoder.Encode(text)).Append("</p>");
-            return this;
-        }
-
-        public HtmlBuilder Raw(string html)
-        {
-            _html.Append(html);
-            return this;
-        }
-
-        public override string ToString() => _html.ToString();
     }
 }

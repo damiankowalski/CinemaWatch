@@ -10,9 +10,11 @@
 > `SAAS_INFRA.md` after every infrastructure change.
 >
 > Last updated: 3 November 2026. Status: **stage 3 in progress** - MVP 0 on the development PC; increments 1
-> (`saas-skeleton`: accounts by invitation, e-mail, Polish/English UI) and 2 (`saas-profiles`: profile import, list,
-> profile limit per account) built and tested. `CinemaWatch.Probe` 0.1.0 keeps running on the VPS; risk test R1
-> provisionally green (full check before stage 4). Next: increment 3 (poller).
+> (`saas-skeleton`: accounts by invitation, e-mail, Polish/English UI), 2 (`saas-profiles`: profile import, list,
+> profile limit per account) and 3 (`saas-poller`: background checks, notification e-mails, history, "check now",
+> test e-mail; SaaS 0.3.3) built and tested against a fake of Cinema City. `CinemaWatch.Probe` 0.1.0 keeps
+> running on the VPS; risk test R1 provisionally green (full check before stage 4). Next: increment 4 (operator's
+> panel).
 
 ---
 
@@ -111,29 +113,67 @@ Stripe (later): Checkout, Billing, webhooks                       --> web app
   profile with the same name replaces it), `enabled`, `ends_at` (start of the last screening, UTC), `created_at`,
   `updated_at`, `document` (JSONB: profile format v1, normalised as the desktop saves it, so import and export with
   desktop and Android stay free).
-- `watched_screenings` - one row per unique screening id: `cinema_id`, `starts_at` (Europe/Warsaw), cached
-  `venue_id`, `seatplan_id`, `venue_type_id`, `is_reserved`, `next_check_at`, last result. The poller works on this
-  table, not on profiles.
+- `profiles` also keep `last_manual_check_at` and `check_pending` ("check now", increment 3).
+- `watched_screenings` - one row per unique screening id: `cinema_id`, `starts_at` (UTC, converted from the
+  profile's Polish time), `interval_minutes` (the shortest of the profiles that watch it), `next_check_at`,
+  `manual_requested_at`, the last result (`last_checked_at`, `last_succeeded_at`, `last_outcome` Ok / Failed /
+  Blocked, `last_http_status`, `last_error`, `free_seat_keys`, `free_count`, `total_count`) and the cached details
+  (`venue_id`, `seatplan_id`, `venue_type_id`, `is_reserved`). Derived from the profiles at every poller cycle; the
+  poller works on this table, not on profiles.
+- `seat_plans` - hall layouts as Cinema City returned them, shared by all users (`venue_id`, `seatplan_id`, `json`,
+  `fetched_at`; fetched again after 7 days, deleted after 30 days unused).
 - `notification_state` - `profile_id`, `screening_id`, the set of available watched seats from the last check
-  (KB §4 "notify only about new seats").
-- `notifications` - history: when, which profile, which seats, delivery status.
-- `check_log` - per request: time, endpoint, HTTP status, duration (needed for R1 and the request budget).
+  (KB §4 "notify only about new seats"); deleted with the profile, dropped for screenings that are over.
+- `notifications` - history: when, which profile, subject, one line per screening, delivered or not (and the error);
+  deleted with the profile, kept 90 days.
+- `check_log` - per request, the probe's columns: time, cycle, screening, manual or not, method, host, endpoint,
+  target, HTTP status, duration, content type, `cf-mitigated`, `cf-ray`, `Retry-After`, error. No personal data; kept
+  30 days.
+- `poller_state` - one row: `blocked_until`, `block_count` (blocks in a row), `blocked_at`, `block_reason`,
+  `last_cycle_at`, `last_cleanup_at`; survives a restart.
+- `service_events` - blocks, resumptions, an exhausted budget, mail failures, failing cycles, starts; kept 90 days;
+  shown in the operator's panel (increment 4).
+- All times in the database are UTC (`timestamptz`); Polish time only at the edges (pages, e-mails).
 - Later: `plans` / entitlements, `stripe_customers`, `subscriptions`, `payment_events`.
 
 Multi-tenancy: **one database, every row has an owner** (`user_id`). A database per user is a pattern for business
 customers with isolation requirements and an anti-pattern here. PostgreSQL Row-Level Security can later act as a
 safety net against application bugs.
 
-### 4.3 Poller rules
+### 4.3 Poller rules (as built in increment 3)
 
-- Check each unique screening once and fan the result out to every enabled profile that watches it.
-- Cache the screening details (`venueTypeId`, `isReserved` do not change), so a check usually needs 1 request
-  instead of 2. Layouts are cached and shared (static per `venueId/seatplanId`).
-- Adaptive interval (proposal): screenings weeks away less often, the last 48 hours more often; never more often
-  than the minimum allowed for the profile.
-- Global rate limiter and jitter (no bursts at :00); on HTTP 403/429 back off and log, no retry storms (KB §3.6).
-- Past screenings are skipped; a profile whose screenings are all over is disabled automatically.
-- Honest User-Agent identifying the app (KB §3.1).
+- Check each unique screening once and fan the result out to every enabled profile that watches it. The poller is
+  global: one queue for all users; profiles only decide which screenings are in it and how often.
+- Interval per screening: the shortest profile interval of its watchers, never below the server minimum
+  (`Saas:Limits:MinIntervalMinutes`, 10 min; cannot be configured below 5), plus up to 20% at random (10-12 min). A
+  new screening is checked within a minute of the import.
+- One check = screening details + free seats, the pair the R1 probe measured; the layout comes from `seat_plans`.
+  Reusing the details (1 request per check) exists as a switch (`ReuseScreeningDetails`), off until measured.
+- Pace and budget: the two requests of a screening go directly one after the other (like a browser opening the
+  screening's page); between screenings 3-6 s at random in the background and 1-2 s for "check now" (somebody waits);
+  a global budget of 120 requests an hour (scheduled and manual), refilled steadily, at most a sixth of an hour saved
+  up. When it is used up, due screenings wait in the
+  order of their due times: everybody is checked a little less often instead of the server sending more.
+- Failed check (HTTP 5xx, another 4xx such as 404, timeout, network error, unreadable answer): the notification
+  state stays, no retry, the next attempt at the normal time (R1 data: one HTTP 500 in 1,144 requests on 3 Nov 2026).
+- Block (HTTP 403 / 429, a response marked `cf-mitigated`, HTML instead of JSON): nothing more is sent in the cycle;
+  all requests pause for 1 hour, doubling with every block in a row up to 24 hours, a longer `Retry-After` wins
+  (at most 7 days); the pause survives a restart. Pending "check now" requests are dropped. After the pause the
+  blocked screening is tried first, alone; once a request gets through, the counter returns to 0. The owner gets an
+  e-mail when a block starts and when it ends; users see a banner and a greyed-out "check now".
+- Notifications: at most one e-mail per profile per cycle, in the account's language, one line per screening with
+  its booking link; the state is saved only after the e-mail went out.
+- "Check now": no cooldown; unavailable (greyed out) only while the profile's check runs or checks are paused.
+  Cinema City is asked only about screenings checked more than a minute ago, fresher ones answer at once from the
+  stored result. Results are saved screening by screening, so the page fills in row by row.
+- Past screenings drop out; a profile whose screenings are all over (`ends_at`) is skipped (not switched off: the
+  page already shows it as ended).
+- One session (`uuid` header, cookies, connection) per cycle, like one probe run. Honest User-Agent:
+  `Mozilla/5.0 (<platform>) CinemaWatch-Server/<version> (+<repository URL>)` (KB §3.1).
+- Development and tests use a fake of Cinema City (captured responses steered by files); the app refuses it outside
+  the Development environment.
+- Adaptive interval (proposal, not built): screenings weeks away less often, the last 48 hours more often; never more
+  often than the minimum allowed for the profile.
 
 ### 4.4 Hosting and infrastructure
 
@@ -227,17 +267,19 @@ In scope:
 - Import of a `*.cinemawatch.json` file (validation as in KB §5.3: refuse a higher `version`, ignore unknown fields).
 - Profile list: screenings, number of watched seats, enabled/disabled, last check, last notification; enable,
   disable, delete, download the stored JSON.
-- "Check now" per profile, like the desktop, rate-limited (e.g. once a minute per account) to protect the request
-  budget.
+- "Check now" per profile, like the desktop, without a cooldown; a screening checked in the last minute is not asked
+  again (§4.3).
 - Background checks per KB §5.4 with de-duplication and the poller rules (§4.3), at the profile's own interval
   (`intervalMinutes`) but never more often than a server minimum (e.g. 10 minutes).
 - E-mail "Wolne miejsca: {film}" with one line per screening and the booking link; a "send a test e-mail" button
   to check delivery and spam placement.
 - Notification history per profile.
 - Limits in configuration (`Saas:Limits`): 5 profiles per account (enabled, disabled and ended alike; the owner can
-  set another limit per account, 1-50), 20 screenings per profile, minimum interval 10 minutes.
+  set another limit per account, 1-50), 20 screenings per profile, minimum interval 10 minutes; a global request
+  budget (`Saas:Poller`, 120 an hour).
 - Privacy notice page; UI in Polish and English like the desktop app.
-- Operator view (owner only): requests per hour, HTTP status breakdown, last errors.
+- Operator's panel (owner only, increment 4): status of the components, events, requests per hour, HTTP status
+  breakdown, poller settings and a pause switch.
 
 Out of scope: wizard and hall map, plans and payments, OIDC provider, queue broker, Kubernetes, web push, mobile
 integration.
@@ -265,7 +307,7 @@ interchangeable.
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
-  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.2.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.3.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
   database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
@@ -333,12 +375,24 @@ Every increment ends with something testable in the browser on the PC (`src/Cine
       enable / disable / delete (question with "Keep it") / download (the desktop's file and file name); 5 profiles per
       account, the owner sets a different limit per account on the users page; profiles in the
       personal data download, deleted with the account; privacy text; SaaS 0.2.0. No Cinema City requests.
-- [ ] 3 `saas-poller`: `watched_screenings` from the enabled profiles, scheduling (profile interval, server minimum
-      10 min, jitter), global rate limit, stop on 403 / 429 / challenge, notification state in the database, e-mail
-      "Wolne miejsca", history, "check now", "send a test e-mail", `check_log`; retention for `check_log` and the history
-      (e.g. 30 and 90 days: they, not the profiles, grow the disk); seat names in the profile list from the cached
-      layouts. Development uses a fake Cinema City client with captured responses; the real API only on demand.
-- [ ] 4 `saas-operator`: operator view (requests per hour, statuses, errors), polish, privacy text reviewed, docs.
+- [x] 3 `saas-poller` (3 Nov 2026): background loop in the web app; `watched_screenings` derived from the enabled
+      profiles at every cycle; scheduling (profile interval, server minimum 10 min, up to 20% jitter, new screenings
+      within a minute); details + free seats per check, layouts in `seat_plans`; 3-6 s between requests; global budget
+      120 requests an hour; failed check (5xx etc.) without retry and without a state change; block (403 / 429 /
+      challenge / HTML) stops the cycle, pauses 1 h doubling up to 24 h, one screening first afterwards, e-mails to the
+      owner, banner for users; notification state in the database, e-mail "Wolne miejsca" per profile with booking
+      links, history; "check now" (no cooldown, greyed out while running, stored result under 1 min, results row by
+      row) with a self-refreshing page; test e-mail (the page says when it went to the local test inbox); `check_log`, `service_events`, retention (30 / 90 days); watched and free seat names in the profile list;
+      the development fake of Cinema City (files in `C:\DEV\CINEMAWATCH\saas-fake`), refused outside Development;
+      SaaS 0.3.3 (0.3.0 plus the owner's first tests: check now without a cooldown and with 1-2 s between screenings,
+      the blocked screening first after a pause, a page that reloads itself also after "check now" and around a pause,
+      several profiles open at once, kept in the address). Rules in §4.3, decisions in §9.
+- [ ] 4 `saas-operator`: the operator's panel (owner only) - status of the components as a checklist (poller: last
+      cycle, pause; Cinema City: last requests, statuses, blocks; e-mail: last sent, last error; database), the
+      `service_events` list, requests per hour and status breakdown from `check_log`, the poller settings in the
+      database with fixed ranges (interval minimum not below 5 min, budget, pauses) and a pause / resume switch;
+      a heartbeat for an external "dead man's switch" (the service itself comes in stage 4); polish, privacy text
+      reviewed, docs.
 - Done when: the whole flow (invitation → import → freed seat → e-mail with the booking link) works on the PC, one
       manual check against the real API passes, and the SaaS and desktop tests are green in CI.
 
@@ -356,6 +410,9 @@ Every increment ends with something testable in the browser on the PC (`src/Cine
 - [ ] E-mail provider account with 2FA (moved from stage 1).
 - [ ] E-mail domain: SPF (replaces `v=spf1 -all`), DKIM, DMARC.
 - [ ] Backups: daily `pg_dump` off the server; restore tested once.
+- [ ] Heartbeat monitor ("dead man's switch", e.g. Healthchecks.io free plan): the poller signals after every cycle;
+      the service e-mails the owner when the signals stop (process, server or e-mail down). Works behind Cloudflare
+      Access, because the server calls out.
 
 ### Stage 5 - First SaaS test
 - [ ] 3-5 invited people (possibly only the owner, §9), free, behind Cloudflare Access, 2 weeks. Watch requests
@@ -473,6 +530,24 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | The import is a Blazor form on the profile page (static SSR binds uploaded files); enable / disable / delete are form endpoints with a redirect; someone else's profile id answers 404 | The page can show the full result of every file; a successful import redirects, so a reload does not post the files again |
 | Nov 2026 | Page state that must survive a reload lives in the address: `?profile=<id>` opens a profile (after enable / disable), `&confirm=delete` adds the deletion question with "Yes, delete" and "Keep it" | No JavaScript (decision above): an open `<details>` exists only in the browser and cannot be closed by a button; a reload keeps the question; someone else's id opens nothing |
 | Nov 2026 | Light / dark theme follows the system (`prefers-color-scheme`), no switch in the web app | Same as the desktop app; nothing to store; can be added later as a per-device cookie |
+| Nov 2026 | Poller is global: one queue of unique screenings for all users; a block on the server's IP stops checks for everybody | The block is on the IP, not on an account; profiles decide only which screenings are watched and how often |
+| Nov 2026 | Each check asks for the screening details and the free seats (2 requests), as the R1 probe did; reusing the details is a switch, off | R1 measured this pair; whether `seats-status` alone passes from a fresh session is unknown. Halving the requests matters at scale, not for MVP 0 |
+| Nov 2026 | Pace: the two requests of a screening back to back; between screenings 3-6 s at random in the background, 1-2 s for "check now"; global budget 120 requests an hour for scheduled and manual checks, refilled steadily; when used up, due screenings wait in order | Gentler than the probe's bursts (12-14 requests in 2.5 s, green); a pause before every request made a "check now" of 5 screenings take about 40 s against a few seconds on the desktop, now about 10 s; the budget, not the pause, caps the volume; waiting in order stretches everybody's interval instead of skipping some |
+| Nov 2026 | Server minimum interval stays 10 minutes; it cannot be configured below 5 | 10 minutes is what R1 measured; a freed IMAX seat can be gone within minutes, 15 would delay notifications by 2-3 minutes on average |
+| Nov 2026 | Failed check (HTTP 5xx, another 4xx, timeout, network error, unreadable answer): notification state unchanged, no retry, next attempt at the normal time | R1 data: one HTTP 500 in 1,144 requests (3 Nov 2026); retries would only add load to a struggling server |
+| Nov 2026 | Block = HTTP 403 / 429, a response marked `cf-mitigated`, or HTML instead of JSON from the API: stop the cycle, drop pending "check now" requests, pause 1 h doubling up to 24 h (a longer `Retry-After` wins, at most 7 days), the pause survives restarts; afterwards the blocked screening is tried first, alone | Cloudflare announces no end of a block; a single request after a growing pause is the cheapest way to find out; HTML on an API endpoint means something stands in the way. The owner's first test showed a stale "blocked" row after the pause and a "checking" button during it: the blocked screening goes first, and the pause, not a pending check, is what the page shows |
+| Nov 2026 | Alerts: e-mail to the owner (`Saas:OwnerEmail`) at the start and the end of a block; users see a banner, no e-mails to users about pauses | The owner can act; mass e-mails to friends would be noise and hurt the sender's reputation |
+| Nov 2026 | A dead process cannot report its own death: an external heartbeat ("dead man's switch") comes with the operator's panel (code) and stage 4 (service) | The only way to notice that the server, the app or the e-mail is down |
+| Nov 2026 | Operator's panel in increment 4 grows: status of the components as a checklist, events, request statistics, poller settings in the database with fixed ranges and a pause switch; increment 3 already records the data (`check_log`, `service_events`, `poller_state`) | The owner wanted one place to see the state of the services; settings without SSH; increment 3 stays reviewable |
+| Nov 2026 | "Check now" without a cooldown: greyed out only while the profile's check runs or checks are paused; Cinema City is asked only about screenings checked more than a minute ago, fresher ones answer at once from the stored result; new seats from it are e-mailed like any check (first built with a 2-minute cooldown and 5 minutes, changed after the owner's test) | Waiting for the button was unintuitive; the pause between requests (3-6 s, unchanged) and the global budget already cap what reaches Cinema City however often it is pressed; one shared notification state, so a seat seen on the page is never left out of the e-mails |
+| Nov 2026 | The page refreshes itself with `<meta http-equiv="refresh">` every 3 s while "check now" runs (at most 5 minutes), when a pause ends and every 10 s until the first request after it got through; the target is the page's address with a new `refresh=` value each time; results are saved screening by screening, so the rows fill in one by one | Keeps the no-JavaScript decision; a check of 5 screenings takes about half a minute at 3-6 s between requests, so progress matters more than speed. A refresh to the same address does nothing when it ends with `#profile-…` (the browser only jumps to the anchor) - found in the owner's test |
+| Nov 2026 | The profile header is a link that opens or closes the profile; the open profiles live in the address (`?profile=` in focus, `?open=` others), forms carry them and the redirects restore them | An open `<details>` exists only in the browser, so every self-refresh closed the profiles the owner had opened; without JavaScript the address is the only place that survives a reload |
+| Nov 2026 | With a local mail server (`Mail:Host` = localhost) the account page and the test e-mail's message say the e-mail went to the local test inbox, not to the real mailbox | In the owner's first test the message "check your inbox" suggested a real delivery to Gmail |
+| Nov 2026 | Notifications: at most one e-mail per profile per cycle, one line per screening with its own booking link and a link to the profile; state saved only after the e-mail went out; a refused e-mail is recorded in the history and notified again at the next check | Same rule as the desktop (KB §4); e-mails can carry several links, unlike a toast |
+| Nov 2026 | `watched_screenings` is derived from the profiles at every cycle (no hooks in the import, enable, disable or delete); all database times UTC | Nothing can get out of step; at this scale reading all profiles every 30 s costs nothing |
+| Nov 2026 | Development fake of Cinema City: the real client and pipeline on captured responses (Sadyba hall) steered by files (`free-<id>.txt`, `block.txt`, `error500*.txt`); refused outside the Development environment; the tests use the same fake in a temporary folder | The whole pipeline incl. block detection is exercised; seats can be freed and blocks simulated by hand; the fake can never answer on the real server |
+| Nov 2026 | Retention: request log 30 days, notification history and events 90 days, unused layouts 30 days; cleanup once a day by the poller | The log and the history, not the profiles, grow the disk |
+| Nov 2026 | Test e-mail on the account page: a sample notification to the own address, at most every 5 minutes, no Cinema City request | Checks delivery and spam placement without waiting for a freed seat |
 
 ---
 
@@ -480,7 +555,9 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 
 | Question | Options / notes |
 | --- | --- |
-| Check interval | MVP 0: the profile's interval with a server minimum (about 10 minutes, decided Nov 2026); the minimum and the adaptive rules (§4.3) tuned with the stage 2 data |
+| Check interval | MVP 0: the profile's interval with a server minimum of 10 minutes (decided Nov 2026); the adaptive rules (§4.3) tuned with the stage 4 data |
+| One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
+| Heartbeat service | Healthchecks.io (free plan, push-based) or similar; chosen in stage 4 with the panel's heartbeat |
 | E-mail provider | See §8.3 |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
 | Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
@@ -500,6 +577,8 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 - **Cloudflare Workers experiment:** one component (e.g. the notifier) on Workers to compare serverless with
   containers.
 - **More channels:** web push, Telegram / Signal bots.
+- **Users e-mailed about long pauses:** e.g. when a block lasts longer than a few hours; today only the owner is
+  e-mailed and users see a banner.
 - **`profileId`** in the profile format for sync between desktop, Android and SaaS (KB §5.3).
 - **Learning items:** Kubernetes (k3s), RabbitMQ, Keycloak, Row-Level Security, monitoring (Prometheus / Grafana),
   Ansible (planned for stage 4).

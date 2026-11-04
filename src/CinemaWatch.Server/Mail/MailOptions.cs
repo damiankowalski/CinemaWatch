@@ -24,4 +24,10 @@ public sealed class MailOptions
     public string? Password { get; set; }
     public string FromAddress { get; set; } = "cinemawatch@localhost";
     public string FromName { get; set; } = "CinemaWatch";
+
+    /// <summary>
+    /// The mail server runs on this computer (development: the smtp4dev test inbox): nothing reaches a real mailbox, and
+    /// the pages say so.
+    /// </summary>
+    public bool IsLocal => Host.Trim().ToLowerInvariant() is "localhost" or "127.0.0.1" or "::1" or "[::1]";
 }
