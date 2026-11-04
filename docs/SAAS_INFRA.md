@@ -666,7 +666,8 @@ sudo rm -rf /opt/cinemawatch-probe /etc/cinemawatch-probe /var/lib/private/cinem
 - Start of stage 4: the final R1 check with at least 5 days of probe data (§4.18), then stop and remove the probe
   (§4.19) unless it is still useful.
 - Stage 4: the Ansible playbook first (stage 2 hardening as code, verified by a reinstall), then swap, Docker and
-  Compose, a `deploy` user, Cloudflare Tunnel and Access, e-mail records, backups.
+  Compose, a `deploy` user, Cloudflare Tunnel and Access, e-mail records, backups, and an external heartbeat monitor
+  for the poller ("dead man's switch", [`SAAS.md`](SAAS.md) §7).
 
 Each step will be added to §1 and §3 of this file.
 

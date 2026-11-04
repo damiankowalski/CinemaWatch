@@ -1,7 +1,9 @@
 @page "/"
 @inject ProfileService Profiles
+@inject CheckService Checks
 @inject UserManager<AppUser> UserManager
 @inject IdentityRedirectManager RedirectManager
+@inject TimeProvider Time
 
 <PageTitle>@T("Profile", "Profiles") – CinemaWatch</PageTitle>
 
@@ -10,6 +12,29 @@
     <p class="count">@T($"{list.Profiles.Count} z {list.Limit} profili", $"{list.Profiles.Count} of {list.Limit} profiles")</p>
 </div>
 <StatusMessage />
+
+@if (RefreshSeconds is { } seconds)
+{
+    @* No JavaScript: while something is about to change (a check runs, a pause ends) the page reloads itself. *@
+    <HeadContent><meta http-equiv="refresh" content="@($"{seconds}; url={RefreshUrl}")" /></HeadContent>
+}
+
+@if (poller.PausedUntil is { } pausedUntil)
+{
+    <p class="status error" role="alert">
+        @T($"Sprawdzanie miejsc jest wstrzymane do {PollerTime.ClockText(pausedUntil)}: Cinema City odrzuciło zapytania serwera. Wznowi się samo; właściciel serwisu dostał e-mail.",
+           $"Seat checks are paused until {PollerTime.ClockText(pausedUntil)}: Cinema City refused the server's requests. They resume by themselves; the site's owner has been e-mailed.")
+    </p>
+}
+else if (poller.Resuming)
+{
+    <p class="hint">@T("Przerwa minęła: serwer wznawia sprawdzanie, zaczynając od seansu, przy którym go zablokowano.",
+                       "The pause is over: the server resumes the checks, starting with the screening where it was blocked.")</p>
+}
+else if (!poller.Enabled)
+{
+    <p class="hint">@T("Sprawdzanie w tle jest wyłączone w ustawieniach serwera.", "Background checks are switched off in the server's settings.")</p>
+}
 
 @if (results is not null)
 {
@@ -50,21 +75,25 @@
 }
 else
 {
-    <p class="hint">@T("Serwer jeszcze nie sprawdza miejsc i nie wysyła e-maili: to przyjdzie w kolejnej wersji.", "The server does not check seats or send e-mails yet: that arrives in the next version.")</p>
     <div class="profiles">
         @foreach (var profile in list.Profiles)
         {
             var document = profile.Document;
-            var opened = profile.Id == OpenProfile;
-            var confirming = opened && Confirm == "delete";
-            <details class="profile" id="profile-@profile.Id" open="@opened">
-                <summary>
+            var opened = Expanded.Contains(profile.Id);
+            var confirming = profile.Id == OpenProfile && Confirm == "delete";
+            var status = statuses.GetValueOrDefault(profile.Id);
+            var active = profile.Enabled && !profile.Ended;
+            var freeNow = active && status is not null && document.Screenings.Any(s => s.StartsAt > polishNow && status.Screenings.GetValueOrDefault(s.Id)?.AvailableCount > 0);
+            @* Opening and closing is a link that keeps the state in the address (?profile=…&open=…): the page reloads itself
+               while a check runs, and a state that lives only in the browser would be lost at every reload. *@
+            <section class="profile@(opened ? " open" : "")" id="profile-@profile.Id">
+                <a class="profile-head" href="@ToggleUrl(profile.Id, opened)" aria-expanded="@(opened ? "true" : "false")" aria-controls="profile-body-@profile.Id">
                     <span class="profile-name">@profile.Name</span>
                     <span class="badge @StateClass(profile)">@StateText(profile)</span>
-                    <span class="profile-meta">@Meta(document)</span>
-                </summary>
+                    <span class="profile-meta">@Meta(document)@if (freeNow){<span class="free-now"> · @T("są wolne miejsca", "seats free now")</span>}</span>
+                </a>
 
-                <div class="profile-body">
+                <div class="profile-body" id="profile-body-@profile.Id" hidden="@(!opened)">
                     <div class="table-scroll">
                         <table>
                             <thead>
@@ -72,18 +101,61 @@ else
                                     <th scope="col">@T("Seans", "Screening")</th>
                                     <th scope="col">@T("Kino", "Cinema")</th>
                                     <th scope="col">@T("Sala", "Hall")</th>
-                                    <th scope="col">@T("Miejsca", "Seats")</th>
+                                    <th scope="col">@T("Pilnowane miejsca", "Watched seats")</th>
+                                    <th scope="col">@T("Stan", "Status")</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 @foreach (var screening in document.Screenings.OrderBy(s => s.StartsAt))
                                 {
                                     var past = screening.StartsAt <= polishNow;
+                                    var check = status?.Screenings.GetValueOrDefault(screening.Id);
                                     <tr class="@(past ? "past" : null)">
                                         <td>@screening.StartsAt.ToString("ddd d.MM.yyyy, HH:mm", Culture)@(past ? T(" (już się zaczął)", " (already started)") : "")</td>
                                         <td>@CinemaText(screening, document)</td>
                                         <td>@screening.Auditorium</td>
-                                        <td>@screening.SeatKeys.Count</td>
+                                        <td>@(check?.WatchedText ?? screening.SeatKeys.Count.ToString(Culture))</td>
+                                        <td>
+                                            @if (past || !active)
+                                            {
+                                                <span class="hint">–</span>
+                                            }
+                                            else if (check is { Pending: true })
+                                            {
+                                                <span class="hint">@T("sprawdzam…", "checking…")</span>
+                                                @if (check.LastCheckedAt is { } before)
+                                                {
+                                                    <br /><span class="hint">@T($"poprzednio {WhenText(before)}", $"previously {WhenText(before)}")</span>
+                                                }
+                                            }
+                                            else if (check?.LastCheckedAt is not { } checkedAt)
+                                            {
+                                                <span class="hint">@T("czeka na pierwsze sprawdzenie", "waiting for the first check")</span>
+                                            }
+                                            else
+                                            {
+                                                @if (check.LastOutcome == CheckOutcome.Ok)
+                                                {
+                                                    @if (check.AvailableCount > 0)
+                                                    {
+                                                        <strong class="free">@T("wolne", "free"): @(check.AvailableText ?? check.AvailableCount.ToString())</strong>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>@T("brak wolnych", "none free")</span>
+                                                    }
+                                                }
+                                                else if (check.LastOutcome == CheckOutcome.Blocked)
+                                                {
+                                                    <span class="problem">@T("zablokowane", "blocked")@HttpText(check.LastHttpStatus)</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="problem">@(check.LastHttpStatus is null ? T("brak odpowiedzi", "no answer") : T("błąd Cinema City", "Cinema City error"))@HttpText(check.LastHttpStatus)</span>
+                                                }
+                                                <br /><span class="hint">@CheckedText(checkedAt, check)</span>
+                                            }
+                                        </td>
                                     </tr>
                                 }
                             </tbody>
@@ -96,17 +168,39 @@ else
                             : T($"Powiadomienie o co najmniej {document.MinAdjacent} wolnych miejscach obok siebie.",
                                 $"Notification when at least {document.MinAdjacent} watched seats next to each other become free."))
                         @IntervalText(document.IntervalMinutes)
+                        @NextCheckText(profile, status)
                     </p>
 
                     <div class="actions">
+                        @if (active && status is not null)
+                        {
+                            @* Unavailable (greyed out) while checks are paused or while this profile's check runs. *@
+                            @if (poller.PausedUntil is { } paused)
+                            {
+                                <button type="button" class="button" disabled title="@T($"Sprawdzanie wstrzymane do {PollerTime.ClockText(paused)}", $"Checks paused until {PollerTime.ClockText(paused)}")">@T("Sprawdź teraz", "Check now")</button>
+                            }
+                            else if (status.Checking)
+                            {
+                                <button type="button" class="button" disabled>@T("Sprawdzam…", "Checking…")</button>
+                            }
+                            else
+                            {
+                                <form action="profiles/@profile.Id/check" method="post">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="open" value="@OthersOpen(profile.Id)" />
+                                    <button type="submit" class="button primary">@T("Sprawdź teraz", "Check now")</button>
+                                </form>
+                            }
+                        }
                         <form action="profiles/@profile.Id/@(profile.Enabled ? "disable" : "enable")" method="post">
                             <AntiforgeryToken />
+                            <input type="hidden" name="open" value="@OthersOpen(profile.Id)" />
                             <button type="submit" class="button">@(profile.Enabled ? T("Wyłącz", "Disable") : T("Włącz", "Enable"))</button>
                         </form>
                         <a class="button" href="profiles/@profile.Id/download" download>@T("Pobierz plik", "Download file")</a>
                         @if (!confirming)
                         {
-                            <a class="button danger-outline" href="?profile=@profile.Id&confirm=delete#profile-@profile.Id">@T("Usuń", "Delete")</a>
+                            <a class="button danger-outline" href="@PageUrl(profile.Id, "delete")">@T("Usuń", "Delete")</a>
                         }
                     </div>
 
@@ -118,14 +212,40 @@ else
                             <div class="actions">
                                 <form action="profiles/@profile.Id/delete" method="post">
                                     <AntiforgeryToken />
+                                    <input type="hidden" name="open" value="@OthersOpen(profile.Id)" />
                                     <button type="submit" class="button danger">@T("Tak, usuń profil", "Yes, delete the profile")</button>
                                 </form>
-                                <a class="button" href="?profile=@profile.Id#profile-@profile.Id">@T("Nie usuwaj", "Keep it")</a>
+                                <a class="button" href="@PageUrl(profile.Id)">@T("Nie usuwaj", "Keep it")</a>
                             </div>
                         </div>
                     }
+
+                    <h3>@T("Powiadomienia", "Notifications")</h3>
+                    @if (status is null || status.History.Count == 0)
+                    {
+                        <p class="hint">@T("Jeszcze nie było powiadomień o tym profilu.", "No notifications for this profile yet.")</p>
+                    }
+                    else
+                    {
+                        <ul class="history">
+                            @foreach (var sent in status.History)
+                            {
+                                <li>
+                                    <span class="when">@WhenText(sent.At)</span>
+                                    @if (!sent.Delivered)
+                                    {
+                                        <span class="problem"> · @T("e-mail nie wyszedł, ponowna próba przy następnym sprawdzeniu", "the e-mail failed; it is tried again at the next check")</span>
+                                    }
+                                    @foreach (var line in sent.Summary.Split('\n'))
+                                    {
+                                        <br /><span>@line</span>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    }
                 </div>
-            </details>
+            </section>
         }
     </div>
 }
@@ -151,9 +271,16 @@ else
 @code {
     private const int MaxErrorsShown = 8;
 
+    /// <summary>The page reloads itself at most this long after a "Check now" (if the poller is not running, it stops waiting).</summary>
+    private static readonly TimeSpan RefreshWhileChecking = TimeSpan.FromMinutes(5);
+
     private ProfileList list = new([], 0);
     private IReadOnlyList<ImportResult>? results;
+    private IReadOnlyDictionary<Guid, ProfileStatus> statuses = new Dictionary<Guid, ProfileStatus>();
+    private PollerStatus poller = new(true, null);
     private DateTime polishNow;
+
+    private DateTimeOffset Now => Time.GetUtcNow();
 
     [CascadingParameter]
     private HttpContext HttpContext { get; set; } = default!;
@@ -164,6 +291,10 @@ else
     /// <summary>?profile=… opens that profile (after enabling, disabling or "Keep it"); someone else's id opens nothing.</summary>
     [SupplyParameterFromQuery(Name = "profile")]
     private Guid? OpenProfile { get; set; }
+
+    /// <summary>?open=a,b keeps further profiles open (several can be open at once).</summary>
+    [SupplyParameterFromQuery(Name = "open")]
+    private string? OpenList { get; set; }
 
     /// <summary>?confirm=delete with ?profile=… shows the deletion question for that profile.</summary>
     [SupplyParameterFromQuery(Name = "confirm")]
@@ -214,8 +345,122 @@ else
 
     private async Task LoadAsync()
     {
-        list = await Profiles.ListAsync(UserManager.GetUserId(HttpContext.User)!);
-        polishNow = PolishTime.Now();
+        var userId = UserManager.GetUserId(HttpContext.User)!;
+        list = await Profiles.ListAsync(userId);
+        statuses = await Checks.GetProfileStatusesAsync(userId, list.Profiles);
+        poller = await Checks.GetPollerStatusAsync();
+        polishNow = PolishTime.Now(Time);
+    }
+
+    /// <summary>
+    /// Seconds until the page reloads itself: every 3 s while a "Check now" runs (the results fill in screening by
+    /// screening, the button comes back when it is done); during a pause, when the pause ends; after it, every 10 s
+    /// until the first request has got through. Never after an import with errors (its result would disappear).
+    /// </summary>
+    private int? RefreshSeconds
+    {
+        get
+        {
+            if (results is not null)
+                return null;
+            var now = Now;
+            if (poller.PausedUntil is { } until)
+                return (int)Math.Ceiling((until - now).TotalSeconds) + 5;
+            if (poller.Resuming)
+                return 10;
+            return statuses.Values.Any(s => s.Checking && s.LastManualCheckAt is { } asked && now - asked < RefreshWhileChecking) ? 3 : null;
+        }
+    }
+
+    /// <summary>
+    /// Where the reload goes: this page as it is (open profiles, a deletion question) with a new "refresh" value each
+    /// time. A reload to the very same address does nothing when the address ends with #profile-…: the browser takes it
+    /// for a jump to that anchor, not a reload.
+    /// </summary>
+    private string RefreshUrl => PageUrl(OpenProfile, Confirm, refresh: true);
+
+    private HashSet<Guid>? _expanded;
+
+    /// <summary>Open profiles: ?profile=… (the one in focus) and ?open=… (any others).</summary>
+    private HashSet<Guid> Expanded => _expanded ??= ParseOpen(OpenList, OpenProfile);
+
+    private static HashSet<Guid> ParseOpen(string? list, Guid? focus)
+    {
+        var open = (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(LimitOptions.ProfileLimitCeiling)
+            .Select(part => Guid.TryParse(part, out var id) ? id : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .ToHashSet();
+        if (focus is { } f)
+            open.Add(f);
+        return open;
+    }
+
+    /// <summary>The account's open profiles except one, as the "open" value of a form or an address ("a,b").</summary>
+    private string OthersOpen(Guid except) =>
+        string.Join(",", list.Profiles.Select(p => p.Id).Where(id => id != except && Expanded.Contains(id)));
+
+    /// <summary>
+    /// "/?profile=focus&open=others&confirm=…#profile-focus": this page with the profile in focus open and scrolled to,
+    /// the other open profiles still open. Ids that are not the account's own are dropped.
+    /// </summary>
+    private string PageUrl(Guid? focus, string? confirm = null, bool refresh = false, IReadOnlySet<Guid>? open = null, Guid? anchor = null)
+    {
+        open ??= Expanded;
+        var others = list.Profiles.Select(p => p.Id).Where(id => id != focus && open.Contains(id)).ToList();
+        var query = new List<string>();
+        if (focus is { } f)
+            query.Add($"profile={f}");
+        if (others.Count > 0)
+            query.Add($"open={string.Join(",", others)}");
+        if (focus is not null && !string.IsNullOrEmpty(confirm))
+            query.Add($"confirm={Uri.EscapeDataString(confirm)}");
+        if (refresh)
+            query.Add($"refresh={Now.ToUnixTimeMilliseconds()}");
+        var target = anchor ?? focus;
+        return (query.Count == 0 ? "/" : "/?" + string.Join("&", query)) + (target is { } a ? $"#profile-{a}" : "");
+    }
+
+    /// <summary>The header link: an open profile closes (the others stay open), a closed one opens and gets the focus.</summary>
+    private string ToggleUrl(Guid id, bool opened)
+    {
+        if (!opened)
+            return PageUrl(id, open: Expanded.Append(id).ToHashSet());
+        var rest = Expanded.Where(open => open != id).ToHashSet();
+        return PageUrl(OpenProfile == id ? null : OpenProfile, open: rest, anchor: id);
+    }
+
+    private static string HttpText(int? status) => status is { } code ? $" (HTTP {code})" : "";
+
+    /// <summary>"sprawdzono 14:28 · w sali wolne 3 z 385"</summary>
+    private string CheckedText(DateTimeOffset checkedAt, ScreeningStatus check)
+    {
+        var text = T($"sprawdzono {WhenText(checkedAt)}", $"checked {WhenText(checkedAt)}");
+        if (check.LastOutcome == CheckOutcome.Ok && check is { FreeCount: { } free, TotalCount: { } total })
+            text += T($" · w sali wolne {free} z {total}", $" · {free} of {total} free in the hall");
+        return text;
+    }
+
+    /// <summary>"14:28" today, "pon 2.11, 14:28" another day (Polish time).</summary>
+    private string WhenText(DateTimeOffset utc)
+    {
+        var local = PolishTime.FromUtc(utc.UtcDateTime);
+        return local.Date == polishNow.Date ? local.ToString("HH:mm", Culture) : local.ToString(T("ddd d.MM, HH:mm", "ddd d MMM, HH:mm"), Culture);
+    }
+
+    private string NextCheckText(ProfileView profile, ProfileStatus? status)
+    {
+        if (profile.Ended)
+            return "";
+        if (!profile.Enabled)
+            return T("Profil jest wyłączony: serwer go nie sprawdza.", "The profile is disabled: the server does not check it.");
+        if (!poller.Enabled)
+            return "";
+        if (status?.NextCheckAt is not { } next)
+            return T("Pierwsze sprawdzenie w ciągu minuty.", "The first check follows within a minute.");
+        return next <= Now
+            ? T("Następne sprawdzenie: teraz.", "Next check: now.")
+            : T($"Następne automatyczne sprawdzenie ok. {PollerTime.ClockText(next)}.", $"Next automatic check at about {PollerTime.ClockText(next)}.");
     }
 
     private string Describe(ImportResult result) => result.Outcome switch

@@ -1,14 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <!--
-    SaaS web app (MVP 0, docs/SAAS.md §5.1): accounts by invitation, later profiles and history. Static server-side
+    SaaS web app (MVP 0, docs/SAAS.md §5.1): accounts by invitation, profiles, checks and notification history. Static server-side
     rendering (Blazor, no WebAssembly, no JavaScript); hosts the background services of CinemaWatch.Server.
     Versioned with the SaaS, not with the desktop app. Local setup: README.md in this folder.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>CinemaWatch.Web</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.3.3</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- An unreachable vulnerability feed or a low/moderate advisory must not fail the build; high and critical do. -->
     <WarningsNotAsErrors>NU1900;NU1901;NU1902</WarningsNotAsErrors>

@@ -4,9 +4,9 @@
 > Order of trust when something disagrees: **repository code** > **this document** > chat history.
 > Keep it current: update *Status*, *Version history* and *Decision log* with every release or decision.
 >
-> Last updated: 3 November 2026 (desktop 1.4.0; SaaS stage 3 in progress: accounts by invitation and profile import built
-> and tested on the PC, risk test still running and provisionally green - plan in [`docs/SAAS.md`](SAAS.md),
-> infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
+> Last updated: 3 November 2026 (desktop 1.4.0; SaaS stage 3 in progress: accounts by invitation, profile import and
+> the poller with notification e-mails built and tested on the PC, risk test still running and provisionally green -
+> plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
 
 ---
 
@@ -24,7 +24,7 @@ It only **reads** public seat information. It never logs in, never creates a car
 | Original PowerShell script | Done, kept in `scripts/CinemaWatch.ps1` | E-mail notifications via Gmail SMTP; the origin of the project |
 | **Desktop (Windows)** | **1.4.0 stable** - feature-complete for now | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
 | Android | Planned - concept agreed, nothing built | "Proxy" that checks profiles exported by the desktop app |
-| SaaS (web) | Stage 3 in progress - MVP 0 on the PC: increments 1 (accounts by invitation, e-mail, PL/EN) and 2 (profile import, limit per account) done; risk test (`tools/CinemaWatch.Probe`) still running on the VPS, provisionally green | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
+| SaaS (web) | Stage 3 in progress - MVP 0 on the PC: increments 1 (accounts by invitation, e-mail, PL/EN), 2 (profile import, limit per account) and 3 (poller: background checks, e-mails, history, check now) done; risk test (`tools/CinemaWatch.Probe`) still running on the VPS, provisionally green | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
 
 ---
 
@@ -71,7 +71,8 @@ SaaS track - goals, risks, target architecture, MVP, plan, hosting choice and it
 **[`docs/SAAS.md`](SAAS.md)**. In short:
 - Same repository (monorepo), reusing `CinemaWatch.Core`; separate SaaS version and `web-v*` tags.
 - **MVP 0** = server-side profile proxy: accounts, import of `*.cinemawatch.json`, background checks (§5.4),
-  e-mail notifications. The wizard and hall map follow in MVP 1.
+  e-mail notifications. The wizard and hall map follow in MVP 1. The server's poller follows §3.6 with stricter
+  rules of its own (3-6 s between requests, a global hourly budget, a pause after a block): [`docs/SAAS.md`](SAAS.md) §4.3.
 - First technical step: a risk test of polling Cinema City from a datacenter IP (see §10) - running since
   2 Nov 2026 (`tools/CinemaWatch.Probe`), provisionally green; the full check comes before the first deployment.
 - Hosted infrastructure only (Linux VPS + Docker + Cloudflare); an on-prem lab is parked.

@@ -318,19 +318,21 @@ td form { margin: 0; }
 
 .profile { border-bottom: 1px solid var(--line); }
 
-.profile > summary {
+/* The header is a link (the open state lives in the address), drawn like a disclosure row with a chevron. */
+.profile-head {
     display: grid;
     grid-template-columns: 1rem 1fr auto;
     align-items: baseline;
     gap: 0.15rem 0.5rem;
     padding: 0.85rem 0;
-    cursor: pointer;
-    list-style: none;
+    color: inherit;
+    text-decoration: none;
 }
 
-.profile > summary::-webkit-details-marker { display: none; }
+.profile-head:hover { color: inherit; }
+.profile-head:hover .profile-name { text-decoration: underline; }
 
-.profile > summary::before {
+.profile-head::before {
     content: "";
     width: 0.45rem;
     height: 0.45rem;
@@ -339,11 +341,7 @@ td form { margin: 0; }
     transform: translateY(-0.15rem) rotate(-45deg);
 }
 
-.profile[open] > summary::before { transform: translateY(-0.25rem) rotate(45deg); }
-
-@media (prefers-reduced-motion: no-preference) {
-    .profile > summary::before { transition: transform 0.15s ease-out; }
-}
+.profile.open > .profile-head::before { transform: translateY(-0.25rem) rotate(45deg); }
 
 .profile-name { font-weight: 600; overflow-wrap: anywhere; }
 .profile-meta { grid-column: 2 / -1; color: var(--muted); font-size: 0.9rem; }
@@ -391,4 +389,25 @@ input[type=file] {
     .bar { padding: 0.6rem 1rem; }
     .content { padding: 1.5rem 1rem 2.5rem; }
     .languages { padding-left: 0; border-left: 0; }
+}
+
+/* Checks: free watched seats stand out in green, problems in red; the history is a quiet list. */
+
+.free, .free-now { color: var(--free); }
+.free { font-weight: 600; }
+.problem { color: var(--danger); }
+
+.profile-body h3 { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+
+.history { margin: 0; padding-left: 1.1rem; font-size: 0.95rem; }
+.history > li + li { margin-top: 0.5rem; }
+.history .when { color: var(--muted); }
+
+/* A button that cannot be used now is plainly grey, whatever its kind. */
+.button:disabled,
+.button.primary:disabled {
+    background: var(--line);
+    border-color: var(--line);
+    color: var(--muted);
+    cursor: not-allowed;
 }

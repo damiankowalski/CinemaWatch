@@ -12,6 +12,9 @@ public sealed class LimitOptions
     /// <summary>Highest profile limit the owner can give an account: a typo such as 5000 must not get through.</summary>
     public const int ProfileLimitCeiling = 50;
 
+    /// <summary>The server minimum cannot be configured below this (KB §3.6: 10-15 minutes recommended, 5 allowed).</summary>
+    public const int MinIntervalFloor = 5;
+
     /// <summary>Profiles per account (enabled, disabled and ended alike) unless the account has its own limit.</summary>
     public int MaxProfiles { get; set; } = 5;
 
@@ -24,7 +27,7 @@ public sealed class LimitOptions
     public bool IsValid() =>
         MaxProfiles is >= 1 and <= ProfileLimitCeiling
         && MaxScreeningsPerProfile >= 1
-        && MinIntervalMinutes >= 1;
+        && MinIntervalMinutes >= MinIntervalFloor;
 
     /// <summary>The interval the server actually uses for a profile.</summary>
     public int EffectiveInterval(int profileInterval) => Math.Max(profileInterval, MinIntervalMinutes);

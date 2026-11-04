@@ -1,6 +1,7 @@
 @page "/Account/Manage"
 @inject UserManager<AppUser> UserManager
 @inject IdentityRedirectManager RedirectManager
+@inject IOptions<CinemaWatch.Server.Mail.MailOptions> Mail
 
 <PageTitle>@T("Konto", "Account") – CinemaWatch</PageTitle>
 
@@ -16,6 +17,19 @@
             <dt>@T("Język e-maili", "E-mail language")</dt>
             <dd>@(user.Language == "en" ? "English" : "polski") <span class="hint">@T("(zmienisz go przełącznikiem PL / EN u góry)", "(change it with the PL / EN switch at the top)")</span></dd>
         </dl>
+
+        <h2>@T("Powiadomienia e-mail", "E-mail notifications")</h2>
+        <p>@T("Powiadomienia o wolnych miejscach przychodzą na ten adres. Testowy e-mail pokaże, czy dociera i czy nie trafia do spamu (najwyżej raz na 5 minut).",
+              "Notifications about free seats go to this address. A test e-mail shows whether it arrives and stays out of spam (at most once every 5 minutes).")</p>
+        @if (Mail.Value.IsLocal)
+        {
+            <p class="hint">@T("Tryb testowy: serwer pocztowy działa na tym komputerze, więc e-maile trafiają do lokalnej skrzynki testowej, a nie do prawdziwej skrzynki.",
+                               "Test mode: the mail server runs on this computer, so e-mails go to a local test inbox, not to the real mailbox.")</p>
+        }
+        <form action="Account/Manage/TestMail" method="post">
+            <AntiforgeryToken />
+            <button type="submit" class="button">@T("Wyślij testowy e-mail", "Send a test e-mail")</button>
+        </form>
 
         <h2>@T("Hasło", "Password")</h2>
         <p><a class="button" href="Account/Manage/ChangePassword">@T("Zmień hasło", "Change password")</a></p>

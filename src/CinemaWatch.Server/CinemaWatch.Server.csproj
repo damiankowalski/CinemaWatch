@@ -1,14 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    SaaS: server-side logic without HTTP - data (EF Core + PostgreSQL), accounts and e-mail; later the poller and the
-    notifier. Hosted by CinemaWatch.Web in MVP 0; a separate worker host can reference it later (docs/SAAS.md §6).
+    SaaS: server-side logic without HTTP - data (EF Core + PostgreSQL), accounts, e-mail, and the poller that checks
+    the watched screenings and sends the notification e-mails. Hosted by CinemaWatch.Web in MVP 0; a separate worker
+    host can reference it later (docs/SAAS.md §6).
     Versioned with the SaaS, not with the desktop app (the root Directory.Build.props holds the desktop version).
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>CinemaWatch.Server</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.3.3</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <!-- An unreachable vulnerability feed or a low/moderate advisory must not fail the build; high and critical do. -->
     <WarningsNotAsErrors>NU1900;NU1901;NU1902</WarningsNotAsErrors>
@@ -20,6 +21,13 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageReference Include="EFCore.NamingConventions" Version="10.0.1" />
     <PackageReference Include="MailKit" Version="4.18.2" />
+    <!-- BackgroundService for the poller (the host itself is the web app today, a worker later). -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Captured Cinema City responses for the development fake (Polling/FakeCinemaCityHandler.cs). -->
+    <EmbeddedResource Include="Polling\Fake\*.json" LogicalName="CinemaWatch.Server.Fake.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

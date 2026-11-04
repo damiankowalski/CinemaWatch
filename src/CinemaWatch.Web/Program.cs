@@ -2,6 +2,7 @@ using CinemaWatch.Server;
 using CinemaWatch.Server.Accounts;
 using CinemaWatch.Server.Data;
 using CinemaWatch.Server.Mail;
+using CinemaWatch.Server.Polling;
 using CinemaWatch.Server.Profiles;
 using CinemaWatch.Web;
 using CinemaWatch.Web.Components;
@@ -28,7 +29,14 @@ builder.Services.AddOptions<SaasOptions>()
 builder.Services.AddOptions<MailOptions>().Bind(builder.Configuration.GetSection(MailOptions.Section));
 builder.Services.AddOptions<LimitOptions>()
     .Bind(builder.Configuration.GetSection(LimitOptions.Section))
-    .Validate(o => o.IsValid(), $"Saas:Limits: MaxProfiles must be 1-{LimitOptions.ProfileLimitCeiling}, MaxScreeningsPerProfile and MinIntervalMinutes at least 1")
+    .Validate(o => o.IsValid(), $"Saas:Limits: MaxProfiles must be 1-{LimitOptions.ProfileLimitCeiling}, MaxScreeningsPerProfile at least 1, MinIntervalMinutes at least {LimitOptions.MinIntervalFloor}")
+    .ValidateOnStart();
+builder.Services.AddOptions<PollerOptions>()
+    .Bind(builder.Configuration.GetSection(PollerOptions.Section))
+    .Validate(o => o.IsValid(), "Saas:Poller: a value is out of range (src/CinemaWatch.Web/README.md lists the settings); Source=Fake needs FakeDirectory")
+    // The fake must never answer for Cinema City on a real server.
+    .Validate<IHostEnvironment>((o, environment) => o.Source != CinemaCitySource.Fake || environment.IsDevelopment() || environment.IsEnvironment("Testing"),
+        "Saas:Poller:Source=Fake is allowed only in the Development environment")
     .ValidateOnStart();
 
 // Uploads: at most 10 profile files of 256 KB in one request; anything bigger is refused before it is read.
@@ -89,6 +97,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<IMailSender, SmtpMailSender>();
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<ProfileService>();
+// Background checks of the watched screenings and the notification e-mails (docs/SAAS.md §4.3).
+builder.Services.AddPoller();
 
 var app = builder.Build();
 
