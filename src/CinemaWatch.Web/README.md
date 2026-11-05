@@ -1,21 +1,22 @@
 # CinemaWatch.Web - SaaS web app (MVP 0)
 
 Private web app for the owner and invited friends (plan: [`docs/SAAS.md`](../../docs/SAAS.md) §5.1). Today
-(increments 1-3): accounts by invitation, sign-in, password reset, account page, data download, account deletion,
-Polish/English UI, privacy page (draft); import of desktop profiles (`*.cinemawatch.json`), the profile list, a profile
-limit per account; background checks of the watched screenings, notification e-mails with the booking link, the
-notification history, "Check now" and a test e-mail. The operator's panel follows in increment 4.
+(increments 1-4, the whole MVP 0): accounts by invitation, sign-in, password reset, account page, data download,
+account deletion, Polish/English UI, privacy page (draft); import of desktop profiles (`*.cinemawatch.json`), the
+profile list, a profile limit per account; background checks of the watched screenings, notification e-mails with the
+booking link, the notification history, "Check now" and a test e-mail; the operator's panel (status of the components,
+request statistics, events, a pause switch, poller settings) and a heartbeat for an external "dead man's switch".
 
 | Project | Contents |
 | --- | --- |
-| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `CheckService`, the development fake) |
+| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `CheckService`, `PollerSettings`, the development fake), the operator's panel and the heartbeat (`Operations/`) |
 | `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms, no JavaScript); hosts the background services in MVP 0 |
 | `tests/CinemaWatch.Saas.Tests` | Logic tests, database tests and the whole web flow (real app in memory, e-mails recorded) |
 
 How it works:
 - Every page needs a signed-in user, except sign-in, password help, set-password, privacy, errors.
 - Accounts exist only by invitation. At start-up the owner's account (`Saas:OwnerEmail`) is created and invited once;
-  only the owner sees **Users** and can invite. The invited person sets a password through the e-mail link, which also
+  only the owner sees **Operator** and **Users** and can invite. The invited person sets a password through the e-mail link, which also
   confirms the address. Links work 24 hours and once. "Forgot your password?" sends a reset link to an active account
   and a new invitation to an account still waiting for activation - the page never reveals which addresses exist.
 - Links in e-mails are built from `Saas:BaseUrl`, never from the request.
@@ -69,6 +70,52 @@ How it works:
 - "Send a test e-mail" on the account page: a sample notification, at most every 5 minutes, no Cinema City request.
   When `Mail:Host` is `localhost`, the page says the e-mail went to the local test inbox (smtp4dev), not to the real
   mailbox.
+- The numbers above are the defaults from the configuration; the operator's panel can change some of them (below).
+
+### The operator's panel (owner only)
+
+`/admin`, **Operator** in the menu. Like **Users** it is open only to the account whose e-mail is `Saas:OwnerEmail`,
+checked on the server for the page and for every form. All owner pages and forms live under `/admin`, so stage 4 can
+put Cloudflare Access on `/admin*` as a second, independent gate. The page does not reload itself (a reload would wipe
+what is being typed into the settings form): **Odśwież** reloads it.
+
+- **Status of the components**, each with a dot and a word (working / attention / problem / off):
+  - poller: the last cycle (none for 5 minutes = problem), the owner's pause, a block's pause, watched and due
+    screenings, the source (the fake is named);
+  - Cinema City: the last request and its answer, the last successful answer, the last block (90 days);
+  - e-mail: the last e-mail sent and the last error of any e-mail (invitations, test e-mails, notifications, alerts;
+    `component_status`), the mail server; addresses are cut out of stored error texts;
+  - database: PostgreSQL version, size, last migration, the largest tables with exact row counts;
+  - heartbeat: off without an address; otherwise the last ping and the last error. Only the host of the address is
+    shown: the rest is a secret.
+- **Pause**: "Wstrzymaj sprawdzanie" stops all requests to Cinema City (background and "Check now") from the next
+  cycle until "Wznów sprawdzanie", restarts included (`poller_state.paused_by_operator_at`). Pending "Check now"
+  requests are dropped; users see a notice and a greyed-out button; nobody is e-mailed. A block's pause, if one is in
+  force, is independent of it.
+- **Requests**: the last hour against the budget, the last 24 hours hour by hour (with a bar for the hour's share of
+  the budget), answers per HTTP status for 24 hours and 7 days, the latest 20 requests (from `check_log`).
+- **Events**: the latest 100 of `service_events` (kept 90 days), with details such as a block's response.
+- **Poller settings**: the minimum interval, the random addition, the hourly budget, the pauses between screenings
+  (background and "Check now"), how fresh a stored result "Check now" may reuse, the pauses after a block and
+  `ReuseScreeningDetails`, each within a range fixed in code (`PollerTuning`; e.g. budget 10-300 an hour, minimum
+  interval 5-60 minutes). The panel stores only what differs from the configuration (`poller_settings`); an empty field
+  or the configuration's value means "from the configuration", so a later change of `appsettings.json` applies again.
+  A configuration value outside the panel's range (Development pauses only 2 minutes after a block) is shown and kept,
+  but cannot be set in the panel. A change applies from the next cycle (`PollerSettings` is read at the start of every
+  cycle) and is recorded as an event with the old and new values. "Przywróć wszystkie wartości z konfiguracji"
+  removes all changes. Infrastructure values (`Enabled`, `Source`, `TickSeconds`, retention) and the profile limits stay
+  in the configuration.
+
+### Heartbeat ("dead man's switch")
+
+After every poller cycle that finished (idle, paused and blocked cycles included), at most every
+`Saas:Heartbeat:IntervalMinutes` (5), the server sends a GET to `Saas:Heartbeat:Url` (10-second timeout, not a Cinema
+City request: no budget, no `check_log`). An external service such as Healthchecks.io e-mails the owner when the
+pings stop: the server, the process or the poller is down, or every cycle fails. A failed ping is recorded and never
+stops the poller. The address works like a password (whoever knows it can report "alive" for the server): user
+secrets or an environment variable only, never a file in the repository; https only; empty = off (the default, also on
+the PC: every stop of the app would otherwise raise an alarm). The service and its account come in stage 4
+([`docs/SAAS.md`](../../docs/SAAS.md) §7).
 
 ## Configuration
 
@@ -85,7 +132,12 @@ How it works:
 | `Saas:Poller:ManualFreshMinutes` | `appsettings.json`: `1`; Development: `0` | how old a result "Check now" may reuse instead of asking |
 | `Saas:Poller:FirstBlockPauseMinutes`, `MaxBlockPauseMinutes` | `appsettings.json`: `60`, `1440`; Development: `2`, `10` | pause after a block, doubling |
 | `Saas:Poller:Enabled`, `TickSeconds`, `JitterPercent`, `ReuseScreeningDetails`, `CheckLogDays`, `HistoryDays` | `appsettings.json`: `true`, `30`, `20`, `false`, `30`, `90` | `ReuseScreeningDetails = true`: one request per check instead of two (not measured yet) |
+| `Saas:Heartbeat:Url` | empty (off); user secrets for a test | a secret; empty or https; start-up fails otherwise |
+| `Saas:Heartbeat:IntervalMinutes` | `appsettings.json`: `5` | 1-60; the external check's period should be at least this |
 | `Mail:Host`, `Mail:Port`, `Mail:Security`, `Mail:UserName`, `Mail:Password`, `Mail:FromAddress`, `Mail:FromName` | `appsettings.json`: `localhost`, `2525`, `None` (smtp4dev) | the provider is chosen in stage 4; its password only in secrets |
+
+The minimum interval and the `Saas:Poller` values for the budget, the pauses, `ManualFreshMinutes`, `JitterPercent`
+and `ReuseScreeningDetails` are defaults: the operator's panel can change them within fixed ranges.
 
 User secrets are a .NET development feature: a JSON file outside the repository,
 `%APPDATA%\Microsoft\UserSecrets\cinemawatch-web\secrets.json`, read only in the Development environment.

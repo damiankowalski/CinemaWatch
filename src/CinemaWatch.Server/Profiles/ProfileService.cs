@@ -1,6 +1,7 @@
 using System.Text;
 using CinemaWatch.Core;
 using CinemaWatch.Server.Data;
+using CinemaWatch.Server.Polling;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -45,18 +46,19 @@ public enum LimitChange
 /// Profiles of one account (docs/SAAS.md §5.1). Every operation takes the account's id and touches only that
 /// account's rows: someone else's profile id behaves like an id that does not exist. Makes no Cinema City requests.
 /// </summary>
-public sealed class ProfileService(AppDbContext db, IOptions<LimitOptions> limits, TimeProvider time, ILogger<ProfileService> logger)
+public sealed class ProfileService(AppDbContext db, PollerSettings settings, TimeProvider time, ILogger<ProfileService> logger)
 {
     /// <summary>The account's profile limit: its own one if the owner set it, otherwise the default.</summary>
-    public int LimitOf(AppUser user) => user.MaxProfiles ?? limits.Value.MaxProfiles;
+    public int LimitOf(AppUser user) => user.MaxProfiles ?? settings.Limits.MaxProfiles;
 
-    public LimitOptions Limits => limits.Value;
+    /// <summary>The effective limits: the minimum interval may come from the operator's panel.</summary>
+    public LimitOptions Limits => settings.Limits;
 
     public async Task<ProfileList> ListAsync(string userId, CancellationToken cancellationToken = default)
     {
         var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(u => u.Id == userId, cancellationToken);
         if (user is null)
-            return new ProfileList([], limits.Value.MaxProfiles);
+            return new ProfileList([], settings.Limits.MaxProfiles);
 
         var rows = await db.Profiles.AsNoTracking()
             .Where(p => p.UserId == userId)
@@ -214,7 +216,7 @@ public sealed class ProfileService(AppDbContext db, IOptions<LimitOptions> limit
 
         // UTF-8 (the desktop app writes it without a byte order mark; one is tolerated).
         var json = new UTF8Encoding(false).GetString(buffer, 0, read).TrimStart('\uFEFF');
-        return ProfileImport.Check(fileName, json, polishNow, limits.Value.MaxScreeningsPerProfile);
+        return ProfileImport.Check(fileName, json, polishNow, settings.Limits.MaxScreeningsPerProfile);
 
         ProfileCheck TooLarge() => ProfileImport.Refuse(fileName, Localizer.T(
             $"Plik jest za duży (najwyżej {ProfileImport.MaxFileBytes / 1024} KB).",

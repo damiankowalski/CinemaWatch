@@ -4,9 +4,10 @@
 > Order of trust when something disagrees: **repository code** > **this document** > chat history.
 > Keep it current: update *Status*, *Version history* and *Decision log* with every release or decision.
 >
-> Last updated: 3 November 2026 (desktop 1.4.0; SaaS stage 3 in progress: accounts by invitation, profile import and
-> the poller with notification e-mails built and tested on the PC, risk test still running and provisionally green -
-> plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
+> Last updated: 5 November 2026 (desktop 1.4.0; SaaS stage 3 done: MVP 0 - accounts by invitation, profile import, the
+> poller with notification e-mails and the operator's panel - built and tested on the PC, risk test still running and
+> provisionally green; next: stage 4, deployment - plan in [`docs/SAAS.md`](SAAS.md), infrastructure in
+> [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
 
 ---
 
@@ -24,7 +25,7 @@ It only **reads** public seat information. It never logs in, never creates a car
 | Original PowerShell script | Done, kept in `scripts/CinemaWatch.ps1` | E-mail notifications via Gmail SMTP; the origin of the project |
 | **Desktop (Windows)** | **1.4.0 stable** - feature-complete for now | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
 | Android | Planned - concept agreed, nothing built | "Proxy" that checks profiles exported by the desktop app |
-| SaaS (web) | Stage 3 in progress - MVP 0 on the PC: increments 1 (accounts by invitation, e-mail, PL/EN), 2 (profile import, limit per account) and 3 (poller: background checks, e-mails, history, check now) done; risk test (`tools/CinemaWatch.Probe`) still running on the VPS, provisionally green | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
+| SaaS (web) | Stage 3 done - MVP 0 complete on the PC (SaaS 0.4.0): accounts by invitation, e-mail, PL/EN; profile import, limit per account; poller with background checks, e-mails, history, check now; operator's panel (status, statistics, events, pause, settings) and a heartbeat; risk test (`tools/CinemaWatch.Probe`) still running on the VPS, provisionally green. Next: stage 4 (deployment) | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
 
 ---
 

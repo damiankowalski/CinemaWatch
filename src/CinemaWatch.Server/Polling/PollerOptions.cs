@@ -16,7 +16,8 @@ public enum CinemaCitySource
 /// <summary>
 /// Settings of the poller (configuration section "Saas:Poller"; docs/SAAS.md §4.3, KB §3.6). The intervals per screening
 /// come from the profiles and <see cref="Profiles.LimitOptions.MinIntervalMinutes"/>; these settings shape how the
-/// requests go out.
+/// requests go out. Some of them can be changed in the operator's panel within fixed ranges (<see cref="PollerTuning"/>);
+/// the poller reads the effective values from <see cref="PollerSettings"/>, never from the configuration directly.
 /// </summary>
 public sealed class PollerOptions
 {
@@ -101,6 +102,8 @@ public sealed class PollerOptions
         && CheckLogDays >= 1
         && HistoryDays >= 1
         && (Source != CinemaCitySource.Fake || !string.IsNullOrWhiteSpace(FakeDirectory));
+
+    public PollerOptions Copy() => (PollerOptions)MemberwiseClone();
 
     /// <summary>Pause after the n-th block in a row: first, then doubled, at most the maximum.</summary>
     public TimeSpan BlockPause(int blocksInARow)

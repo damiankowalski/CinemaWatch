@@ -3,7 +3,10 @@
 
 <PageTitle>@T("Prywatność", "Privacy") – CinemaWatch</PageTitle>
 
-@* Draft; reviewed before the first deployment (docs/SAAS.md §5.1, stage 4). *@
+@*
+    Draft, reviewed in increment 4 against what the code stores. Before the first deployment (stage 4) it gets the
+    e-mail provider's name and the hosting details (docs/SAAS.md §5.1, §7).
+*@
 <article class="prose">
     <h1>@T("Prywatność", "Privacy")</h1>
     <p class="hint">@T("Wersja robocza.", "Draft.")</p>
@@ -15,8 +18,12 @@
     <h2>@T("Jakie dane przechowujemy", "What we store")</h2>
     <p>@T("Adres e-mail, zabezpieczony skrót hasła (nie samo hasło), język e-maili, daty utworzenia konta i zaproszenia, limit profili konta, zaimportowane profile (pilnowane seanse i miejsca), wynik ostatniego sprawdzenia każdego profilu oraz historię wysłanych powiadomień.",
           "Your e-mail address, a protected hash of your password (not the password itself), the e-mail language, the dates the account was created and invited, the account's profile limit, your imported profiles (the watched screenings and seats), the result of each profile's last check and the history of the notifications sent.")</p>
-    <p>@T("Serwer zapisuje też dziennik swoich zapytań do Cinema City (czas, adres zapytania, odpowiedź); nie ma w nim danych osobowych.",
-          "The server also keeps a log of its requests to Cinema City (time, request address, response); it contains no personal data.")</p>
+    <p>@T("Właściciel serwisu widzi listę kont (adres e-mail, stan konta, liczbę i limit profili) i jako administrator ma techniczny dostęp do bazy danych.",
+          "The site's owner sees the list of accounts (e-mail address, account state, number and limit of profiles) and, as the administrator, has technical access to the database.")</p>
+    <p>@T("Serwer zapisuje też dziennik swoich zapytań do Cinema City (czas, adres zapytania, odpowiedź) i zdarzenia serwisu (np. blokady, wstrzymania, błędy wysyłki e-maili). Nie ma w nich danych osobowych: adresy e-mail są wycinane z komunikatów o błędach. Techniczny dziennik aplikacji zawiera najwyżej wewnętrzny identyfikator konta, nie adres e-mail.",
+          "The server also keeps a log of its requests to Cinema City (time, request address, response) and service events (e.g. blocks, pauses, failed e-mails). They contain no personal data: e-mail addresses are cut out of error messages. The application's technical log contains at most an account's internal id, not its e-mail address.")</p>
+    <p>@T("Co kilka minut serwer melduje się w zewnętrznej usłudze monitorującej, żeby jego awaria nie przeszła niezauważona. Meldunek nie zawiera żadnych danych o użytkownikach.",
+          "Every few minutes the server reports to an external monitoring service, so that an outage does not go unnoticed. The report contains no data about users.")</p>
     <p>@T("Serwis używa tylko niezbędnych ciasteczek: logowania, języka i ochrony formularzy. Nie ma reklam ani analityki.",
           "The service uses only essential cookies: sign-in, language and form protection. There are no ads and no analytics.")</p>
 
@@ -24,8 +31,10 @@
     <p>@T("Żeby można było się zalogować i dostawać e-maile o zwolnionych miejscach.", "So you can sign in and receive e-mails about freed seats.")</p>
 
     <h2>@T("Gdzie i jak długo", "Where and for how long")</h2>
-    <p>@T("Dane są na serwerze w Polsce i zostają tam do usunięcia konta. Historia powiadomień jest usuwana po 90 dniach, dziennik zapytań po 30 dniach.",
-          "The data is kept on a server in Poland until you delete your account. The notification history is deleted after 90 days, the request log after 30 days.")</p>
+    <p>@T("Dane są na serwerze w Polsce i zostają tam do usunięcia konta. Historia powiadomień i zdarzenia serwisu są usuwane po 90 dniach, dziennik zapytań po 30 dniach.",
+          "The data is kept on a server in Poland until you delete your account. The notification history and the service events are deleted after 90 days, the request log after 30 days.")</p>
+    <p>@T("E-maile wysyła zewnętrzny dostawca poczty; jego nazwa pojawi się tutaj przed uruchomieniem serwisu. Poza nim dane nie trafiają do nikogo.",
+          "E-mails are sent by an external mail provider; its name will appear here before the service goes live. Apart from it, the data goes to nobody.")</p>
 
     <h2>@T("Twoje prawa", "Your rights")</h2>
     <p>@T("Na stronie konta możesz pobrać swoje dane i usunąć konto razem ze wszystkimi danymi.", "On your account page you can download your data and delete the account with all its data.")</p>

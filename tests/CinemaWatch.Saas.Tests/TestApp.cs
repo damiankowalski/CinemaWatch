@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using CinemaWatch.Server.Data;
 using CinemaWatch.Server.Mail;
+using CinemaWatch.Server.Operations;
 using CinemaWatch.Server.Polling;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -14,16 +15,20 @@ using Npgsql;
 namespace CinemaWatch.Saas.Tests;
 
 /// <summary>
-/// The real web app in memory, on its own test database, with e-mails recorded instead of sent. The type argument
-/// only identifies the web app's assembly (its Program class is internal). The poller is enabled but its background
-/// loop is removed: the tests run the cycles themselves, against the development fake of Cinema City in a temporary
-/// folder, on a clock that moves only when a test moves it, and without pauses between requests. Nothing reaches the
-/// real Cinema City.
+/// The real web app in memory, on its own test database, with e-mails recorded instead of sent (behind the same
+/// status-recording wrapper as SMTP). The type argument only identifies the web app's assembly (its Program class is
+/// internal). The poller is enabled but its background loop is removed: the tests run the cycles themselves, against the
+/// development fake of Cinema City in a temporary folder, on a clock that moves only when a test moves it, and without
+/// pauses between requests. The heartbeat has an address, but its pings are only recorded. Nothing reaches the real
+/// Cinema City or any other site.
 /// </summary>
 internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components.App>
 {
     public const string OwnerEmail = "owner@example.test";
     public const string Password = "correct horse battery staple";
+
+    /// <summary>The heartbeat's address in the tests: its path is the secret part.</summary>
+    public const string HeartbeatUrl = "https://hc-ping.example.test/secret-check-id";
 
     public RecordingMailSender Mail { get; } = new();
 
@@ -37,6 +42,8 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
 
     public RecordingPacer Pacer { get; } = new();
 
+    public RecordingHeartbeatClient HeartbeatClient { get; } = new();
+
     public TestApp(string connectionString)
     {
         Directory.CreateDirectory(FakeFolder);
@@ -47,6 +54,7 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
         Environment.SetEnvironmentVariable("Saas__OwnerEmail", OwnerEmail);
         Environment.SetEnvironmentVariable("Saas__Poller__Source", "Fake");
         Environment.SetEnvironmentVariable("Saas__Poller__FakeDirectory", FakeFolder);
+        Environment.SetEnvironmentVariable("Saas__Heartbeat__Url", HeartbeatUrl);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -58,7 +66,8 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
         builder.ConfigureTestServices(services =>
         {
             services.Remove(services.Single(d => d.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService) && d.ImplementationType == typeof(PollerHostedService)));
-            services.AddSingleton<IMailSender>(Mail);
+            services.AddMailSender(_ => Mail);
+            services.AddSingleton<IHeartbeatClient>(HeartbeatClient);
             services.AddSingleton<TimeProvider>(Time);
             services.AddSingleton<ICinemaCityNetwork>(Network);
             services.AddSingleton<IRequestPacer>(Pacer);
@@ -165,6 +174,28 @@ internal sealed class TestNetwork(string folder) : ICinemaCityNetwork
                     request.Headers.TryGetValues("uuid", out var uuid) ? uuid.FirstOrDefault() : null));
             return owner.Override?.Invoke(request) is { } answer ? Task.FromResult(answer) : base.SendAsync(request, cancellationToken);
         }
+    }
+}
+
+/// <summary>Records the heartbeat's pings; answers <see cref="Status"/>, or throws <see cref="Throw"/> when set.</summary>
+internal sealed class RecordingHeartbeatClient : IHeartbeatClient
+{
+    private readonly List<Uri> _pings = [];
+
+    public int Status { get; set; } = 200;
+
+    public Exception? Throw { get; set; }
+
+    public IReadOnlyList<Uri> Pings
+    {
+        get { lock (_pings) return _pings.ToList(); }
+    }
+
+    public Task<int> PingAsync(Uri target, CancellationToken cancellationToken)
+    {
+        lock (_pings)
+            _pings.Add(target);
+        return Throw is { } exception ? Task.FromException<int>(exception) : Task.FromResult(Status);
     }
 }
 

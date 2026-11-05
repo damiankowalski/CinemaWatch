@@ -9,12 +9,12 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 3 November 2026. Status: **stage 3 in progress** - MVP 0 on the development PC; increments 1
+> Last updated: 5 November 2026. Status: **stage 3 done** - MVP 0 complete on the development PC; increments 1
 > (`saas-skeleton`: accounts by invitation, e-mail, Polish/English UI), 2 (`saas-profiles`: profile import, list,
-> profile limit per account) and 3 (`saas-poller`: background checks, notification e-mails, history, "check now",
-> test e-mail; SaaS 0.3.3) built and tested against a fake of Cinema City. `CinemaWatch.Probe` 0.1.0 keeps
-> running on the VPS; risk test R1 provisionally green (full check before stage 4). Next: increment 4 (operator's
-> panel).
+> profile limit per account), 3 (`saas-poller`: background checks, notification e-mails, history, "check now",
+> test e-mail) and 4 (`saas-operator`: operator's panel, pause switch, poller settings in the database, heartbeat;
+> SaaS 0.4.0) built and tested against a fake of Cinema City. `CinemaWatch.Probe` 0.1.0 keeps running on the VPS;
+> risk test R1 provisionally green (full check at the start of stage 4). Next: stage 4 (deploy to the VPS).
 
 ---
 
@@ -101,6 +101,8 @@ Stripe (later): Checkout, Billing, webhooks                       --> web app
 | PostgreSQL | All data | Yes | Row-Level Security |
 | Poller | Checks watched screenings (KB §5.4) | Yes (in the worker) | Separate service, several instances |
 | Notifier | Sends e-mails about newly free seats | Yes (in the worker) | Separate service behind a queue |
+| Operator's panel | Status of the components, request statistics, events, pause switch, poller settings (owner only) | Yes (`/admin`) | Alerts beyond e-mail |
+| Heartbeat monitor (external) | E-mails the owner when the server stops reporting ("dead man's switch") | Code yes; service in stage 4 | - |
 | Queue | Poller → notifier events | No | RabbitMQ (learning) |
 | E-mail provider | Transactional e-mail with SPF / DKIM / DMARC | Yes | - |
 | Stripe | Payments | No | Test mode first |
@@ -130,9 +132,14 @@ Stripe (later): Checkout, Billing, webhooks                       --> web app
   target, HTTP status, duration, content type, `cf-mitigated`, `cf-ray`, `Retry-After`, error. No personal data; kept
   30 days.
 - `poller_state` - one row: `blocked_until`, `block_count` (blocks in a row), `blocked_at`, `block_reason`,
-  `last_cycle_at`, `last_cleanup_at`; survives a restart.
-- `service_events` - blocks, resumptions, an exhausted budget, mail failures, failing cycles, starts; kept 90 days;
-  shown in the operator's panel (increment 4).
+  `last_cycle_at`, `last_cleanup_at`, `paused_by_operator_at` (the owner's pause, no end time); survives a restart.
+- `service_events` - blocks, resumptions, an exhausted budget, mail failures, failing cycles, starts, the owner's
+  settings changes and pauses, heartbeat failures; kept 90 days; shown in the operator's panel.
+- `poller_settings` - one row of overrides set in the operator's panel (null = the configuration's value): minimum
+  interval, random addition, hourly budget, pauses between screenings (background, "check now"), how fresh a stored
+  result "check now" reuses, pauses after a block, `reuse_screening_details`; `updated_at`.
+- `component_status` - one row per component the database cannot see otherwise (`mail`, `heartbeat`): `last_ok_at`,
+  `last_failure_at`, `last_failure` (e-mail addresses cut out).
 - All times in the database are UTC (`timestamptz`); Polish time only at the edges (pages, e-mails).
 - Later: `plans` / entitlements, `stripe_customers`, `subscriptions`, `payment_events`.
 
@@ -144,6 +151,11 @@ safety net against application bugs.
 
 - Check each unique screening once and fan the result out to every enabled profile that watches it. The poller is
   global: one queue for all users; profiles only decide which screenings are in it and how often.
+- Settings: the configuration gives the defaults; the operator's panel changes some of them within ranges fixed in
+  code (`PollerTuning`): minimum interval 5-60 min, random addition 0-50%, budget 10-300 requests an hour, pauses
+  between screenings 2-60 s (background) and 1-10 s ("check now"), fresh result 0-10 min, first pause after a block
+  15-720 min, longest 15 min-7 days, `ReuseScreeningDetails` on/off. Only differences from the configuration are
+  stored; each cycle reads the effective settings at its start; every change is an event with old and new values.
 - Interval per screening: the shortest profile interval of its watchers, never below the server minimum
   (`Saas:Limits:MinIntervalMinutes`, 10 min; cannot be configured below 5), plus up to 20% at random (10-12 min). A
   new screening is checked within a minute of the import.
@@ -166,6 +178,13 @@ safety net against application bugs.
 - "Check now": no cooldown; unavailable (greyed out) only while the profile's check runs or checks are paused.
   Cinema City is asked only about screenings checked more than a minute ago, fresher ones answer at once from the
   stored result. Results are saved screening by screening, so the page fills in row by row.
+- The owner's pause (operator's panel): from the next cycle no requests at all, scheduled or "check now", until
+  resumed, restarts included; pending "check now" requests are dropped; users see a notice and a greyed-out button;
+  nobody is e-mailed. Independent of a block's pause, which a resume does not shorten.
+- Heartbeat: after every cycle that finished (idle, paused and blocked ones included), at most every 5 minutes, a GET
+  to the external "dead man's switch" (`Saas:Heartbeat:Url`, a secret; 10 s timeout; not a Cinema City request). A
+  cycle that throws sends nothing, so a failing or stuck poller raises the alarm too. A failed ping is recorded and
+  never stops the poller.
 - Past screenings drop out; a profile whose screenings are all over (`ends_at`) is skipped (not switched off: the
   page already shows it as ended).
 - One session (`uuid` header, cookies, connection) per cycle, like one probe run. Honest User-Agent:
@@ -277,9 +296,10 @@ In scope:
 - Limits in configuration (`Saas:Limits`): 5 profiles per account (enabled, disabled and ended alike; the owner can
   set another limit per account, 1-50), 20 screenings per profile, minimum interval 10 minutes; a global request
   budget (`Saas:Poller`, 120 an hour).
-- Privacy notice page; UI in Polish and English like the desktop app.
-- Operator's panel (owner only, increment 4): status of the components, events, requests per hour, HTTP status
-  breakdown, poller settings and a pause switch.
+- Privacy notice page (draft until stage 4 names the e-mail provider); UI in Polish and English like the desktop app.
+- Operator's panel at `/admin` (owner only): status of the components as a checklist (poller, Cinema City, e-mail,
+  database, heartbeat), events, requests per hour, answers per HTTP status, the latest requests, poller settings and a
+  pause switch; a heartbeat for an external "dead man's switch".
 
 Out of scope: wizard and hall map, plans and payments, OIDC provider, queue broker, Kubernetes, web push, mobile
 integration.
@@ -307,7 +327,7 @@ interchangeable.
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
-  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.3.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.4.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
   database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
@@ -361,7 +381,7 @@ Each stage ends with an update of this document.
       home for the same seats at about the same time. From stage 3 the proof is the e-mail (a test inbox on the
       development PC first, then the real inbox).
 
-### Stage 3 - MVP 0 on the development PC (in progress)
+### Stage 3 - MVP 0 on the development PC (done 5 Nov 2026)
 Four increments, each a `feature/saas-<name>` branch squash-merged into `main` after CI; nothing is deployed or tagged.
 Every increment ends with something testable in the browser on the PC (`src/CinemaWatch.Web/README.md`).
 - [x] 1 `saas-skeleton` (2 Nov 2026): `CinemaWatch.Server` and `CinemaWatch.Web`, PostgreSQL 18 on the PC (EDB zip, no
@@ -387,14 +407,19 @@ Every increment ends with something testable in the browser on the PC (`src/Cine
       SaaS 0.3.3 (0.3.0 plus the owner's first tests: check now without a cooldown and with 1-2 s between screenings,
       the blocked screening first after a pause, a page that reloads itself also after "check now" and around a pause,
       several profiles open at once, kept in the address). Rules in §4.3, decisions in §9.
-- [ ] 4 `saas-operator`: the operator's panel (owner only) - status of the components as a checklist (poller: last
-      cycle, pause; Cinema City: last requests, statuses, blocks; e-mail: last sent, last error; database), the
-      `service_events` list, requests per hour and status breakdown from `check_log`, the poller settings in the
-      database with fixed ranges (interval minimum not below 5 min, budget, pauses) and a pause / resume switch;
-      a heartbeat for an external "dead man's switch" (the service itself comes in stage 4); polish, privacy text
-      reviewed, docs.
+- [x] 4 `saas-operator` (5 Nov 2026): the operator's panel at `/admin` (owner only, all owner pages and forms under
+      `/admin`): status of the components as a checklist (poller: last cycle, pauses; Cinema City: last request, last
+      success, last block; e-mail: last sent, last error of any e-mail; database: version, size, last migration,
+      largest tables; heartbeat), requests of the last 24 hours hour by hour, answers per HTTP status (24 h, 7 days), the
+      latest 20 requests, the latest 100 events; a pause / resume switch (`poller_state.paused_by_operator_at`); poller
+      settings stored as overrides in `poller_settings` within fixed ranges, applied from the next cycle, every change
+      an event, "restore all values from the configuration"; `component_status` for the mail server and the heartbeat;
+      the heartbeat after every finished cycle (at most every 5 min; address a secret, empty = off); e-mail addresses cut
+      out of stored mail errors; privacy text reviewed against what is stored; SaaS 0.4.0. Rules in §4.3, decisions
+      in §9.
 - Done when: the whole flow (invitation → import → freed seat → e-mail with the booking link) works on the PC, one
-      manual check against the real API passes, and the SaaS and desktop tests are green in CI.
+      manual check against the real API passes, and the SaaS and desktop tests are green in CI. Checked by the owner
+      with increment 4's test, before its merge.
 
 ### Stage 4 - Deploy to the VPS (staging)
 - [ ] Final R1 check first: at least 5 days of probe data (`SAAS_INFRA.md` §4.18) against the gate criteria of
@@ -403,16 +428,22 @@ Every increment ends with something testable in the browser on the PC (`src/Cine
 - [ ] Ansible playbook in `infra/ansible/` (first): the stage 2 hardening plus the setup below; the real inventory
       (server address) stays out of git; verified by reinstalling the VPS from scratch. Control node: §10.
 - [ ] Swap file (2 GB) before Docker.
-- [ ] Docker + Compose on the VPS: `web`, `worker`, `postgres`, `cloudflared`; containers publish no ports (§4.4).
+- [ ] Docker + Compose on the VPS: `web` (with the poller inside, one process in MVP 0, §9), `postgres`,
+      `cloudflared`; containers publish no ports (§4.4).
 - [ ] GitHub Actions: build images → GHCR; deploy = pull + restart on the VPS through a dedicated `deploy` user
       with limited rights (its SSH key in GitHub Secrets).
 - [ ] Cloudflare Tunnel hostname for staging + Cloudflare Access for testers.
+- [ ] Cloudflare Access on `/admin*` (staging and production): only the owner's Google account (with 2FA), a second
+      gate in front of the operator's panel besides the app's own owner check (§9).
 - [ ] E-mail provider account with 2FA (moved from stage 1).
 - [ ] E-mail domain: SPF (replaces `v=spf1 -all`), DKIM, DMARC.
 - [ ] Backups: daily `pg_dump` off the server; restore tested once.
-- [ ] Heartbeat monitor ("dead man's switch", e.g. Healthchecks.io free plan): the poller signals after every cycle;
-      the service e-mails the owner when the signals stop (process, server or e-mail down). Works behind Cloudflare
-      Access, because the server calls out.
+- [ ] Heartbeat monitor ("dead man's switch"; the code is in increment 4): Healthchecks.io account with 2FA (free
+      plan), one check per environment with period 5 min and grace 10 min (alert about 15 minutes after an outage; the
+      nightly reboot at 03:30 UTC stays below it), the ping address as a secret on the server
+      (`Saas__Heartbeat__Url`), tested by stopping the container once. The service e-mails the owner when the pings stop
+      (server, process or poller down). Works behind Cloudflare Access, because the server calls out. Planned stops:
+      pause the check in Healthchecks first.
 
 ### Stage 5 - First SaaS test
 - [ ] 3-5 invited people (possibly only the owner, §9), free, behind Cloudflare Access, 2 weeks. Watch requests
@@ -548,6 +579,15 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Development fake of Cinema City: the real client and pipeline on captured responses (Sadyba hall) steered by files (`free-<id>.txt`, `block.txt`, `error500*.txt`); refused outside the Development environment; the tests use the same fake in a temporary folder | The whole pipeline incl. block detection is exercised; seats can be freed and blocks simulated by hand; the fake can never answer on the real server |
 | Nov 2026 | Retention: request log 30 days, notification history and events 90 days, unused layouts 30 days; cleanup once a day by the poller | The log and the history, not the profiles, grow the disk |
 | Nov 2026 | Test e-mail on the account page: a sample notification to the own address, at most every 5 minutes, no Cinema City request | Checks delivery and spam placement without waiting for a freed seat |
+| Nov 2026 | Operator's panel at `/admin`, open to the owner only by the same rule as the users page (the signed-in account's e-mail equals `Saas:OwnerEmail`, checked on the server for the page and every form); all owner pages and forms under `/admin`; in stage 4 Cloudflare Access on `/admin*` (owner's Google account with 2FA) as a second gate; no own 2FA in the app for now | The e-mail cannot be changed in the app, is unique and accounts exist only by invitation, so the rule is safe here; the named policy can switch to roles later without touching the pages; Access gives a second factor without code |
+| Nov 2026 | Poller settings in the database as overrides of the configuration (`poller_settings`, null = configuration); ranges fixed in code (`PollerTuning`, §4.3); a value equal to the configuration is not stored; changes apply from the next cycle and are events with old and new values; "restore" removes them all; infrastructure values (`Enabled`, `Source`, tick, retention) and profile limits stay in the configuration | Settings without SSH; the configuration stays the source of defaults (a later change still applies); a range is a code decision, so a mistyped value cannot overload Cinema City; a separate worker would see the same settings |
+| Nov 2026 | The configuration may lie outside the panel's ranges (Development: 2-minute pause after a block): the panel shows such a value and keeps it, but cannot set one | Development and tests need short pauses; the panel's ranges are for the real service |
+| Nov 2026 | The owner's pause: until resumed, survives restarts, from the next cycle (a running cycle finishes), drops pending "check now", users see a notice without self-refresh, nobody is e-mailed; no button to end a block's pause early | One switch for "stop everything now"; ending a block's pause by hand would bypass the growing pause that protects against retry storms (KB §3.6) |
+| Nov 2026 | Heartbeat: GET to `Saas:Heartbeat:Url` after every finished cycle, at most every 5 minutes, 10 s timeout, outside the request budget; https only; the address is a secret (user secrets / environment), never logged; only its host shown in the panel; empty = off, also on the PC; the service (Healthchecks.io, free plan) in stage 4 | Without it a dead server, process or poller goes unnoticed - the block alerts come from the same process; a cycle that throws sends nothing, so a failing poller is caught too; free, a small class of code |
+| Nov 2026 | `component_status` table for the mail server and the heartbeat (last success, last failure), written by a wrapper around the mail sender and by the heartbeat | In the database, not in memory: survives restarts and would work after a split into web and worker, like "check now" |
+| Nov 2026 | E-mail addresses are cut out of mail error texts kept for the operator (events, `component_status`) | SMTP replies often quote the recipient; events are kept 90 days and must hold no personal data |
+| Nov 2026 | The panel does not reload itself; "Odśwież" reloads it; the database section counts rows exactly | A reload would wipe the settings form; PostgreSQL's statistics lag behind and the tables are small |
+| Nov 2026 | Privacy text reviewed against what is stored (owner's view of accounts, request log and events without personal data, heartbeat without user data, retention); stays a draft until stage 4 names the e-mail provider | The notice must describe the real service before anyone else uses it |
 
 ---
 
@@ -557,7 +597,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | --- | --- |
 | Check interval | MVP 0: the profile's interval with a server minimum of 10 minutes (decided Nov 2026); the adaptive rules (§4.3) tuned with the stage 4 data |
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
-| Heartbeat service | Healthchecks.io (free plan, push-based) or similar; chosen in stage 4 with the panel's heartbeat |
+| Heartbeat service | Recommended: Healthchecks.io (free Hobbyist plan: 20 checks, no card; open source); the code is ready (§4.3), the account and checks come in stage 4 |
 | E-mail provider | See §8.3 |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
 | Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
@@ -580,6 +620,8 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 - **Users e-mailed about long pauses:** e.g. when a block lasts longer than a few hours; today only the owner is
   e-mailed and users see a banner.
 - **`profileId`** in the profile format for sync between desktop, Android and SaaS (KB §5.3).
+- **Own 2FA (TOTP) for the owner's account** if the operator's panel is ever reachable without Cloudflare Access in
+  front of it (needs a QR code page and recovery codes).
 - **Learning items:** Kubernetes (k3s), RabbitMQ, Keycloak, Row-Level Security, monitoring (Prometheus / Grafana),
   Ansible (planned for stage 4).
 - **SSH brute-force noise:** not a risk with key-only login. If the log noise bothers: `ufw limit 22/tcp` first;

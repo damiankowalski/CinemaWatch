@@ -47,6 +47,8 @@ internal static class ProfileEndpoints
                     T($"Sprawdzam profil „{name}”. Wyniki pojawiają się seans po seansie – strona odświeża się sama.", $"Checking the profile \"{name}\". The results appear screening by screening - the page refreshes itself.")),
                 CheckRequestOutcome.AlreadyChecking => (StatusMessageKind.Error,
                     T($"Profil „{name}” jest właśnie sprawdzany.", $"The profile \"{name}\" is being checked right now.")),
+                CheckRequestOutcome.Paused when result.Until is null => (StatusMessageKind.Error,
+                    T("Sprawdzanie jest wstrzymane przez właściciela serwisu.", "Checks are paused by the site's owner.")),
                 CheckRequestOutcome.Paused => (StatusMessageKind.Error,
                     T($"Sprawdzanie jest wstrzymane do {at}: Cinema City odrzuciło zapytania serwera.", $"Checks are paused until {at}: Cinema City refused the server's requests.")),
                 CheckRequestOutcome.NotActive => (StatusMessageKind.Error,

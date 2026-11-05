@@ -184,6 +184,12 @@ public sealed class PollerStateRow
     public DateTimeOffset? LastCycleAt { get; set; }
 
     public DateTimeOffset? LastCleanupAt { get; set; }
+
+    /// <summary>
+    /// The owner paused all checks in the operator's panel at this time; null = not paused. Unlike a block, the pause
+    /// has no end: it lasts until the owner resumes the checks.
+    /// </summary>
+    public DateTimeOffset? PausedByOperatorAt { get; set; }
 }
 
 public enum ServiceEventKind
@@ -194,11 +200,24 @@ public enum ServiceEventKind
     BudgetExhausted,
     MailFailed,
     CycleFailed,
+
+    /// <summary>The owner changed the poller settings in the operator's panel.</summary>
+    SettingsChanged,
+
+    /// <summary>The owner paused all checks.</summary>
+    PausedByOperator,
+
+    /// <summary>The owner resumed the checks.</summary>
+    ResumedByOperator,
+
+    /// <summary>The heartbeat (the external "dead man's switch") could not be reached.</summary>
+    HeartbeatFailed,
 }
 
 /// <summary>
 /// Something the operator should be able to look back at (table service_events): blocks, resumptions, an exhausted
-/// request budget, mail failures. Shown in the operator's panel (increment 4); kept for a limited time.
+/// request budget, mail failures, the owner's settings changes and pauses. Shown in the operator's panel; kept for a
+/// limited time.
 /// </summary>
 public sealed class ServiceEvent
 {

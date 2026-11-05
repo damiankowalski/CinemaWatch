@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Options;
-
 namespace CinemaWatch.Server.Polling;
 
 /// <summary>Waits before the next screening of a cycle. Tests replace it so they do not wait.</summary>
@@ -12,13 +10,13 @@ public interface IRequestPacer
 /// <summary>
 /// A random pause: <see cref="PollerOptions.RequestGapMinSeconds"/>-<see cref="PollerOptions.RequestGapMaxSeconds"/>
 /// in the background, <see cref="PollerOptions.ManualGapMinSeconds"/>-<see cref="PollerOptions.ManualGapMaxSeconds"/>
-/// for "Check now".
+/// for "Check now" (the effective values: the operator's panel can change them).
 /// </summary>
-public sealed class RandomPacer(IOptions<PollerOptions> options) : IRequestPacer
+public sealed class RandomPacer(PollerSettings current) : IRequestPacer
 {
     public Task PauseAsync(bool manual, CancellationToken cancellationToken)
     {
-        var settings = options.Value;
+        var settings = current.Poller;
         var (min, max) = manual
             ? (settings.ManualGapMinSeconds, settings.ManualGapMaxSeconds)
             : (settings.RequestGapMinSeconds, settings.RequestGapMaxSeconds);

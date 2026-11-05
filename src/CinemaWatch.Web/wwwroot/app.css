@@ -15,6 +15,7 @@
     --on-free: #ffffff;
     --danger: #b42318;
     --on-danger: #ffffff;
+    --warn: #a15c07;
     --focus: #2457d6;
     --ok-bg: #e7f4ec;
     --error-bg: #fdecea;
@@ -36,6 +37,7 @@
         --on-free: #0b1a12;
         --danger: #f2766b;
         --on-danger: #1f0b09;
+        --warn: #e5a54b;
         --focus: #7ea3ff;
         --ok-bg: #16281f;
         --error-bg: #2d1715;
@@ -411,3 +413,90 @@ input[type=file] {
     color: var(--muted);
     cursor: not-allowed;
 }
+
+/* Operator's panel: the checklist reuses the status dot (a seat) - green working, amber attention, red problem,
+   grey off - and always names the state in words next to it. */
+
+.sections { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0 0 1rem; font-size: 0.95rem; }
+
+.checklist {
+    display: grid;
+    grid-template-columns: minmax(9rem, max-content) 1fr;
+    gap: 0;
+    margin: 0;
+    border-top: 1px solid var(--line);
+}
+
+.checklist dt, .checklist dd { padding: 0.7rem 0; border-bottom: 1px solid var(--line); }
+.checklist dt { padding-right: 1.25rem; font-weight: 600; }
+.checklist dd { margin: 0; }
+.checklist dd p { margin: 0 0 0.35rem; }
+.checklist dd p:last-child { margin-bottom: 0; }
+.checklist .level { display: block; margin-left: 1rem; color: var(--muted); font-size: 0.85rem; font-weight: 400; }
+.checklist .badge { font-size: 1rem; }
+.checklist table { margin-top: 0.5rem; }
+
+.badge.warn::before { background: var(--warn); }
+.badge.problem::before { background: var(--danger); }
+.warn-text { color: var(--warn); }
+
+@media (max-width: 40rem) {
+    .checklist { grid-template-columns: 1fr; }
+    .checklist dt { border-bottom: 0; padding-bottom: 0; }
+}
+
+section + section { margin-top: 2.5rem; }
+section > h3 { font-size: 1rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+
+table.compact { font-size: 0.9rem; }
+table.compact th, table.compact td { padding: 0.35rem 0.75rem 0.35rem 0; }
+th.number, td.number { text-align: right; font-variant-numeric: tabular-nums; }
+tr.quiet td { color: var(--muted); }
+
+/* The hour's share of the request budget. */
+.meter {
+    display: inline-block;
+    width: 8rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--line);
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.meter > span { display: block; height: 100%; background: var(--free); }
+
+.events td { vertical-align: top; }
+.events details { margin-top: 0.35rem; }
+.events pre {
+    max-height: 16rem;
+    overflow: auto;
+    margin: 0.35rem 0 0;
+    padding: 0.5rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-size: 0.8rem;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+/* Settings: one group per fieldset; the number fields are short, the unit sits next to them. */
+.settings fieldset {
+    margin: 0 0 1.25rem;
+    padding: 0.75rem 1rem 0.25rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.settings legend { padding: 0 0.35rem; font-weight: 600; }
+.setting { margin-bottom: 0.9rem; }
+.setting label { display: block; font-size: 0.95rem; }
+.setting-input { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.25rem; }
+.setting-input input[type=number] { width: 7rem; }
+.setting-input .unit { color: var(--muted); }
+.setting .hint { margin: 0.25rem 0 0; }
+.setting.invalid input { border-color: var(--danger); }
+.field-error { margin: 0.25rem 0 0; color: var(--danger); font-size: 0.875rem; }
+.settings label.check { display: flex; align-items: center; gap: 0.5rem; }
+.settings fieldset .hint { margin: 0.35rem 0 0.75rem; }
