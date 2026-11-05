@@ -1,0 +1,70 @@
+@using System.Linq.Expressions
+@*
+    One number of the poller settings form. The field keeps the name Blazor gives the bound property (Input.X), so the
+    page's form gets it back; the browser's own range check is widened to include the configuration's value, which may
+    lie outside the panel's range (Development pauses only 2 minutes after a block). The server checks the range anyway.
+*@
+<div class="setting@(Error is null ? "" : " invalid")">
+    <label for="@Id">@Label</label>
+    <div class="setting-input">
+        <InputText id="@Id" type="number" step="@(Setting.WholeNumber ? "1" : "any")"
+                   min="@Setting.Format(Math.Min(Setting.Min, Default))" max="@Setting.Format(Math.Max(Setting.Max, Default))"
+                   aria-describedby="@($"{Id}-hint")" aria-invalid="@(Error is null ? null : "true")"
+                   Value="@Value" ValueChanged="@ValueChanged" ValueExpression="@ValueExpression" />
+        <span class="unit">@Unit</span>
+    </div>
+    <p class="hint" id="@($"{Id}-hint")">
+        @T($"Zakres {Number(Setting.Min)}–{Number(Setting.Max)}{UnitText}.", $"Range {Number(Setting.Min)}–{Number(Setting.Max)}{UnitText}.")
+        @(Overridden
+            ? T($" Zmienione tutaj; w konfiguracji: {Number(Default)}.", $" Changed here; the configuration says {Number(Default)}.")
+            : T(" Z konfiguracji.", " From the configuration."))
+        @if (!Setting.InRange(Default))
+        {
+            @T(" Wartość z konfiguracji jest spoza zakresu panelu: zostaje, dopóki jej tu nie zmienisz.", " The configuration's value is outside the panel's range: it stays until you change it here.")
+        }
+    </p>
+    @if (Error is not null)
+    {
+        <p class="field-error">@Error</p>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Id { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public string Unit { get; set; } = "";
+
+    [Parameter, EditorRequired]
+    public NumberSetting Setting { get; set; } = default!;
+
+    /// <summary>The configuration's value.</summary>
+    [Parameter]
+    public double Default { get; set; }
+
+    /// <summary>The value comes from the panel, not from the configuration.</summary>
+    [Parameter]
+    public bool Overridden { get; set; }
+
+    [Parameter]
+    public string? Error { get; set; }
+
+    [Parameter]
+    public string? Value { get; set; }
+
+    [Parameter]
+    public EventCallback<string?> ValueChanged { get; set; }
+
+    [Parameter]
+    public Expression<Func<string?>>? ValueExpression { get; set; }
+
+    /// <summary>" min", " s", but "%" without a space.</summary>
+    private string UnitText => Unit == "%" ? "%" : " " + Unit;
+
+    /// <summary>"2,5" in Polish, "2.5" in English.</summary>
+    private static string Number(double value) => value.ToString("0.##", Culture);
+}

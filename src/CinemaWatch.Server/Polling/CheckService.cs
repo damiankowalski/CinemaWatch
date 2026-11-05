@@ -11,9 +11,14 @@ using static CinemaWatch.Core.Localizer;
 
 namespace CinemaWatch.Server.Polling;
 
-/// <summary>Whether the background checks run, and until when they are paused by a block.</summary>
-/// <param name="Resuming">The pause is over, but no request has got through yet (the poller is about to try).</param>
-public sealed record PollerStatus(bool Enabled, DateTimeOffset? PausedUntil, bool Resuming = false);
+/// <summary>Whether the background checks run, until when they are paused by a block, and whether the owner paused them.</summary>
+/// <param name="Resuming">The block's pause is over, but no request has got through yet (the poller is about to try).</param>
+/// <param name="PausedByOperator">The owner paused all checks in the operator's panel (no end time).</param>
+public sealed record PollerStatus(bool Enabled, DateTimeOffset? PausedUntil, bool Resuming = false, bool PausedByOperator = false)
+{
+    /// <summary>Nothing is sent to Cinema City now: "Check now" is unavailable.</summary>
+    public bool IsPaused => PausedByOperator || PausedUntil is not null;
+}
 
 /// <summary>A watched screening as the profile page shows it.</summary>
 /// <param name="Pending">A "Check now" for it is waiting or running.</param>
@@ -53,7 +58,10 @@ public enum CheckRequestOutcome
     /// <summary>A "Check now" of this profile is still waiting or running.</summary>
     AlreadyChecking,
 
-    /// <summary>All requests are paused by a block (see <see cref="CheckRequestResult.Until"/>).</summary>
+    /// <summary>
+    /// All requests are paused: by a block until <see cref="CheckRequestResult.Until"/>, or by the owner (Until is
+    /// null).
+    /// </summary>
     Paused,
 
     /// <summary>The profile is disabled or all its screenings are over.</summary>
@@ -114,6 +122,7 @@ public sealed class TestMailLimiter
 /// </summary>
 public sealed class CheckService(
     AppDbContext db,
+    PollerSettings settings,
     IOptions<PollerOptions> options,
     TimeProvider time,
     PollerSignal signal,
@@ -125,17 +134,21 @@ public sealed class CheckService(
     /// <summary>Notifications shown per profile.</summary>
     public const int HistoryShown = 10;
 
-    public PollerOptions Settings => options.Value;
+    /// <summary>The effective poller settings (the configuration plus the operator's changes).</summary>
+    public PollerOptions Settings => settings.Poller;
 
     public async Task<PollerStatus> GetPollerStatusAsync(CancellationToken cancellationToken = default)
     {
-        var until = await db.PollerState.AsNoTracking()
+        var state = await db.PollerState.AsNoTracking()
             .Where(s => s.Id == PollerStateRow.SingleId)
-            .Select(s => s.BlockedUntil)
+            .Select(s => new { s.BlockedUntil, s.PausedByOperatorAt })
             .SingleOrDefaultAsync(cancellationToken);
+        var until = state?.BlockedUntil;
+        var byOperator = state?.PausedByOperatorAt is not null;
         var now = time.GetUtcNow();
         var enabled = options.Value.Enabled;
-        return new PollerStatus(enabled, until is { } u && u > now ? u : null, enabled && until is { } over && over <= now);
+        return new PollerStatus(enabled, until is { } u && u > now ? u : null,
+            enabled && !byOperator && until is { } over && over <= now, byOperator);
     }
 
     public async Task<IReadOnlyDictionary<Guid, ProfileStatus>> GetProfileStatusesAsync(
@@ -211,7 +224,7 @@ public sealed class CheckService(
     }
 
     /// <summary>
-    /// "Check now" for a profile: not during a block, not while the profile's previous "Check now" is still waiting or
+    /// "Check now" for a profile: not during a block or the owner's pause, not while the profile's previous "Check now" is still waiting or
     /// running, only for an enabled profile with upcoming screenings. The poller then decides per screening whether
     /// Cinema City is asked or a result younger than <see cref="PollerOptions.ManualFreshMinutes"/> is used.
     /// </summary>
@@ -223,8 +236,9 @@ public sealed class CheckService(
         var now = time.GetUtcNow();
         if (!profile.Enabled || profile.EndsAt <= now)
             return new CheckRequestResult(CheckRequestOutcome.NotActive, profile.Name);
-        if ((await GetPollerStatusAsync(cancellationToken)).PausedUntil is { } until)
-            return new CheckRequestResult(CheckRequestOutcome.Paused, profile.Name, until);
+        var poller = await GetPollerStatusAsync(cancellationToken);
+        if (poller.IsPaused)
+            return new CheckRequestResult(CheckRequestOutcome.Paused, profile.Name, poller.PausedByOperator ? null : poller.PausedUntil);
         if (profile.CheckPending || await IsCheckingAsync(profile, cancellationToken))
             return new CheckRequestResult(CheckRequestOutcome.AlreadyChecking, profile.Name);
 

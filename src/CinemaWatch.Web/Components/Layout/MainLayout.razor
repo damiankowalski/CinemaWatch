@@ -14,6 +14,7 @@
                     <a href="/">@T("Profile", "Profiles")</a>
                     @if (OwnerAuthorizationHandler.IsOwner(context.User, Saas.Value))
                     {
+                        <a href="admin">Operator</a>
                         <a href="admin/users">@T("Użytkownicy", "Users")</a>
                     }
                     <a href="Account/Manage">@T("Konto", "Account")</a>

@@ -1,4 +1,5 @@
 using CinemaWatch.Server.Data;
+using CinemaWatch.Server.Operations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -28,12 +29,14 @@ public sealed class PollerSignal
 
 /// <summary>
 /// Runs <see cref="PollerCycle"/> in the background of the web app (MVP 0: one process; a worker host later). A failing
-/// cycle is logged and recorded, never ends the loop; the next tick tries again.
+/// cycle is logged and recorded, never ends the loop; the next tick tries again. After every cycle that finished, the
+/// <see cref="Heartbeat"/> tells an external service that the server is alive.
 /// </summary>
 public sealed class PollerHostedService(
     PollerCycle cycle,
     PollerSignal signal,
     IOptions<PollerOptions> options,
+    Heartbeat heartbeat,
     IServiceScopeFactory scopes,
     ServiceEvents events,
     ILogger<PollerHostedService> logger) : BackgroundService
@@ -64,6 +67,7 @@ public sealed class PollerHostedService(
             try
             {
                 await cycle.RunAsync(stoppingToken);
+                await heartbeat.AfterCycleAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

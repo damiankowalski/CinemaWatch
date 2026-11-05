@@ -1,0 +1,664 @@
+@page "/admin"
+@attribute [Authorize(Policy = OwnerAuthorizationHandler.Policy)]
+@using CinemaWatch.Server.Operations
+@inject OperatorService Operations
+@inject PollerSettings Settings
+@inject IOptions<PollerOptions> PollerConfig
+@inject IOptions<CinemaWatch.Server.Mail.MailOptions> Mail
+@inject Microsoft.Extensions.Hosting.IHostEnvironment HostEnvironment
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>@T("Panel operatora", "Operator's panel") – CinemaWatch</PageTitle>
+
+@*
+    One page, no JavaScript and no self-refresh: a reload would wipe what is being typed into the settings form.
+    Blazor renders once at the first await of OnInitializedAsync, before the data is there: nothing is shown until then.
+*@
+@if (overview is not null && stats is not null)
+{
+<div class="page-head">
+    <h1>@T("Panel operatora", "Operator's panel")</h1>
+    <p class="count"><a href="admin">@T("Odśwież", "Refresh")</a></p>
+</div>
+<p class="hint">
+    @T($"Stan z {When(overview.Now)}. CinemaWatch {Version}, środowisko {HostEnvironment.EnvironmentName}, proces działa od {When(overview.StartedAt)}.",
+       $"As of {When(overview.Now)}. CinemaWatch {Version}, environment {HostEnvironment.EnvironmentName}, process running since {When(overview.StartedAt)}.")
+</p>
+<p class="sections">
+    <a href="admin#status">@T("Stan", "Status")</a>
+    <a href="admin#pause">@T("Wstrzymanie", "Pause")</a>
+    <a href="admin#requests">@T("Zapytania", "Requests")</a>
+    <a href="admin#events">@T("Zdarzenia", "Events")</a>
+    <a href="admin#settings">@T("Ustawienia", "Settings")</a>
+</p>
+<StatusMessage />
+
+<section id="status">
+    <h2>@T("Stan serwisu", "Service status")</h2>
+    <dl class="checklist">
+        @{ var poller = overview.Poller; }
+        <dt><span class="badge @LevelClass(poller.Level)">Poller</span> <span class="level">@LevelText(poller.Level)</span></dt>
+        <dd>
+            @if (!poller.Enabled)
+            {
+                <p>@T("Wyłączony w konfiguracji (Saas:Poller:Enabled = false): serwer nie sprawdza niczego w tle.", "Switched off in the configuration (Saas:Poller:Enabled = false): the server checks nothing in the background.")</p>
+            }
+            else
+            {
+                <p>
+                    @if (poller.LastCycleAt is { } lastCycle)
+                    {
+                        @T($"Ostatni cykl: {When(lastCycle)}.", $"Last cycle: {When(lastCycle)}.")
+                        @if (overview.Now - lastCycle > OperatorService.StaleCycle)
+                        {
+                            <strong class="problem">@T(" Od ponad 5 minut nie było cyklu: poller albo cały proces stoi.", " No cycle for more than 5 minutes: the poller or the whole process is stuck.")</strong>
+                        }
+                    }
+                    else
+                    {
+                        @T("Jeszcze nie było cyklu.", "No cycle yet.")
+                    }
+                    @T($" Pilnowane seanse: {poller.WatchedScreenings}, do sprawdzenia teraz: {poller.DueNow}.", $" Watched screenings: {poller.WatchedScreenings}, due now: {poller.DueNow}.")
+                    @if (poller.NextCheckAt is { } next && next > overview.Now)
+                    {
+                        @T($" Następne sprawdzenie ok. {PollerTime.ClockText(next)}.", $" Next check at about {PollerTime.ClockText(next)}.")
+                    }
+                </p>
+                @if (poller.PausedByOperatorAt is { } paused)
+                {
+                    <p class="warn-text">@T($"Wstrzymany przez Ciebie od {When(paused)}.", $"Paused by you since {When(paused)}.")</p>
+                }
+                @if (poller.BlockedUntil is { } blockedUntil)
+                {
+                    <p class="problem">@T($"Pauza po blokadzie do {When(blockedUntil)} (blokad z rzędu: {poller.BlockCount}). Powód: {poller.BlockReason}",
+                                          $"Paused after a block until {When(blockedUntil)} (blocks in a row: {poller.BlockCount}). Reason: {poller.BlockReason}")</p>
+                }
+                <p class="hint">
+                    @(poller.Source == CinemaCitySource.Fake
+                        ? T($"Źródło: atrapa Cinema City (pliki w {PollerConfig.Value.FakeDirectory}); prawdziwe Cinema City nie dostaje zapytań.",
+                            $"Source: the fake of Cinema City (files in {PollerConfig.Value.FakeDirectory}); the real Cinema City gets no requests.")
+                        : T("Źródło: Cinema City.", "Source: Cinema City."))
+                </p>
+            }
+        </dd>
+
+        @{ var cinema = overview.CinemaCity; }
+        <dt><span class="badge @LevelClass(cinema.Level)">Cinema City</span> <span class="level">@LevelText(cinema.Level)</span></dt>
+        <dd>
+            @if (cinema.LastRequest is { } last)
+            {
+                <p>
+                    @T($"Ostatnie zapytanie: {When(last.At)}, {Outcome(last)}.", $"Last request: {When(last.At)}, {Outcome(last)}.")
+                    @if (cinema.LastOkAt is { } ok && ok != last.At)
+                    {
+                        @T($" Ostatnia udana odpowiedź: {When(ok)}.", $" Last successful answer: {When(ok)}.")
+                    }
+                </p>
+            }
+            else
+            {
+                <p>@T("W dzienniku zapytań (30 dni) nie ma jeszcze żadnego zapytania.", "The request log (30 days) has no request yet.")</p>
+            }
+            <p class="hint">
+                @(cinema.LastBlock is { } block
+                    ? T($"Ostatnia blokada: {When(block.At)}.", $"Last block: {When(block.At)}.")
+                    : T("Żadnej blokady w ostatnich 90 dniach.", "No block in the last 90 days."))
+            </p>
+        </dd>
+
+        @{ var mail = overview.Mail; }
+        <dt><span class="badge @LevelClass(mail.Level)">E-mail</span> <span class="level">@LevelText(mail.Level)</span></dt>
+        <dd>
+            <p>
+                @if (mail.LastOkAt is null && mail.LastFailureAt is null)
+                {
+                    @T("Serwer nie wysłał jeszcze żadnego e-maila.", "The server has not sent any e-mail yet.")
+                }
+                @if (mail.LastOkAt is { } sent)
+                {
+                    @T($"Ostatni wysłany: {When(sent)}. ", $"Last sent: {When(sent)}. ")
+                }
+                @if (mail.LastFailureAt is { } failed)
+                {
+                    <span class="@(mail.Level == HealthLevel.Problem ? "problem" : null)">@T($"Ostatni błąd: {When(failed)}: {mail.LastFailure}", $"Last error: {When(failed)}: {mail.LastFailure}")</span>
+                }
+            </p>
+            <p class="hint">
+                @T($"Serwer pocztowy: {Mail.Value.Host}:{Mail.Value.Port}.", $"Mail server: {Mail.Value.Host}:{Mail.Value.Port}.")
+                @if (Mail.Value.IsLocal)
+                {
+                    @T(" To lokalna skrzynka testowa: nic nie trafia do prawdziwych skrzynek.", " It is the local test inbox: nothing reaches real mailboxes.")
+                }
+                @T(" Testowy e-mail wyślesz na stronie ", " You can send a test e-mail on the ")<a href="Account/Manage">@T("Konto", "Account")</a>@T(".", " page.")
+            </p>
+        </dd>
+
+        @{ var database = overview.Database; }
+        <dt><span class="badge @LevelClass(database.Level)">@T("Baza danych", "Database")</span> <span class="level">@LevelText(database.Level)</span></dt>
+        <dd>
+            @if (database.Error is not null)
+            {
+                <p class="problem">@T($"Nie udało się odczytać szczegółów: {database.Error}", $"The details could not be read: {database.Error}")</p>
+            }
+            else
+            {
+                <p>@T($"PostgreSQL {database.Version}, rozmiar {Bytes(database.SizeBytes ?? 0)}, ostatnia migracja {database.LastMigration}.",
+                      $"PostgreSQL {database.Version}, size {Bytes(database.SizeBytes ?? 0)}, last migration {database.LastMigration}.")</p>
+                <div class="table-scroll">
+                    <table class="compact">
+                        <thead>
+                            <tr>
+                                <th scope="col">@T("Największe tabele", "Largest tables")</th>
+                                <th scope="col" class="number">@T("Rozmiar", "Size")</th>
+                                <th scope="col" class="number">@T("Wiersze", "Rows")</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var table in database.Tables)
+                            {
+                                <tr>
+                                    <td>@table.Name</td>
+                                    <td class="number">@Bytes(table.Bytes)</td>
+                                    <td class="number">@table.Rows.ToString("N0", Culture)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </dd>
+
+        @{ var heartbeat = overview.Heartbeat; var beat = overview.HeartbeatSettings; }
+        <dt><span class="badge @LevelClass(heartbeat.Level)">Heartbeat</span> <span class="level">@LevelText(heartbeat.Level)</span></dt>
+        <dd>
+            @if (!beat.IsEnabled)
+            {
+                <p>@T("Wyłączony: brak adresu w Saas:Heartbeat:Url (user secrets lub zmienna środowiskowa). Gdy serwer, proces albo poller stanie, nikt się o tym nie dowie.",
+                      "Off: no address in Saas:Heartbeat:Url (user secrets or an environment variable). If the server, the process or the poller stops, nobody will know.")</p>
+            }
+            else
+            {
+                <p>
+                    @if (heartbeat.LastOkAt is null && heartbeat.LastFailureAt is null)
+                    {
+                        @T("Jeszcze nie było pingu (wychodzi po pierwszym zakończonym cyklu).", "No ping yet (it goes out after the first finished cycle).")
+                    }
+                    @if (heartbeat.LastOkAt is { } pinged)
+                    {
+                        @T($"Ostatni ping: {When(pinged)}. ", $"Last ping: {When(pinged)}. ")
+                    }
+                    @if (heartbeat.LastFailureAt is { } pingFailed)
+                    {
+                        <span class="@(heartbeat.Level == HealthLevel.Problem ? "problem" : null)">@T($"Ostatni błąd: {When(pingFailed)}: {heartbeat.LastFailure}", $"Last error: {When(pingFailed)}: {heartbeat.LastFailure}")</span>
+                    }
+                </p>
+                <p class="hint">@T($"Adres: {beat.Target?.Host} (reszta adresu jest tajna). Ping po każdym zakończonym cyklu, najwyżej co {beat.IntervalMinutes} min.",
+                                   $"Address: {beat.Target?.Host} (the rest of it is secret). A ping after every finished cycle, at most every {beat.IntervalMinutes} min.")</p>
+            }
+        </dd>
+    </dl>
+</section>
+
+<section id="pause" class="prose">
+    <h2>@T("Wstrzymanie sprawdzania", "Pausing the checks")</h2>
+    @if (overview.Poller.PausedByOperatorAt is { } pausedAt)
+    {
+        <p>@T($"Sprawdzanie jest wstrzymane przez Ciebie od {When(pausedAt)}. Serwer nie wysyła zapytań do Cinema City, użytkownicy widzą komunikat, a „Sprawdź teraz” jest nieaktywne.",
+              $"Checks are paused by you since {When(pausedAt)}. The server sends no requests to Cinema City, users see a notice and \"Check now\" is unavailable.")</p>
+        <form action="admin/resume" method="post">
+            <AntiforgeryToken />
+            <button type="submit" class="button primary">@T("Wznów sprawdzanie", "Resume checks")</button>
+        </form>
+    }
+    else
+    {
+        <p>@T("Wstrzymanie zatrzymuje od następnego cyklu wszystkie zapytania do Cinema City – w tle i „Sprawdź teraz” – aż je wznowisz, także po restarcie. Użytkownicy zobaczą komunikat; nikt nie dostaje e-maila.",
+              "Pausing stops all requests to Cinema City from the next cycle - background checks and \"Check now\" - until you resume them, restarts included. Users see a notice; nobody is e-mailed.")</p>
+        <form action="admin/pause" method="post">
+            <AntiforgeryToken />
+            <button type="submit" class="button danger-outline">@T("Wstrzymaj sprawdzanie", "Pause checks")</button>
+        </form>
+    }
+    @if (overview.Poller.BlockedUntil is { } blockUntil)
+    {
+        <p class="hint">@T($"Niezależnie od tego trwa przerwa po blokadzie do {When(blockUntil)}; wznowienie jej nie skraca.",
+                           $"Independently, the pause after a block lasts until {When(blockUntil)}; resuming does not shorten it.")</p>
+    }
+</section>
+
+<section id="requests">
+    <h2>@T("Zapytania do Cinema City", "Requests to Cinema City")</h2>
+    @{ var use = overview.Budget; }
+    <p>
+        @T($"Ostatnia godzina: {use.LastHour} z budżetu {use.PerHour} na godzinę; w puli teraz {use.Available} z {use.Capacity}.",
+           $"Last hour: {use.LastHour} of the budget of {use.PerHour} an hour; {use.Available} of {use.Capacity} in the bucket now.")
+        @T($" 24 godziny: {stats.Total24Hours} (blokady: {stats.Blocked24Hours}), 7 dni: {stats.Total7Days} (blokady: {stats.Blocked7Days}).",
+           $" 24 hours: {stats.Total24Hours} (blocks: {stats.Blocked24Hours}), 7 days: {stats.Total7Days} (blocks: {stats.Blocked7Days}).")
+        @if (stats.AverageMs24Hours is { } average)
+        {
+            @T($" Średni czas odpowiedzi (24 h): {average} ms.", $" Average response time (24 h): {average} ms.")
+        }
+    </p>
+
+    <h3>@T("Ostatnie 24 godziny", "The last 24 hours")</h3>
+    <div class="table-scroll">
+        <table class="compact hours">
+            <thead>
+                <tr>
+                    <th scope="col">@T("Godzina", "Hour")</th>
+                    <th scope="col" class="number">@T("Zapytania", "Requests")</th>
+                    <th scope="col" class="number">@T("Udane", "OK")</th>
+                    <th scope="col" class="number">@T("Błędy", "Errors")</th>
+                    <th scope="col" class="number">@T("Blokady", "Blocks")</th>
+                    <th scope="col" class="number">@T("„Sprawdź teraz”", "\"Check now\"")</th>
+                    <th scope="col">@T("Budżet godziny", "Hour's budget")</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var hour in stats.Hours)
+                {
+                    <tr class="@(hour.Requests == 0 ? "quiet" : null)">
+                        <td>@PolishTime.FromUtc(hour.Hour.UtcDateTime).ToString("HH:mm", Culture)</td>
+                        <td class="number">@hour.Requests</td>
+                        <td class="number">@hour.Ok</td>
+                        <td class="number @(hour.Failed > 0 ? "problem" : null)">@hour.Failed</td>
+                        <td class="number @(hour.Blocked > 0 ? "problem" : null)">@hour.Blocked</td>
+                        <td class="number">@hour.Manual</td>
+                        <td><span class="meter" aria-hidden="true"><span style="width: @BudgetShare(hour.Requests, use.PerHour)%"></span></span></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <h3>@T("Odpowiedzi", "Answers")</h3>
+    @if (stats.Statuses.Count == 0)
+    {
+        <p class="hint">@T("Brak zapytań w ostatnich 7 dniach.", "No requests in the last 7 days.")</p>
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table class="compact">
+                <thead>
+                    <tr>
+                        <th scope="col">Status</th>
+                        <th scope="col" class="number">24 h</th>
+                        <th scope="col" class="number">@T("7 dni", "7 days")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var status in stats.Statuses)
+                    {
+                        <tr>
+                            <td class="@(status.Status is >= 200 and < 300 ? null : "problem")">@(status.Status is { } code ? $"HTTP {code}" : T("bez odpowiedzi (timeout, sieć)", "no answer (timeout, network)"))</td>
+                            <td class="number">@status.Last24Hours</td>
+                            <td class="number">@status.Last7Days</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    <h3>@T("Ostatnie zapytania", "Latest requests")</h3>
+    @if (stats.Recent.Count == 0)
+    {
+        <p class="hint">@T("Dziennik zapytań jest pusty.", "The request log is empty.")</p>
+    }
+    else
+    {
+        <div class="table-scroll">
+            <table class="compact">
+                <thead>
+                    <tr>
+                        <th scope="col">@T("Czas", "Time")</th>
+                        <th scope="col">@T("Seans", "Screening")</th>
+                        <th scope="col">@T("Zapytanie", "Request")</th>
+                        <th scope="col">@T("Wynik", "Result")</th>
+                        <th scope="col" class="number">ms</th>
+                        <th scope="col">cf-ray</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var request in stats.Recent)
+                    {
+                        <tr>
+                            <td>@When(request.At)</td>
+                            <td>@request.ScreeningId@(request.Manual ? T(" (ręcznie)", " (manual)") : "")</td>
+                            <td>@request.Endpoint</td>
+                            <td class="@(IsSuccess(request) ? null : "problem")">@Outcome(request)</td>
+                            <td class="number">@request.DurationMs</td>
+                            <td class="hint">@request.CfRay</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<section id="events">
+    <h2>@T("Zdarzenia", "Events")</h2>
+    @if (events.Count == 0)
+    {
+        <p class="hint">@T("Brak zdarzeń w ostatnich 90 dniach.", "No events in the last 90 days.")</p>
+    }
+    else
+    {
+        <p class="hint">@T($"Najnowsze {OperatorService.EventsShown}, przechowywane 90 dni. Opisy po angielsku, jak w dzienniku serwera.",
+                           $"The latest {OperatorService.EventsShown}, kept for 90 days. Descriptions in English, as in the server's log.")</p>
+        <div class="table-scroll">
+            <table class="compact events">
+                <thead>
+                    <tr>
+                        <th scope="col">@T("Czas", "Time")</th>
+                        <th scope="col">@T("Rodzaj", "Kind")</th>
+                        <th scope="col">@T("Opis", "Description")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in events)
+                    {
+                        <tr>
+                            <td>@When(item.At)</td>
+                            <td class="@KindClass(item.Kind)">@KindText(item.Kind)</td>
+                            <td>
+                                @item.Message
+                                @if (!string.IsNullOrEmpty(item.Data))
+                                {
+                                    <details>
+                                        <summary>@T("Szczegóły", "Details")</summary>
+                                        <pre>@item.Data</pre>
+                                    </details>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+<section id="settings" class="prose">
+    <h2>@T("Ustawienia pollera", "Poller settings")</h2>
+    <p>@T("Wartości z konfiguracji (appsettings.json, zmienne środowiskowe) możesz tu zmienić w stałych zakresach. Zmiana działa od następnego cyklu (do 30 sekund) i trafia do zdarzeń. Wartość równa tej z konfiguracji nie jest zapisywana, więc późniejsza zmiana konfiguracji znowu działa.",
+          "Here you can change values from the configuration (appsettings.json, environment variables) within fixed ranges. A change applies from the next cycle (within 30 seconds) and is recorded in the events. A value equal to the configuration's is not stored, so a later change of the configuration applies again.")</p>
+
+    @if (problems.Count > 0)
+    {
+        <p class="status error" role="alert">@T("Nie zapisano: popraw zaznaczone pola.", "Not saved: correct the marked fields.")</p>
+    }
+
+    <EditForm Model="Input" method="post" OnSubmit="SaveAsync" FormName="settings" class="settings">
+        <fieldset>
+            <legend>@T("Jak często", "How often")</legend>
+            <SettingField Id="min-interval" Label="@T("Najkrótszy odstęp między sprawdzeniami seansu", "Shortest interval between checks of a screening")" Unit="min"
+                          Setting="@Number(TuningKey.MinIntervalMinutes)" Default="@Default(TuningKey.MinIntervalMinutes)" Overridden="@Overridden(TuningKey.MinIntervalMinutes)"
+                          Error="@ErrorFor(TuningKey.MinIntervalMinutes)" @bind-Value="Input.MinIntervalMinutes" />
+            <SettingField Id="jitter" Label="@T("Losowy dodatek do odstępu", "Random addition to the interval")" Unit="%"
+                          Setting="@Number(TuningKey.JitterPercent)" Default="@Default(TuningKey.JitterPercent)" Overridden="@Overridden(TuningKey.JitterPercent)"
+                          Error="@ErrorFor(TuningKey.JitterPercent)" @bind-Value="Input.JitterPercent" />
+            <SettingField Id="budget" Label="@T("Budżet zapytań całego serwera", "Request budget of the whole server")" Unit="@T("na godzinę", "an hour")"
+                          Setting="@Number(TuningKey.RequestsPerHour)" Default="@Default(TuningKey.RequestsPerHour)" Overridden="@Overridden(TuningKey.RequestsPerHour)"
+                          Error="@ErrorFor(TuningKey.RequestsPerHour)" @bind-Value="Input.RequestsPerHour" />
+        </fieldset>
+
+        <fieldset>
+            <legend>@T("Przerwy między seansami", "Pauses between screenings")</legend>
+            <SettingField Id="gap-min" Label="@T("W tle: od", "In the background: from")" Unit="s"
+                          Setting="@Number(TuningKey.RequestGapMinSeconds)" Default="@Default(TuningKey.RequestGapMinSeconds)" Overridden="@Overridden(TuningKey.RequestGapMinSeconds)"
+                          Error="@ErrorFor(TuningKey.RequestGapMinSeconds)" @bind-Value="Input.RequestGapMinSeconds" />
+            <SettingField Id="gap-max" Label="@T("W tle: do", "In the background: to")" Unit="s"
+                          Setting="@Number(TuningKey.RequestGapMaxSeconds)" Default="@Default(TuningKey.RequestGapMaxSeconds)" Overridden="@Overridden(TuningKey.RequestGapMaxSeconds)"
+                          Error="@ErrorFor(TuningKey.RequestGapMaxSeconds)" @bind-Value="Input.RequestGapMaxSeconds" />
+            <SettingField Id="manual-gap-min" Label="@T("„Sprawdź teraz”: od", "\"Check now\": from")" Unit="s"
+                          Setting="@Number(TuningKey.ManualGapMinSeconds)" Default="@Default(TuningKey.ManualGapMinSeconds)" Overridden="@Overridden(TuningKey.ManualGapMinSeconds)"
+                          Error="@ErrorFor(TuningKey.ManualGapMinSeconds)" @bind-Value="Input.ManualGapMinSeconds" />
+            <SettingField Id="manual-gap-max" Label="@T("„Sprawdź teraz”: do", "\"Check now\": to")" Unit="s"
+                          Setting="@Number(TuningKey.ManualGapMaxSeconds)" Default="@Default(TuningKey.ManualGapMaxSeconds)" Overridden="@Overridden(TuningKey.ManualGapMaxSeconds)"
+                          Error="@ErrorFor(TuningKey.ManualGapMaxSeconds)" @bind-Value="Input.ManualGapMaxSeconds" />
+            <SettingField Id="manual-fresh" Label="@T("„Sprawdź teraz” bierze zapamiętany wynik młodszy niż", "\"Check now\" uses a stored result younger than")" Unit="min"
+                          Setting="@Number(TuningKey.ManualFreshMinutes)" Default="@Default(TuningKey.ManualFreshMinutes)" Overridden="@Overridden(TuningKey.ManualFreshMinutes)"
+                          Error="@ErrorFor(TuningKey.ManualFreshMinutes)" @bind-Value="Input.ManualFreshMinutes" />
+        </fieldset>
+
+        <fieldset>
+            <legend>@T("Po blokadzie", "After a block")</legend>
+            <SettingField Id="first-pause" Label="@T("Pierwsza przerwa (podwaja się z każdą blokadą z rzędu)", "First pause (doubles with every block in a row)")" Unit="min"
+                          Setting="@Number(TuningKey.FirstBlockPauseMinutes)" Default="@Default(TuningKey.FirstBlockPauseMinutes)" Overridden="@Overridden(TuningKey.FirstBlockPauseMinutes)"
+                          Error="@ErrorFor(TuningKey.FirstBlockPauseMinutes)" @bind-Value="Input.FirstBlockPauseMinutes" />
+            <SettingField Id="max-pause" Label="@T("Najdłuższa przerwa", "Longest pause")" Unit="min"
+                          Setting="@Number(TuningKey.MaxBlockPauseMinutes)" Default="@Default(TuningKey.MaxBlockPauseMinutes)" Overridden="@Overridden(TuningKey.MaxBlockPauseMinutes)"
+                          Error="@ErrorFor(TuningKey.MaxBlockPauseMinutes)" @bind-Value="Input.MaxBlockPauseMinutes" />
+        </fieldset>
+
+        <fieldset>
+            <legend>@T("Szczegóły seansu", "Screening details")</legend>
+            <label class="check">
+                <InputCheckbox @bind-Value="Input.ReuseScreeningDetails" />
+                @T("Używaj zapamiętanych szczegółów seansu: 1 zapytanie na sprawdzenie zamiast 2", "Reuse stored screening details: 1 request per check instead of 2")
+            </label>
+            <p class="hint">
+                @T("Do pomiaru w etapie 4: nie wiadomo jeszcze, czy samo zapytanie o wolne miejsca przechodzi z nowej sesji.", "To be measured in stage 4: it is not known yet whether the free-seat request alone gets through from a fresh session.")
+                @(Settings.Overrides.ReuseScreeningDetails is not null && Settings.Poller.ReuseScreeningDetails != Settings.DefaultReuseScreeningDetails
+                    ? T($" Zmienione tutaj; w konfiguracji: {OnOff(Settings.DefaultReuseScreeningDetails)}.", $" Changed here; the configuration says {OnOff(Settings.DefaultReuseScreeningDetails)}.")
+                    : T(" Z konfiguracji.", " From the configuration."))
+            </p>
+        </fieldset>
+
+        <button type="submit" class="button primary">@T("Zapisz ustawienia", "Save settings")</button>
+    </EditForm>
+
+    @if (!Settings.Overrides.IsEmpty)
+    {
+        <form action="admin/settings/defaults" method="post" class="aside">
+            <AntiforgeryToken />
+            <button type="submit" class="button">@T("Przywróć wszystkie wartości z konfiguracji", "Restore all values from the configuration")</button>
+        </form>
+    }
+</section>
+}
+
+@code {
+    private static readonly string Version = AppInfo.VersionOf(typeof(Program).Assembly);
+
+    private OperatorOverview? overview;
+    private RequestStats? stats;
+    private IReadOnlyList<ServiceEvent> events = [];
+    private IReadOnlyList<SettingProblem> problems = [];
+    private DateTime polishNow;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm(FormName = "settings")]
+    private SettingsInput Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        // A posted form keeps what was typed; otherwise the form shows the values in force.
+        Input ??= SettingsInput.From(Settings);
+    }
+
+    private async Task LoadAsync()
+    {
+        overview = await Operations.GetOverviewAsync();
+        stats = await Operations.GetRequestStatsAsync();
+        events = await Operations.GetEventsAsync();
+        polishNow = PolishTime.FromUtc(overview.Now.UtcDateTime);
+    }
+
+    private async Task SaveAsync()
+    {
+        var parse = Settings.Parse(Input.Values(), Input.ReuseScreeningDetails);
+        if (!parse.IsValid)
+        {
+            problems = parse.Problems;
+            return;
+        }
+        var result = await Operations.SaveSettingsAsync(parse.Row);
+        var message = result.Changes.Count == 0
+            ? T("Nic się nie zmieniło.", "Nothing changed.")
+            : T($"Zapisano: {Describe(result.Changes)}. Działa od następnego cyklu.", $"Saved: {Describe(result.Changes)}. It applies from the next cycle.");
+        RedirectManager.RedirectToWithStatus(OperatorEndpoints.PanelPath, StatusMessageKind.Success, message, HttpContext);
+    }
+
+    private static NumberSetting Number(TuningKey key) => PollerTuning.Get(key);
+
+    private double Default(TuningKey key) => Settings.DefaultOf(PollerTuning.Get(key));
+
+    private bool Overridden(TuningKey key) => Settings.IsOverridden(PollerTuning.Get(key));
+
+    private string? ErrorFor(TuningKey key)
+    {
+        var problem = problems.FirstOrDefault(p => p.Key == key);
+        if (problem is null)
+            return null;
+        var setting = PollerTuning.Get(key);
+        return problem.Kind switch
+        {
+            SettingProblemKind.NotANumber => setting.WholeNumber
+                ? T("Wpisz liczbę całkowitą.", "Enter a whole number.")
+                : T("Wpisz liczbę.", "Enter a number."),
+            SettingProblemKind.OutOfRange => T($"Dozwolone od {setting.Min.ToString("0.##", Culture)} do {setting.Max.ToString("0.##", Culture)}.",
+                                               $"Allowed from {setting.Min.ToString("0.##", Culture)} to {setting.Max.ToString("0.##", Culture)}."),
+            _ => T("Nie może być mniejsze niż wartość „od” (pierwsza przerwa) w tej grupie.", "Must not be smaller than the \"from\" value (first pause) of this group."),
+        };
+    }
+
+    /// <summary>"budżet zapytań 120 → 90, najkrótszy odstęp 10 → 15"</summary>
+    private static string Describe(IReadOnlyList<SettingChange> changes) =>
+        string.Join(", ", changes.Select(c => $"{ChangeLabel(c.Name)} {c.From} → {c.To}"));
+
+    private static string ChangeLabel(string name) => Enum.TryParse<TuningKey>(name, out var key)
+        ? key switch
+        {
+            TuningKey.MinIntervalMinutes => T("najkrótszy odstęp (min)", "shortest interval (min)"),
+            TuningKey.RequestsPerHour => T("budżet (na godzinę)", "budget (an hour)"),
+            TuningKey.RequestGapMinSeconds => T("przerwa w tle od (s)", "background pause from (s)"),
+            TuningKey.RequestGapMaxSeconds => T("przerwa w tle do (s)", "background pause to (s)"),
+            TuningKey.ManualGapMinSeconds => T("przerwa „Sprawdź teraz” od (s)", "\"Check now\" pause from (s)"),
+            TuningKey.ManualGapMaxSeconds => T("przerwa „Sprawdź teraz” do (s)", "\"Check now\" pause to (s)"),
+            TuningKey.ManualFreshMinutes => T("świeży wynik (min)", "fresh result (min)"),
+            TuningKey.JitterPercent => T("losowy dodatek (%)", "random addition (%)"),
+            TuningKey.FirstBlockPauseMinutes => T("pierwsza przerwa po blokadzie (min)", "first pause after a block (min)"),
+            _ => T("najdłuższa przerwa po blokadzie (min)", "longest pause after a block (min)"),
+        }
+        : T("zapamiętane szczegóły seansu", "stored screening details");
+
+    private static string OnOff(bool value) => value ? T("włączone", "on") : T("wyłączone", "off");
+
+    private static string LevelClass(HealthLevel level) => level switch
+    {
+        HealthLevel.Ok => "active",
+        HealthLevel.Warning => "warn",
+        HealthLevel.Problem => "problem",
+        _ => "off",
+    };
+
+    private static string LevelText(HealthLevel level) => level switch
+    {
+        HealthLevel.Ok => T("działa", "working"),
+        HealthLevel.Warning => T("uwaga", "attention"),
+        HealthLevel.Problem => T("problem", "problem"),
+        _ => T("wyłączone lub nieużywane", "off or unused"),
+    };
+
+    private static string KindText(ServiceEventKind kind) => kind switch
+    {
+        ServiceEventKind.PollerStarted => T("start pollera", "poller started"),
+        ServiceEventKind.Blocked => T("blokada", "block"),
+        ServiceEventKind.Resumed => T("koniec blokady", "block over"),
+        ServiceEventKind.BudgetExhausted => T("budżet wyczerpany", "budget used up"),
+        ServiceEventKind.MailFailed => T("błąd e-maila", "e-mail failed"),
+        ServiceEventKind.CycleFailed => T("błąd cyklu", "cycle failed"),
+        ServiceEventKind.SettingsChanged => T("zmiana ustawień", "settings changed"),
+        ServiceEventKind.PausedByOperator => T("wstrzymanie", "paused"),
+        ServiceEventKind.ResumedByOperator => T("wznowienie", "resumed"),
+        ServiceEventKind.HeartbeatFailed => T("błąd heartbeatu", "heartbeat failed"),
+        _ => kind.ToString(),
+    };
+
+    private static string? KindClass(ServiceEventKind kind) => kind is ServiceEventKind.Blocked or ServiceEventKind.MailFailed
+        or ServiceEventKind.CycleFailed or ServiceEventKind.HeartbeatFailed ? "problem" : null;
+
+    private static bool IsSuccess(CheckLogEntry entry) =>
+        entry.Status is >= 200 and < 300 && !RequestGuard.IsBlock(entry.Status.Value, entry.CfMitigated, entry.ContentType);
+
+    /// <summary>"HTTP 200 (presentation)", "HTTP 403, cf-mitigated: challenge (seats-status)", "timeout (presentation)"</summary>
+    private static string Outcome(CheckLogEntry entry) =>
+        (entry.Status is { } status ? $"HTTP {status}" : entry.Error ?? T("bez odpowiedzi", "no answer"))
+        + (string.IsNullOrEmpty(entry.CfMitigated) ? "" : $", cf-mitigated: {entry.CfMitigated}")
+        + (entry.Status is >= 200 and < 300 && entry.ContentType == "text/html" ? ", text/html" : "")
+        + $" ({entry.Endpoint})";
+
+    /// <summary>"14:32:05" today, "pon 2.11, 14:32" another day (Polish time).</summary>
+    private string When(DateTimeOffset utc)
+    {
+        var local = PolishTime.FromUtc(utc.UtcDateTime);
+        return local.Date == polishNow.Date ? local.ToString("HH:mm:ss", Culture) : local.ToString(T("ddd d.MM, HH:mm", "ddd d MMM, HH:mm"), Culture);
+    }
+
+    private static string Bytes(long bytes) => bytes switch
+    {
+        >= 1024 * 1024 => $"{(bytes / 1024d / 1024d).ToString("0.#", Culture)} MB",
+        >= 1024 => $"{(bytes / 1024d).ToString("0", Culture)} kB",
+        _ => $"{bytes} B",
+    };
+
+    /// <summary>Width of the hour's bar: its requests as a share of the hourly budget.</summary>
+    private static string BudgetShare(int requests, int perHour) =>
+        (perHour <= 0 ? 0 : Math.Min(100, requests * 100.0 / perHour)).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The settings form: text fields (what was typed comes back unchanged with its error) and one switch.</summary>
+    private sealed class SettingsInput
+    {
+        public string? MinIntervalMinutes { get; set; }
+        public string? RequestsPerHour { get; set; }
+        public string? RequestGapMinSeconds { get; set; }
+        public string? RequestGapMaxSeconds { get; set; }
+        public string? ManualGapMinSeconds { get; set; }
+        public string? ManualGapMaxSeconds { get; set; }
+        public string? ManualFreshMinutes { get; set; }
+        public string? JitterPercent { get; set; }
+        public string? FirstBlockPauseMinutes { get; set; }
+        public string? MaxBlockPauseMinutes { get; set; }
+        public bool ReuseScreeningDetails { get; set; }
+
+        public IReadOnlyDictionary<TuningKey, string?> Values() => new Dictionary<TuningKey, string?>
+        {
+            [TuningKey.MinIntervalMinutes] = MinIntervalMinutes,
+            [TuningKey.RequestsPerHour] = RequestsPerHour,
+            [TuningKey.RequestGapMinSeconds] = RequestGapMinSeconds,
+            [TuningKey.RequestGapMaxSeconds] = RequestGapMaxSeconds,
+            [TuningKey.ManualGapMinSeconds] = ManualGapMinSeconds,
+            [TuningKey.ManualGapMaxSeconds] = ManualGapMaxSeconds,
+            [TuningKey.ManualFreshMinutes] = ManualFreshMinutes,
+            [TuningKey.JitterPercent] = JitterPercent,
+            [TuningKey.FirstBlockPauseMinutes] = FirstBlockPauseMinutes,
+            [TuningKey.MaxBlockPauseMinutes] = MaxBlockPauseMinutes,
+        };
+
+        public static SettingsInput From(PollerSettings settings)
+        {
+            string Value(TuningKey key) => PollerTuning.Get(key).Format(settings.ValueOf(PollerTuning.Get(key)));
+            return new SettingsInput
+            {
+                MinIntervalMinutes = Value(TuningKey.MinIntervalMinutes),
+                RequestsPerHour = Value(TuningKey.RequestsPerHour),
+                RequestGapMinSeconds = Value(TuningKey.RequestGapMinSeconds),
+                RequestGapMaxSeconds = Value(TuningKey.RequestGapMaxSeconds),
+                ManualGapMinSeconds = Value(TuningKey.ManualGapMinSeconds),
+                ManualGapMaxSeconds = Value(TuningKey.ManualGapMaxSeconds),
+                ManualFreshMinutes = Value(TuningKey.ManualFreshMinutes),
+                JitterPercent = Value(TuningKey.JitterPercent),
+                FirstBlockPauseMinutes = Value(TuningKey.FirstBlockPauseMinutes),
+                MaxBlockPauseMinutes = Value(TuningKey.MaxBlockPauseMinutes),
+                ReuseScreeningDetails = settings.Poller.ReuseScreeningDetails,
+            };
+        }
+    }
+}

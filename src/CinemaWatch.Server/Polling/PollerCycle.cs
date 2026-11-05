@@ -18,7 +18,7 @@ public enum CycleResult
     /// <summary>Nothing was due.</summary>
     Idle,
 
-    /// <summary>A block is in force: nothing was sent.</summary>
+    /// <summary>The owner paused the checks, or a block is in force: nothing was sent.</summary>
     Paused,
 
     /// <summary>At least one due screening was handled.</summary>
@@ -40,8 +40,9 @@ public sealed record CycleReport(
 /// <summary>
 /// One poller cycle (docs/SAAS.md §4.3):
 /// <list type="number">
+/// <item>read the effective settings (<see cref="PollerSettings"/>: the configuration plus the operator's changes);</item>
 /// <item>bring watched_screenings in step with the profiles (<see cref="WatchList"/>);</item>
-/// <item>stop if a block is in force;</item>
+/// <item>stop if the owner paused the checks or a block is in force;</item>
 /// <item>check the due screenings one by one - "Check now" first, then by due time - through one
 /// <see cref="RequestGuard"/> (pause between requests, global budget, request log, block detection);</item>
 /// <item>give each result to every profile that watches the screening and e-mail the newly available seats.</item>
@@ -59,8 +60,7 @@ public sealed class PollerCycle(
     IRequestPacer pacer,
     RequestBudget budget,
     TimeProvider time,
-    IOptions<PollerOptions> options,
-    IOptions<LimitOptions> limits,
+    PollerSettings effective,
     IOptions<SaasOptions> saas,
     IMailSender mail,
     ServiceEvents events,
@@ -95,10 +95,11 @@ public sealed class PollerCycle(
 
     private async Task<CycleReport> RunLockedAsync(CancellationToken cancellationToken)
     {
-        var settings = options.Value;
         var now = time.GetUtcNow();
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await effective.RefreshAsync(db, cancellationToken).ConfigureAwait(false);
+        var settings = effective.Poller;
 
         var state = await db.PollerState.SingleOrDefaultAsync(s => s.Id == PollerStateRow.SingleId, cancellationToken).ConfigureAwait(false);
         if (state is null)
@@ -112,12 +113,13 @@ public sealed class PollerCycle(
             state.LastCleanupAt = now;
         }
 
-        var watchers = await WatchList.SyncAsync(db, limits.Value, now, logger, cancellationToken).ConfigureAwait(false);
+        var watchers = await WatchList.SyncAsync(db, effective.Limits, now, logger, cancellationToken).ConfigureAwait(false);
         state.LastCycleAt = now;
 
-        if (state.BlockedUntil is { } until && until > now)
+        // Paused by the owner (no end time) or by a block: nothing is sent. A "Check now" that slipped in as the pause
+        // began cannot run: the page shows the pause instead.
+        if (state.PausedByOperatorAt is not null || state.BlockedUntil is { } until && until > now)
         {
-            // A "Check now" that slipped in as the block began cannot run: the page shows the pause instead.
             await db.WatchedScreenings.Where(r => r.ManualRequestedAt != null)
                 .ExecuteUpdateAsync(set => set.SetProperty(r => r.ManualRequestedAt, (DateTimeOffset?)null), cancellationToken).ConfigureAwait(false);
             await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
@@ -308,7 +310,7 @@ public sealed class PollerCycle(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "Alert to the owner could not be sent: {Subject}", message.Subject);
-            events.Add(db, ServiceEventKind.MailFailed, $"Alert \"{message.Subject}\" not sent: {ex.Message}", throttled: true);
+            events.Add(db, ServiceEventKind.MailFailed, $"Alert \"{message.Subject}\" not sent: {MailErrors.WithoutAddresses(ex.Message)}", throttled: true);
         }
     }
 
@@ -381,7 +383,7 @@ public sealed class PollerCycle(
                     record.Error = Shorten(ex.Message);
                     failed++;
                     logger.LogError(ex, "Notification for profile {ProfileId} could not be sent; the seats are notified again at the next check", profile.Id);
-                    events.Add(db, ServiceEventKind.MailFailed, $"Notification not sent: {ex.Message}", throttled: true);
+                    events.Add(db, ServiceEventKind.MailFailed, $"Notification not sent: {MailErrors.WithoutAddresses(ex.Message)}", throttled: true);
                 }
                 db.Notifications.Add(record);
                 if (!record.Delivered)

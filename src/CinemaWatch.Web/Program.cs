@@ -2,6 +2,7 @@ using CinemaWatch.Server;
 using CinemaWatch.Server.Accounts;
 using CinemaWatch.Server.Data;
 using CinemaWatch.Server.Mail;
+using CinemaWatch.Server.Operations;
 using CinemaWatch.Server.Polling;
 using CinemaWatch.Server.Profiles;
 using CinemaWatch.Web;
@@ -37,6 +38,12 @@ builder.Services.AddOptions<PollerOptions>()
     // The fake must never answer for Cinema City on a real server.
     .Validate<IHostEnvironment>((o, environment) => o.Source != CinemaCitySource.Fake || environment.IsDevelopment() || environment.IsEnvironment("Testing"),
         "Saas:Poller:Source=Fake is allowed only in the Development environment")
+    .ValidateOnStart();
+// The external "dead man's switch" (docs/SAAS.md §4.3): its address is a secret, so it comes from user secrets or an
+// environment variable (Saas__Heartbeat__Url); empty = off.
+builder.Services.AddOptions<HeartbeatOptions>()
+    .Bind(builder.Configuration.GetSection(HeartbeatOptions.Section))
+    .Validate(o => o.IsValid(), "Saas:Heartbeat: Url must be empty or an https address; IntervalMinutes 1-60")
     .ValidateOnStart();
 
 // Uploads: at most 10 profile files of 256 KB in one request; anything bigger is refused before it is read.
@@ -94,10 +101,12 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityRedirectManager>();
 
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddSingleton<IMailSender, SmtpMailSender>();
+// Every e-mail's outcome is recorded for the operator's panel (component_status).
+builder.Services.AddMailSender(provider => ActivatorUtilities.CreateInstance<SmtpMailSender>(provider));
 builder.Services.AddScoped<AccountService>();
 builder.Services.AddScoped<ProfileService>();
-// Background checks of the watched screenings and the notification e-mails (docs/SAAS.md §4.3).
+// Background checks of the watched screenings, the notification e-mails, the heartbeat and the operator's panel
+// (docs/SAAS.md §4.3).
 builder.Services.AddPoller();
 
 var app = builder.Build();
@@ -115,6 +124,7 @@ app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>();
 app.MapAccountEndpoints();
 app.MapProfileEndpoints();
+app.MapOperatorEndpoints();
 app.MapLanguageEndpoint();
 
 await app.PrepareDatabaseAsync();

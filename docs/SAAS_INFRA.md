@@ -665,6 +665,9 @@ sudo rm -rf /opt/cinemawatch-probe /etc/cinemawatch-probe /var/lib/private/cinem
 - During stage 3 (development on the PC, no server work): the probe keeps running; a look with §4.16 now and then.
 - Start of stage 4: the final R1 check with at least 5 days of probe data (§4.18), then stop and remove the probe
   (§4.19) unless it is still useful.
+- Stage 4, from the SaaS code of stage 3 ([`SAAS.md`](SAAS.md) §7): Cloudflare Access on `/admin*` (the operator's
+  panel; owner's Google account only) and a Healthchecks.io account with 2FA, one check per environment (period 5 min,
+  grace 10 min), its ping address only as a secret on the server (`Saas__Heartbeat__Url`).
 - Stage 4: the Ansible playbook first (stage 2 hardening as code, verified by a reinstall), then swap, Docker and
   Compose, a `deploy` user, Cloudflare Tunnel and Access, e-mail records, backups, and an external heartbeat monitor
   for the poller ("dead man's switch", [`SAAS.md`](SAAS.md) §7).

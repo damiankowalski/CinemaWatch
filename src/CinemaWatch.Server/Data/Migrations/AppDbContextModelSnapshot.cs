@@ -215,6 +215,32 @@ namespace CinemaWatch.Server.Data.Migrations
                     b.ToTable("check_log", (string)null);
                 });
 
+            modelBuilder.Entity("CinemaWatch.Server.Data.ComponentStatusRow", b =>
+                {
+                    b.Property<string>("Component")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("component");
+
+                    b.Property<string>("LastFailure")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("last_failure");
+
+                    b.Property<DateTimeOffset?>("LastFailureAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_failure_at");
+
+                    b.Property<DateTimeOffset?>("LastOkAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_ok_at");
+
+                    b.HasKey("Component")
+                        .HasName("pk_component_status");
+
+                    b.ToTable("component_status", (string)null);
+                });
+
             modelBuilder.Entity("CinemaWatch.Server.Data.NotificationRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -288,6 +314,66 @@ namespace CinemaWatch.Server.Data.Migrations
                     b.ToTable("notification_state", (string)null);
                 });
 
+            modelBuilder.Entity("CinemaWatch.Server.Data.PollerSettingsRow", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("integer")
+                        .HasColumnName("id");
+
+                    b.Property<int?>("FirstBlockPauseMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("first_block_pause_minutes");
+
+                    b.Property<int?>("JitterPercent")
+                        .HasColumnType("integer")
+                        .HasColumnName("jitter_percent");
+
+                    b.Property<int?>("ManualFreshMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("manual_fresh_minutes");
+
+                    b.Property<double?>("ManualGapMaxSeconds")
+                        .HasColumnType("double precision")
+                        .HasColumnName("manual_gap_max_seconds");
+
+                    b.Property<double?>("ManualGapMinSeconds")
+                        .HasColumnType("double precision")
+                        .HasColumnName("manual_gap_min_seconds");
+
+                    b.Property<int?>("MaxBlockPauseMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_block_pause_minutes");
+
+                    b.Property<int?>("MinIntervalMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("min_interval_minutes");
+
+                    b.Property<double?>("RequestGapMaxSeconds")
+                        .HasColumnType("double precision")
+                        .HasColumnName("request_gap_max_seconds");
+
+                    b.Property<double?>("RequestGapMinSeconds")
+                        .HasColumnType("double precision")
+                        .HasColumnName("request_gap_min_seconds");
+
+                    b.Property<int?>("RequestsPerHour")
+                        .HasColumnType("integer")
+                        .HasColumnName("requests_per_hour");
+
+                    b.Property<bool?>("ReuseScreeningDetails")
+                        .HasColumnType("boolean")
+                        .HasColumnName("reuse_screening_details");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_poller_settings");
+
+                    b.ToTable("poller_settings", (string)null);
+                });
+
             modelBuilder.Entity("CinemaWatch.Server.Data.PollerStateRow", b =>
                 {
                     b.Property<int>("Id")
@@ -318,6 +404,10 @@ namespace CinemaWatch.Server.Data.Migrations
                     b.Property<DateTimeOffset?>("LastCycleAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_cycle_at");
+
+                    b.Property<DateTimeOffset?>("PausedByOperatorAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("paused_by_operator_at");
 
                     b.HasKey("Id")
                         .HasName("pk_poller_state");

@@ -5,6 +5,7 @@ using CinemaWatch.Core;
 using CinemaWatch.Saas.Tests;
 using CinemaWatch.Server.Accounts;
 using CinemaWatch.Server.Data;
+using CinemaWatch.Server.Operations;
 using CinemaWatch.Server.Polling;
 using CinemaWatch.Server.Profiles;
 using CinemaWatch.Tests;
@@ -211,10 +212,14 @@ TestRunner.Add("Block detection: 403, 429, a Cloudflare challenge and HTML inste
     Assert.True(!RequestGuard.IsBlock(404, null, "application/json"));
 });
 
-TestRunner.Add("Request budget: a sixth of the hourly budget saved up at most, refilled steadily", () =>
+static PollerSettings Effective(PollerOptions? poller = null, LimitOptions? limits = null) =>
+    new(Microsoft.Extensions.Options.Options.Create(poller ?? new PollerOptions()), Microsoft.Extensions.Options.Options.Create(limits ?? new LimitOptions()));
+
+TestRunner.Add("Request budget: a sixth of the hourly budget saved up at most, refilled steadily; a budget changed in the panel applies at once", () =>
 {
     var time = new ManualTime(new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero));
-    var budget = new RequestBudget(Microsoft.Extensions.Options.Options.Create(new PollerOptions { RequestsPerHour = 120 }), time);
+    var settings = Effective(new PollerOptions { RequestsPerHour = 120 });
+    var budget = new RequestBudget(settings, time);
     Assert.Equal(20, budget.Available);
     Assert.True(budget.TryTake(20));
     Assert.True(!budget.TryTake());
@@ -222,6 +227,86 @@ TestRunner.Add("Request budget: a sixth of the hourly budget saved up at most, r
     Assert.Equal(1, budget.Available);
     time.Advance(TimeSpan.FromHours(5));
     Assert.Equal(20, budget.Available);
+
+    settings.Apply(new PollerSettingsRow { RequestsPerHour = 300 });
+    Assert.Equal(50, budget.Capacity);
+    time.Advance(TimeSpan.FromHours(1));
+    Assert.Equal(50, budget.Available);
+    settings.Apply(new PollerSettingsRow { RequestsPerHour = 30 }); // a smaller bucket drops what no longer fits
+    Assert.Equal((10, 10), (budget.Capacity, budget.Available));
+});
+
+TestRunner.Add("Poller settings in the panel: empty or the default = no override; ranges, numbers and pairs checked; the configuration may lie outside the ranges", () =>
+{
+    var config = new PollerOptions();
+    var limits = new LimitOptions();
+    static Dictionary<TuningKey, string?> Form(params (TuningKey Key, string? Value)[] values) => values.ToDictionary(v => v.Key, v => v.Value);
+
+    var parse = PollerTuning.Parse(config, limits, Form((TuningKey.RequestsPerHour, " 90 "), (TuningKey.MinIntervalMinutes, "10"), (TuningKey.RequestGapMinSeconds, "2,5"), (TuningKey.JitterPercent, "")), false);
+    Assert.True(parse.IsValid);
+    Assert.Equal((90, null, 2.5, null), (parse.Row.RequestsPerHour, parse.Row.MinIntervalMinutes, parse.Row.RequestGapMinSeconds, parse.Row.JitterPercent));
+    Assert.Equal(null, parse.Row.ReuseScreeningDetails);
+    var (poller, effectiveLimits) = PollerTuning.Apply(config, limits, parse.Row);
+    Assert.Equal((90, 10, 2.5, 6.0), (poller.RequestsPerHour, effectiveLimits.MinIntervalMinutes, poller.RequestGapMinSeconds, poller.RequestGapMaxSeconds));
+    Assert.Equal(120, config.RequestsPerHour); // the configuration itself is never changed
+
+    // Every problem at once: outside the range, not a (whole) number.
+    parse = PollerTuning.Parse(config, limits, Form((TuningKey.MinIntervalMinutes, "4"), (TuningKey.RequestsPerHour, "301"), (TuningKey.ManualFreshMinutes, "1.5"), (TuningKey.JitterPercent, "abc")), false);
+    Assert.SequenceEqual(
+        [(TuningKey.MinIntervalMinutes, SettingProblemKind.OutOfRange), (TuningKey.RequestsPerHour, SettingProblemKind.OutOfRange),
+         (TuningKey.ManualFreshMinutes, SettingProblemKind.NotANumber), (TuningKey.JitterPercent, SettingProblemKind.NotANumber)],
+        parse.Problems.Select(p => (p.Key, p.Kind)));
+
+    // Pairs: the upper value must not be below the lower one, an empty field counting as the configuration's value.
+    parse = PollerTuning.Parse(config, limits, Form((TuningKey.RequestGapMinSeconds, "10"), (TuningKey.RequestGapMaxSeconds, "8"), (TuningKey.FirstBlockPauseMinutes, "720"), (TuningKey.MaxBlockPauseMinutes, "60")), false);
+    Assert.SequenceEqual([(TuningKey.RequestGapMaxSeconds, SettingProblemKind.BelowMinimum), (TuningKey.MaxBlockPauseMinutes, SettingProblemKind.BelowMinimum)],
+        parse.Problems.Select(p => (p.Key, p.Kind)));
+    Assert.True(!PollerTuning.Parse(config, limits, Form((TuningKey.RequestGapMinSeconds, "7")), false).IsValid); // above the configured "to" (6)
+
+    // Development pauses only 2 minutes after a block: the panel shows it and keeps it, but cannot set such a value.
+    var development = new PollerOptions { FirstBlockPauseMinutes = 2, MaxBlockPauseMinutes = 10 };
+    parse = PollerTuning.Parse(development, limits, Form((TuningKey.FirstBlockPauseMinutes, "2"), (TuningKey.MaxBlockPauseMinutes, "10")), false);
+    Assert.True(parse.IsValid && parse.Row.IsEmpty);
+    Assert.SequenceEqual([(TuningKey.FirstBlockPauseMinutes, SettingProblemKind.OutOfRange)],
+        PollerTuning.Parse(development, limits, Form((TuningKey.FirstBlockPauseMinutes, "3")), false).Problems.Select(p => (p.Key, p.Kind)));
+
+    // The switch: stored only when it differs from the configuration.
+    Assert.Equal(true, PollerTuning.Parse(config, limits, Form(), true).Row.ReuseScreeningDetails);
+    Assert.True(PollerTuning.Parse(config, limits, Form(), false).Row.IsEmpty);
+
+    // Stored values outside today's range are ignored; a pair the wrong way round falls back to the configuration.
+    (poller, effectiveLimits) = PollerTuning.Apply(config, limits, new PollerSettingsRow { RequestsPerHour = 5000, MinIntervalMinutes = 15 });
+    Assert.Equal((120, 15), (poller.RequestsPerHour, effectiveLimits.MinIntervalMinutes));
+    (poller, _) = PollerTuning.Apply(config, limits, new PollerSettingsRow { RequestGapMinSeconds = 50 });
+    Assert.Equal(3.0, poller.RequestGapMinSeconds);
+
+    var settings = Effective();
+    Assert.SequenceEqual([new SettingChange("MinIntervalMinutes", "10", "15"), new SettingChange("RequestsPerHour", "120", "90")],
+        settings.ChangesTo(new PollerSettingsRow { RequestsPerHour = 90, MinIntervalMinutes = 15 }));
+    Assert.Equal("MinIntervalMinutes 10 → 15; RequestsPerHour 120 → 90",
+        PollerTuning.Describe(settings.ChangesTo(new PollerSettingsRow { RequestsPerHour = 90, MinIntervalMinutes = 15 })));
+    settings.Apply(new PollerSettingsRow { MinIntervalMinutes = 15 });
+    Assert.Equal((15, 15, 20), (settings.Limits.MinIntervalMinutes, settings.Limits.EffectiveInterval(10), settings.Limits.EffectiveInterval(20)));
+    Assert.True(settings.IsOverridden(PollerTuning.Get(TuningKey.MinIntervalMinutes)) && !settings.IsOverridden(PollerTuning.Get(TuningKey.RequestsPerHour)));
+    Assert.Equal(10.0, settings.DefaultOf(PollerTuning.Get(TuningKey.MinIntervalMinutes)));
+});
+
+TestRunner.Add("Mail errors kept for the operator lose the addresses they quote", () =>
+{
+    Assert.Equal("5.1.1 <[e-mail]>: Recipient address rejected", CinemaWatch.Server.Mail.MailErrors.WithoutAddresses("5.1.1 <anna.nowak+kino@example.com>: Recipient address rejected"));
+    Assert.Equal("Mailbox [e-mail] full; [e-mail] unknown", CinemaWatch.Server.Mail.MailErrors.WithoutAddresses("Mailbox anna@example.com full; ben@example.org unknown"));
+    Assert.Equal("Connection refused (localhost:2525)", CinemaWatch.Server.Mail.MailErrors.WithoutAddresses("Connection refused (localhost:2525)"));
+});
+
+TestRunner.Add("Heartbeat settings: empty = off; only an https address without a user name or password; interval 1-60 minutes", () =>
+{
+    Assert.True(new HeartbeatOptions().IsValid() && !new HeartbeatOptions().IsEnabled && new HeartbeatOptions().Target is null);
+    Assert.True(new HeartbeatOptions { Url = " https://hc-ping.com/0f3c " }.IsValid());
+    Assert.Equal("hc-ping.com", new HeartbeatOptions { Url = "https://hc-ping.com/0f3c" }.Target!.Host);
+    Assert.True(!new HeartbeatOptions { Url = "http://hc-ping.com/0f3c" }.IsValid());
+    Assert.True(!new HeartbeatOptions { Url = "https://user:secret@hc-ping.com/0f3c" }.IsValid());
+    Assert.True(!new HeartbeatOptions { Url = "hc-ping.com/0f3c" }.IsValid());
+    Assert.True(!new HeartbeatOptions { IntervalMinutes = 0 }.IsValid() && !new HeartbeatOptions { IntervalMinutes = 61 }.IsValid());
 });
 
 TestRunner.Add("Fake Cinema City: free seats from a file, sold out without it; block.txt (403 challenge, 429 + Retry-After) and error500 files", async () =>
@@ -420,8 +505,9 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
     TestRunner.Add("Database: the migration creates the snake_case tables", async () =>
     {
         Assert.SequenceEqual(
-            ["__EFMigrationsHistory", "check_log", "data_protection_keys", "notification_state", "notifications", "poller_state", "profiles",
-             "seat_plans", "service_events", "user_claims", "user_logins", "user_tokens", "users", "watched_screenings"],
+            ["__EFMigrationsHistory", "check_log", "component_status", "data_protection_keys", "notification_state", "notifications",
+             "poller_settings", "poller_state", "profiles", "seat_plans", "service_events", "user_claims", "user_logins", "user_tokens",
+             "users", "watched_screenings"],
             await database.TablesAsync());
     });
 
@@ -789,7 +875,8 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
 
     TimeSpan afterInterval = TimeSpan.FromMinutes(12) + TimeSpan.FromSeconds(1); // interval 10 min + at most 20%
 
-    // A clean poller for every test: no profiles, no state; two hours later, so the request budget is full again.
+    // A clean poller for every test: no profiles, no state, the configuration's settings, no pause; two hours later,
+    // so the request budget is full again and the heartbeat may ping.
     async Task ResetPollerAsync()
     {
         app.Time.Advance(TimeSpan.FromHours(2));
@@ -805,8 +892,13 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
             await db.CheckLog.ExecuteDeleteAsync();
             await db.ServiceEvents.ExecuteDeleteAsync();
             await db.SeatPlans.ExecuteDeleteAsync();
+            await db.PollerSettings.ExecuteDeleteAsync();
+            await db.ComponentStatus.ExecuteDeleteAsync();
             return 0;
         });
+        app.Services.GetRequiredService<PollerSettings>().Apply(null);
+        app.HeartbeatClient.Status = 200;
+        app.HeartbeatClient.Throw = null;
     }
 
     static WatchProfile PollProfile(string name, IReadOnlyList<string> ids, int minAdjacent = 1)
@@ -1271,6 +1363,226 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         Assert.Equal(0, events);
         Assert.SequenceEqual(["2000081"], watched);
     });
+    // -----------------------------------------------------------------------------------------------------------
+    // Operator's panel (owner only): status, statistics, events, the pause, the settings; the heartbeat.
+    // -----------------------------------------------------------------------------------------------------------
+
+    async Task<OperatorOverview> OverviewAsync() =>
+        await WithService(async services => await services.GetRequiredService<OperatorService>().GetOverviewAsync());
+
+    TestRunner.Add("Operator's panel: only for the owner (page and forms); checklist, requests hour by hour and per status, the mail server's last success and error", async () =>
+    {
+        await ResetPollerAsync();
+        var member = await SignedInAsync("panel-member@example.test", AppLanguage.Polish);
+        var owner = await SignInAsync(TestApp.OwnerEmail);
+
+        // Nobody else gets in, signed in or not; the forms refuse them too.
+        Assert.True(Location(await member.GetAsync("/admin")).StartsWith("/Account/AccessDenied"));
+        Assert.True(Location(await app.CreateBrowser().GetAsync("/admin")).StartsWith("/Account/Login"));
+        var memberPage = await member.PageAsync("/");
+        Assert.True(!memberPage.Contains("<a href=\"admin\">Operator</a>"));
+        foreach (var path in new[] { "/admin/pause", "/admin/resume", "/admin/settings/defaults" })
+            Assert.True(Location(await member.PostFormAsync(path, memberPage, null, [])).StartsWith("/Account/AccessDenied"), path);
+        Assert.Equal(0, (await EventsAsync(ServiceEventKind.PausedByOperator)).Count);
+
+        // Before anything happened.
+        var page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("<a href=\"admin\">Operator</a>") && page.Contains("Panel operatora"));
+        Assert.True(page.Contains("Jeszcze nie było cyklu.") && page.Contains("W dzienniku zapytań (30 dni) nie ma jeszcze żadnego zapytania."));
+        Assert.True(page.Contains("Źródło: atrapa Cinema City") && page.Contains("Brak zdarzeń w ostatnich 90 dniach."));
+        Assert.True(page.Contains("PostgreSQL ") && page.Contains("_AddOperator.") && page.Contains("check_log"));
+        Assert.True(page.Contains("Jeszcze nie było pingu"));
+
+        // Checks: a freed seat (an e-mail goes out), then Cinema City answers HTTP 500.
+        await ImportAsync(await UserIdAsync("panel-member@example.test"), PollProfile("Panel", ["2000091", "2000092"]));
+        app.Fake("free-2000091.txt", "1_18_4");
+        await FirstChecksAsync();
+        app.Fake("error500.txt", "");
+        app.Time.Advance(afterInterval);
+        await CycleAsync();
+
+        var stats = await WithService(async services => await services.GetRequiredService<OperatorService>().GetRequestStatsAsync());
+        Assert.Equal((24, 7, 7, 2, 0), (stats.Hours.Count, stats.Total24Hours, stats.Hours.Sum(h => h.Requests), stats.Hours.Sum(h => h.Failed), stats.Blocked24Hours));
+        Assert.Equal((5, 2), (stats.Statuses.Single(s => s.Status == 200).Last24Hours, stats.Statuses.Single(s => s.Status == 500).Last7Days));
+        Assert.True(stats.Recent.Count == 7 && stats.Recent[0].Status == 500);
+
+        page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Ostatni cykl: ") && page.Contains("Pilnowane seanse: 2"));
+        Assert.True(page.Contains("Ostatnie zapytanie: ") && page.Contains("HTTP 500 (presentation)") && page.Contains("Ostatnia udana odpowiedź: "));
+        Assert.True(page.Contains("Ostatnia godzina: 7 z budżetu 120 na godzinę") && page.Contains("Żadnej blokady w ostatnich 90 dniach."));
+        Assert.True(page.Contains("Ostatni wysłany: ") && page.Contains("Serwer pocztowy: localhost:2525."));
+        var overview = await OverviewAsync();
+        Assert.Equal((HealthLevel.Ok, HealthLevel.Warning, HealthLevel.Ok, HealthLevel.Ok, HealthLevel.Warning),
+            (overview.Poller.Level, overview.CinemaCity.Level, overview.Mail.Level, overview.Database.Level, overview.Heartbeat.Level));
+        Assert.Equal((7, 120), (overview.Budget.LastHour, overview.Budget.PerHour));
+        Assert.Equal(7L, overview.Database.Tables.Single(t => t.Name == "check_log").Rows); // counted, not estimated
+
+        // An e-mail that fails (here an invitation) shows until the next one goes out.
+        app.Mail.FailNext = true;
+        await WithService(async services => (await services.GetRequiredService<AccountService>().InviteAsync("panel-new@example.test", AppLanguage.Polish)).Outcome);
+        page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Ostatni błąd: ") && page.Contains("The mail server is not reachable (test)."));
+        Assert.Equal(HealthLevel.Problem, (await OverviewAsync()).Mail.Level);
+        await WithService(async services => (await services.GetRequiredService<AccountService>().InviteAsync("panel-new@example.test", AppLanguage.Polish)).Outcome);
+        Assert.Equal(HealthLevel.Ok, (await OverviewAsync()).Mail.Level);
+    });
+
+    TestRunner.Add("Operator's pause: from the next cycle nothing is sent, \"Check now\" is refused and dropped, users see a notice; resume; events", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("panel-pause@example.test", AppLanguage.Polish);
+        var profile = await ImportAsync(await UserIdAsync("panel-pause@example.test"), PollProfile("Pauza", ["2000101"]));
+        await FirstChecksAsync();
+        var owner = await SignInAsync(TestApp.OwnerEmail);
+
+        var panel = await owner.PageAsync("/admin");
+        Assert.True(panel.Contains("Wstrzymaj sprawdzanie"));
+        Assert.Equal("/admin", Location(await owner.PostFormAsync("/admin/pause", panel, null, [])));
+        panel = await owner.PageAsync("/admin");
+        Assert.True(panel.Contains("Sprawdzanie wstrzymane. Od następnego cyklu") && panel.Contains("Wstrzymany przez Ciebie od") && panel.Contains("Wznów sprawdzanie"));
+        Assert.True(panel.Contains("Checks paused by the operator")); // the event list
+        await owner.PostFormAsync("/admin/pause", panel, null, []);
+        Assert.True((await owner.PageAsync("/admin")).Contains("Sprawdzanie jest już wstrzymane."));
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.PausedByOperator)).Count);
+        Assert.True((await PollerStateAsync()).PausedByOperatorAt is not null);
+
+        // Users: a notice and a greyed-out button; the page does not reload itself (the pause has no end).
+        var page = await browser.PageAsync($"/?profile={profile}");
+        Assert.True(page.Contains("Sprawdzanie miejsc jest wstrzymane przez właściciela serwisu."));
+        Assert.True(page.Contains("disabled title=\"Sprawdzanie wstrzymane przez właściciela serwisu\"") && !page.Contains("http-equiv=\"refresh\""));
+        await browser.PostFormAsync($"/profiles/{profile}/check", page, null, []);
+        Assert.True((await browser.PageAsync($"/?profile={profile}")).Contains("Sprawdzanie jest wstrzymane przez właściciela serwisu."));
+
+        // A "Check now" that slipped in before the pause is dropped; the due screening is not checked.
+        await WithService(async services =>
+        {
+            var db = services.GetRequiredService<AppDbContext>();
+            (await db.WatchedScreenings.SingleAsync(r => r.Id == "2000101")).ManualRequestedAt = app.Time.GetUtcNow();
+            return await db.SaveChangesAsync();
+        });
+        app.Time.Advance(afterInterval);
+        var mark = app.Network.Requests.Count;
+        Assert.Equal(CycleResult.Paused, (await CycleAsync()).Result);
+        Assert.Equal(mark, app.Network.Requests.Count);
+        Assert.Equal(null, (await RowAsync("2000101")).ManualRequestedAt);
+        Assert.Equal(HealthLevel.Warning, (await OverviewAsync()).Poller.Level);
+
+        // Resumed: the next cycle checks again, the notice is gone.
+        Assert.Equal("/admin", Location(await owner.PostFormAsync("/admin/resume", panel, null, [])));
+        Assert.True((await owner.PageAsync("/admin")).Contains("Sprawdzanie wznowione."));
+        Assert.Equal(null, (await PollerStateAsync()).PausedByOperatorAt);
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.ResumedByOperator)).Count);
+        Assert.Equal(1, (await CycleAsync()).Checked);
+        Assert.True(!(await browser.PageAsync("/")).Contains("wstrzymane przez właściciela"));
+        await owner.PostFormAsync("/admin/resume", panel, null, []);
+        Assert.True((await owner.PageAsync("/admin")).Contains("Sprawdzanie nie było wstrzymane."));
+    });
+
+    TestRunner.Add("Poller settings in the panel: saved within the ranges and used from the next cycle; errors keep what was typed; restore the configuration; events", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("panel-settings@example.test", AppLanguage.Polish);
+        var owner = await SignInAsync(TestApp.OwnerEmail);
+        var settings = app.Services.GetRequiredService<PollerSettings>();
+
+        // The form as the browser sends it: every field with the value in force, except the changed ones.
+        Dictionary<string, string> Form(params (TuningKey Key, string Value)[] changes)
+        {
+            var fields = PollerTuning.Numbers.ToDictionary(n => $"Input.{n.Key}", n => n.Format(settings.ValueOf(n)));
+            foreach (var (key, value) in changes)
+                fields[$"Input.{key}"] = value;
+            return fields;
+        }
+
+        var page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Ustawienia pollera") && page.Contains("name=\"Input.MinIntervalMinutes\"") && page.Contains("Zakres 5–60 min."));
+        Assert.True(!page.Contains("Przywróć wszystkie wartości z konfiguracji"));
+
+        var response = await owner.PostFormAsync("/admin", page, "settings", Form((TuningKey.MinIntervalMinutes, "15"), (TuningKey.RequestsPerHour, "60")));
+        Assert.Equal("/admin", Location(response));
+        page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Zapisano: najkrótszy odstęp (min) 10 → 15, budżet (na godzinę) 120 → 60. Działa od następnego cyklu."));
+        Assert.True(page.Contains("Zmienione tutaj; w konfiguracji: 10.") && page.Contains("Przywróć wszystkie wartości z konfiguracji"));
+        var stored = await WithService(async services => await services.GetRequiredService<AppDbContext>().PollerSettings.AsNoTracking().SingleAsync());
+        Assert.Equal((15, 60, null, null), (stored.MinIntervalMinutes, stored.RequestsPerHour, stored.JitterPercent, stored.ReuseScreeningDetails));
+        Assert.True((await EventsAsync(ServiceEventKind.SettingsChanged)).Single().Message.EndsWith("MinIntervalMinutes 10 → 15; RequestsPerHour 120 → 60"));
+        Assert.Equal(10, app.Services.GetRequiredService<RequestBudget>().Capacity);
+
+        // The next cycle uses them: a profile asking for 10 minutes is checked every 15-18 minutes, and the page says so.
+        var profile = await ImportAsync(await UserIdAsync("panel-settings@example.test"), PollProfile("Ustawienia", ["2000111"]));
+        await FirstChecksAsync();
+        var row = await RowAsync("2000111");
+        var now = app.Time.GetUtcNow();
+        Assert.True(row.IntervalMinutes == 15 && row.NextCheckAt >= now + TimeSpan.FromMinutes(15) && row.NextCheckAt <= now + TimeSpan.FromMinutes(18), row.NextCheckAt.ToString("O"));
+        Assert.True((await browser.PageAsync($"/?profile={profile}")).Contains("Sprawdzanie co 15 min (profil prosi o 10 min, serwer sprawdza najczęściej co 15)."));
+
+        // Errors: shown next to the fields, what was typed stays, nothing is saved.
+        response = await owner.PostFormAsync("/admin", page, "settings", Form((TuningKey.RequestsPerHour, "1000"), (TuningKey.MinIntervalMinutes, "abc")));
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var text = WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync());
+        Assert.True(text.Contains("Nie zapisano: popraw zaznaczone pola.") && text.Contains("Dozwolone od 10 do 300.") && text.Contains("Wpisz liczbę całkowitą."));
+        Assert.True(text.Contains("value=\"1000\"") && text.Contains("value=\"abc\""));
+        Assert.Equal((15, 60), (settings.Limits.MinIntervalMinutes, settings.Poller.RequestsPerHour));
+
+        // The same values again: nothing to save, no event. The switch alone is a change.
+        await owner.PostFormAsync("/admin", page, "settings", Form());
+        Assert.True((await owner.PageAsync("/admin")).Contains("Nic się nie zmieniło."));
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.SettingsChanged)).Count);
+        var withSwitch = Form();
+        withSwitch["Input.ReuseScreeningDetails"] = "true";
+        await owner.PostFormAsync("/admin", page, "settings", withSwitch);
+        Assert.True(settings.Poller.ReuseScreeningDetails && (await owner.PageAsync("/admin")).Contains("Zapisano: zapamiętane szczegóły seansu false → true."));
+
+        // Back to the configuration: the row is gone, the values are the configuration's again.
+        Assert.Equal("/admin", Location(await owner.PostFormAsync("/admin/settings/defaults", page, null, [])));
+        page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Przywrócono ustawienia z konfiguracji (zmiany: 3).") && !page.Contains("Przywróć wszystkie wartości z konfiguracji"));
+        Assert.Equal(0, await WithService(async services => await services.GetRequiredService<AppDbContext>().PollerSettings.CountAsync()));
+        Assert.Equal((10, 120, false), (settings.Limits.MinIntervalMinutes, settings.Poller.RequestsPerHour, settings.Poller.ReuseScreeningDetails));
+        Assert.Equal(3, (await EventsAsync(ServiceEventKind.SettingsChanged)).Count);
+    });
+
+    TestRunner.Add("Heartbeat: a ping after a finished cycle, at most every 5 minutes; a failure is recorded and stops nothing; the panel never shows the secret part of the address", async () =>
+    {
+        await ResetPollerAsync();
+        var heartbeat = app.Services.GetRequiredService<Heartbeat>();
+        var pings = app.HeartbeatClient.Pings.Count;
+        Assert.True(await heartbeat.AfterCycleAsync());
+        Assert.Equal(new Uri(TestApp.HeartbeatUrl), app.HeartbeatClient.Pings[^1]);
+        app.Time.Advance(TimeSpan.FromMinutes(4));
+        Assert.True(!await heartbeat.AfterCycleAsync());
+        app.Time.Advance(TimeSpan.FromMinutes(1));
+        Assert.True(await heartbeat.AfterCycleAsync());
+        Assert.Equal(pings + 2, app.HeartbeatClient.Pings.Count);
+        Assert.Equal(HealthLevel.Ok, (await OverviewAsync()).Heartbeat.Level);
+
+        var owner = await SignInAsync(TestApp.OwnerEmail);
+        var page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Ostatni ping: ") && page.Contains("Adres: hc-ping.example.test (reszta adresu jest tajna)."));
+        Assert.True(!page.Contains("secret-check-id"));
+
+        // The external service answers 500, then cannot be reached: recorded, one event an hour, nothing thrown.
+        app.HeartbeatClient.Status = 500;
+        app.Time.Advance(TimeSpan.FromMinutes(5));
+        Assert.True(await heartbeat.AfterCycleAsync());
+        Assert.Equal("HTTP 500", (await WithService(async services =>
+            await services.GetRequiredService<AppDbContext>().ComponentStatus.AsNoTracking().SingleAsync(s => s.Component == ComponentStatusRow.Heartbeat))).LastFailure);
+        app.HeartbeatClient.Throw = new HttpRequestException("No such host is known.");
+        app.Time.Advance(TimeSpan.FromMinutes(5));
+        Assert.True(await heartbeat.AfterCycleAsync());
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.HeartbeatFailed)).Count);
+        page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Ostatni błąd: ") && page.Contains("HttpRequestException: No such host is known.") && !page.Contains("secret-check-id"));
+        Assert.Equal(HealthLevel.Problem, (await OverviewAsync()).Heartbeat.Level);
+
+        // Reachable again: back to normal.
+        app.HeartbeatClient.Throw = null;
+        app.HeartbeatClient.Status = 200;
+        app.Time.Advance(TimeSpan.FromMinutes(5));
+        Assert.True(await heartbeat.AfterCycleAsync());
+        Assert.Equal(HealthLevel.Ok, (await OverviewAsync()).Heartbeat.Level);
+    });
+
     TestRunner.Add("Background loop: records its start, runs a cycle at once, wakes up early on \"Check now\", stops cleanly", async () =>
     {
         await ResetPollerAsync();
@@ -1287,6 +1599,7 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
             return null;
         }
 
+        var pings = app.HeartbeatClient.Pings.Count;
         var loop = ActivatorUtilities.CreateInstance<PollerHostedService>(app.Services);
         await loop.StartAsync(CancellationToken.None);
         try
@@ -1303,5 +1616,7 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         }
         Assert.Equal(1, (await EventsAsync(ServiceEventKind.PollerStarted)).Count);
         Assert.True(File.Exists(Path.Combine(app.FakeFolder, FakeCinemaCityHandler.ReadmeFile)));
+        // The finished cycle sent one heartbeat; the second cycle came too soon for another.
+        Assert.Equal(pings + 1, app.HeartbeatClient.Pings.Count);
     });
 }

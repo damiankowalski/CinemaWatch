@@ -33,6 +33,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
 
     public DbSet<ServiceEvent> ServiceEvents { get; set; } = null!;
 
+    public DbSet<PollerSettingsRow> PollerSettings { get; set; } = null!;
+
+    public DbSet<ComponentStatusRow> ComponentStatus { get; set; } = null!;
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -111,6 +115,21 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
             serviceEvent.Property(e => e.Kind).HasConversion<string>().HasMaxLength(32);
             serviceEvent.Property(e => e.Message).HasMaxLength(1000);
             serviceEvent.HasIndex(e => e.At);
+        });
+
+        // Operator's panel (docs/SAAS.md §4.2).
+        builder.Entity<PollerSettingsRow>(settings =>
+        {
+            settings.ToTable("poller_settings");
+            settings.Property(s => s.Id).ValueGeneratedNever();
+            settings.Ignore(s => s.IsEmpty);
+        });
+        builder.Entity<ComponentStatusRow>(status =>
+        {
+            status.ToTable("component_status");
+            status.HasKey(s => s.Component);
+            status.Property(s => s.Component).HasMaxLength(32);
+            status.Property(s => s.LastFailure).HasMaxLength(500);
         });
         builder.Entity<IdentityUserClaim<string>>().ToTable("user_claims");
         builder.Entity<IdentityUserLogin<string>>().ToTable("user_logins");

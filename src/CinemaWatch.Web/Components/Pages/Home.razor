@@ -19,7 +19,14 @@
     <HeadContent><meta http-equiv="refresh" content="@($"{seconds}; url={RefreshUrl}")" /></HeadContent>
 }
 
-@if (poller.PausedUntil is { } pausedUntil)
+@if (poller.PausedByOperator)
+{
+    <p class="status error" role="alert">
+        @T("Sprawdzanie miejsc jest wstrzymane przez właściciela serwisu. Powiadomienia wrócą, gdy je wznowi.",
+           "Seat checks are paused by the site's owner. Notifications come back when the checks resume.")
+    </p>
+}
+else if (poller.PausedUntil is { } pausedUntil)
 {
     <p class="status error" role="alert">
         @T($"Sprawdzanie miejsc jest wstrzymane do {PollerTime.ClockText(pausedUntil)}: Cinema City odrzuciło zapytania serwera. Wznowi się samo; właściciel serwisu dostał e-mail.",
@@ -175,7 +182,11 @@ else
                         @if (active && status is not null)
                         {
                             @* Unavailable (greyed out) while checks are paused or while this profile's check runs. *@
-                            @if (poller.PausedUntil is { } paused)
+                            @if (poller.PausedByOperator)
+                            {
+                                <button type="button" class="button" disabled title="@T("Sprawdzanie wstrzymane przez właściciela serwisu", "Checks paused by the site's owner")">@T("Sprawdź teraz", "Check now")</button>
+                            }
+                            else if (poller.PausedUntil is { } paused)
                             {
                                 <button type="button" class="button" disabled title="@T($"Sprawdzanie wstrzymane do {PollerTime.ClockText(paused)}", $"Checks paused until {PollerTime.ClockText(paused)}")">@T("Sprawdź teraz", "Check now")</button>
                             }
@@ -354,8 +365,9 @@ else
 
     /// <summary>
     /// Seconds until the page reloads itself: every 3 s while a "Check now" runs (the results fill in screening by
-    /// screening, the button comes back when it is done); during a pause, when the pause ends; after it, every 10 s
-    /// until the first request has got through. Never after an import with errors (its result would disappear).
+    /// screening, the button comes back when it is done); during a block's pause, when the pause ends; after it, every
+    /// 10 s until the first request has got through. The owner's pause has no end time: no reload for it. Never after an
+    /// import with errors (its result would disappear).
     /// </summary>
     private int? RefreshSeconds
     {
@@ -364,7 +376,7 @@ else
             if (results is not null)
                 return null;
             var now = Now;
-            if (poller.PausedUntil is { } until)
+            if (!poller.PausedByOperator && poller.PausedUntil is { } until)
                 return (int)Math.Ceiling((until - now).TotalSeconds) + 5;
             if (poller.Resuming)
                 return 10;

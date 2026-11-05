@@ -21,13 +21,18 @@ public sealed class LimitOptions
     /// <summary>Watched screenings in one profile: every one costs requests at every check.</summary>
     public int MaxScreeningsPerProfile { get; set; } = 20;
 
-    /// <summary>Checks never run more often than this, whatever interval the profile asks for.</summary>
+    /// <summary>
+    /// Checks never run more often than this, whatever interval the profile asks for. The operator's panel can change
+    /// it within <see cref="Polling.PollerTuning"/>'s range; the effective value comes from <see cref="Polling.PollerSettings"/>.
+    /// </summary>
     public int MinIntervalMinutes { get; set; } = 10;
 
     public bool IsValid() =>
         MaxProfiles is >= 1 and <= ProfileLimitCeiling
         && MaxScreeningsPerProfile >= 1
         && MinIntervalMinutes >= MinIntervalFloor;
+
+    public LimitOptions Copy() => (LimitOptions)MemberwiseClone();
 
     /// <summary>The interval the server actually uses for a profile.</summary>
     public int EffectiveInterval(int profileInterval) => Math.Max(profileInterval, MinIntervalMinutes);
