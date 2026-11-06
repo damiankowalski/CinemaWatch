@@ -4,9 +4,10 @@
 > Order of trust when something disagrees: **repository code** > **this document** > chat history.
 > Keep it current: update *Status*, *Version history* and *Decision log* with every release or decision.
 >
-> Last updated: 5 November 2026 (desktop 1.4.0; SaaS stage 4 in progress: MVP 0 complete on the PC, risk test R1
-> closed green, the container image and its CI test in increment 4.1 (SaaS 0.5.0); next: accounts, Ansible, first
-> deployment to staging - plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
+> Last updated: 6 November 2026 (desktop 1.4.0; SaaS stage 4 in progress: risk test R1 closed green, container image
+> `web-v0.5.0-beta.1` on GHCR, e-mail through Resend, Cloudflare tunnel and Access, Healthchecks.io; next: Ansible and
+> the first deployment to staging - plan in [`docs/SAAS.md`](SAAS.md), infrastructure in
+> [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
 
 ---
 
@@ -24,7 +25,7 @@ It only **reads** public seat information. It never logs in, never creates a car
 | Original PowerShell script | Done, kept in `scripts/CinemaWatch.ps1` | E-mail notifications via Gmail SMTP; the origin of the project |
 | **Desktop (Windows)** | **1.4.0 stable** - feature-complete for now | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
 | Android | Planned - concept agreed, nothing built | "Proxy" that checks profiles exported by the desktop app |
-| SaaS (web) | Stage 4 in progress - MVP 0 complete on the PC (accounts by invitation, profile import, poller with e-mails, operator's panel, heartbeat); risk test R1 closed green on 5 Nov 2026; SaaS 0.5.0: container image (`src/CinemaWatch.Web/Dockerfile`), `infra/compose/`, container test in CI, images to GHCR on `web-v*` tags. Next: accounts (e-mail, Cloudflare Zero Trust, Healthchecks.io), Ansible, first deployment to staging | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
+| SaaS (web) | Stage 4 in progress - MVP 0 complete on the PC (accounts by invitation, profile import, poller with e-mails, operator's panel, heartbeat); risk test R1 closed green on 5 Nov 2026; SaaS 0.5.0: container image (`src/CinemaWatch.Web/Dockerfile`), `infra/compose/`, container test in CI, images to GHCR on `web-v*` tags; accounts ready: e-mail through Resend, Cloudflare tunnel and Access, Healthchecks.io. Next: Ansible, first deployment to staging; then a first test and MVP 1 (wizard and hall map in the browser) | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
 
 ---
 

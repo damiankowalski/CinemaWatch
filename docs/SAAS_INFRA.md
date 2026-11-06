@@ -10,8 +10,10 @@
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 5 November 2026 - stage 4 started: risk test R1 closed green with the probe data of 2-5 Nov 2026
-> (§3); `CinemaWatch.Probe` keeps running until the reinstall of stage 4 (4.3). No server changes yet in stage 4.
+> Last updated: 6 November 2026 - stage 4: R1 closed green (5 Nov); 4.1 done (container image `web-v0.5.0-beta.1` on
+> GHCR, public); 4.2 done: e-mail through Resend from `mail.damiankowalski.pl` (§1.5), Cloudflare Zero Trust with the
+> tunnel and two Access applications (§1.6), Healthchecks.io (§1.7). No server changes yet in stage 4;
+> `CinemaWatch.Probe` keeps running until the reinstall (4.3).
 
 ---
 
@@ -27,12 +29,15 @@
 | Declined at order | Hosting plan, OVHcloud DNSSEC option, Zimbra Starter mailbox |
 | Nameservers | `faye.ns.cloudflare.com`, `tosana.ns.cloudflare.com` (Cloudflare); previously `dns103.ovh.net`, `ns103.ovh.net` |
 | DNS provider | Cloudflare, Free plan; zone active since 31 Oct 2026 |
-| DNS records | One: `TXT damiankowalski.pl "v=spf1 -all"` (the domain sends no e-mail) |
+| DNS records | Six (6 Nov 2026): apex `TXT "v=spf1 -all"` (the apex sends no e-mail); `TXT _dmarc "v=DMARC1; p=reject;"`; e-mail through Resend for `mail.` - `TXT resend._domainkey.mail` (DKIM), `CNAME rsend.mail` and `CNAME send.mail` (both DNS only); `CNAME staging-cinemawatch` to the tunnel (Proxied). Details §1.5, §1.6 |
 | DNSSEC | On since 31 Oct 2026: Cloudflare signs the zone; DS at the registry with key tag 2371, algorithm 13, digest type 2 |
 | Cloudflare zone extras | AI crawler policy at defaults (allow); Bot Preference Sync on (robots.txt) - irrelevant until a site exists |
 | Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026, hardened (§1.3); runs `CinemaWatch.Probe` (§1.4) |
-| Website / e-mail | None yet (both stage 4) |
-| Costs | Domain 16.69 PLN net (20.53 PLN gross) for the first year, then 58.99 PLN net (72.56 PLN gross) per year; Cloudflare Free 0; VPS about 19.20 PLN net (23.62 PLN gross) per month (cart price on 1 Nov 2026 - confirm on the first invoice) |
+| Website | `staging-cinemawatch.damiankowalski.pl`: tunnel and Access ready (§1.6), the app comes in 4.4 (until then Cloudflare answers 530 behind the Access login) |
+| E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
+| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `sha-75f16cb` (6 Nov 2026) |
+| Heartbeat monitor | Healthchecks.io, check `cinemawatch-staging` (§1.7) |
+| Costs | Domain 16.69 PLN net (20.53 PLN gross) for the first year, then 58.99 PLN net (72.56 PLN gross) per year; Cloudflare Free 0; VPS about 19.20 PLN net (23.62 PLN gross) per month (cart price on 1 Nov 2026 - confirm on the first invoice); Cloudflare Zero Trust Free 0 (a payment card on file is required); Resend Free 0; Healthchecks.io Hobbyist 0 |
 
 ### 1.1 Accounts
 
@@ -40,10 +45,11 @@
 | --- | --- | --- | --- |
 | GitHub | Repository, CI; later container images (GHCR) | Password | Yes |
 | Google | Sign-in to Cloudflare | Password | Yes |
-| Cloudflare | DNS, DNSSEC; later Tunnel and Access | "Sign in with Google" only, no Cloudflare password | No own 2FA - accepted risk (§1.2) |
+| Cloudflare | DNS, DNSSEC; Zero Trust (tunnel, Access) since 6 Nov 2026, plan Zero Trust Free with a payment card on file | "Sign in with Google" only, no Cloudflare password | No own 2FA - accepted risk (§1.2) |
 | OVHcloud | Registrar; VPS and its KVM console (since 1 Nov 2026) | Password | Yes |
 | Server user `ubuntu` | Administering the VPS | SSH key only (§1.3); its password works only on the KVM console | The key file plus its passphrase |
-| E-mail provider | Transactional e-mail | - | Stage 4 |
+| Resend | E-mail provider (SMTP) since 6 Nov 2026 | Password | Yes (TOTP; recovery code in the password manager) |
+| Healthchecks.io | Heartbeat monitor ("dead man's switch") since 6 Nov 2026 | Password | Yes |
 
 Passwords and recovery codes are in the owner's password manager. The accounts use the owner's existing e-mail
 address, not an address on the new domain: losing the domain must not lock the owner out of the accounts that manage it.
@@ -63,6 +69,11 @@ address, not an address on the new domain: losing the domain must not lock the o
   encrypted key file is backed up in the password manager.
 - **SSH port 22 open to the internet.** Key-only login, so bots have nothing to guess; rate limiting or fail2ban is
   in the backlog ([`SAAS.md`](SAAS.md) §11).
+- **Resend keeps account data in the US.** The EU region (Ireland) only decides where e-mails leave from; recipients'
+  addresses, logs and metadata are stored in the US. The privacy notice names Resend and the transfer
+  ([`SAAS.md`](SAAS.md) §9). Moving to an EU provider is configuration only (SMTP).
+- **A payment card on file at Cloudflare.** Zero Trust Free requires one; nothing is charged unless a paid plan or
+  add-on is switched on deliberately. Check *Billing* if an invoice e-mail ever arrives.
 
 ### 1.3 Server (VPS)
 
@@ -101,6 +112,40 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Known issue | Column `bytes` stays empty for compressed responses (.NET does not report the size after decompression); irrelevant for R1, fixed only if the probe is used again |
 | Result | R1 green on 5 Nov 2026 (§3, stage 4 step 1) |
 | Ends | Runs until the reinstall in stage 4, increment 4.3 ([`SAAS.md`](SAAS.md) §7); stop and remove with §4.19 |
+
+### 1.5 E-mail (Resend)
+
+| Item | Value |
+| --- | --- |
+| Provider / plan | Resend, Free (3,000 e-mails a month, at most 100 a day, one domain); SMTP `smtp.resend.com`, port 587, STARTTLS, user `resend`, password = an API key |
+| Sending domain | `mail.damiankowalski.pl` (only for mail; the tunnel's names cannot carry other records), region Ireland (`eu-west-1`), status Verified (6 Nov 2026) |
+| Sender | `CinemaWatch <cinemawatch@mail.damiankowalski.pl>`; replies go nowhere (no mailbox) |
+| DKIM | `TXT resend._domainkey.mail.damiankowalski.pl` = `p=MIGfMA0GCSqG…pBywIDAQAB` (public key; full value in Resend and Cloudflare) |
+| Return path (SPF) | `CNAME send.mail` → `send.forge.rmta.net` and `CNAME rsend.mail` → `rsend-euw1.forge.rmta.net`, both DNS only (a proxied record would break them) |
+| DMARC | `TXT _dmarc.damiankowalski.pl` = `v=DMARC1; p=reject;` since 6 Nov 2026 (first `p=none` until the test passed); applies to the apex and every subdomain; no reports (no mailbox to receive them) |
+| Apex SPF | `v=spf1 -all` unchanged: the apex sends nothing; Resend's e-mails use `send.mail…` as their return path |
+| Test (6 Nov 2026) | One e-mail over SMTP from the PC with a temporary key: inbox (not spam) in Gmail; SPF pass (IP 54.240.3.11), DKIM pass with `mail.damiankowalski.pl`, DMARC pass. The test key was deleted |
+| API keys | None now. The server gets its own key in 4.4: sending access, domain `mail.damiankowalski.pl` only, straight into `.env` (`MAIL_PASSWORD`) |
+
+### 1.6 Cloudflare Zero Trust: tunnel and Access
+
+| Item | Value |
+| --- | --- |
+| Organization | Team domain `damiankowalski.cloudflareaccess.com` (public: the login page testers see); plan Zero Trust Free, $0, 50 seats (one per person who signs in through Access) |
+| Login methods | Cloudflare (default, added with the organization) and One-time PIN (code by e-mail from `noreply@notify.cloudflare.com`, valid 10 minutes); both applications accept the PIN only, with Instant Auth |
+| Tunnel | `staging-cinemawatch`, remotely managed (configured in the dashboard); status Inactive until `cloudflared` runs on the server (4.4). Its token is a secret: shown in the tunnel's page in the dashboard, copied in 4.4 straight into `.env` (`TUNNEL_TOKEN`) |
+| Route (published application) | `staging-cinemawatch.damiankowalski.pl` → `http://web:8080` (the app container in the compose network); DNS: `CNAME staging-cinemawatch` → `<tunnel id>.cfargotunnel.com`, Proxied |
+| Access application 1 | `CinemaWatch staging`: the whole host; policy `Owner and testers` (Allow, Include: e-mails - the owner today); session 1 week |
+| Access application 2 | `CinemaWatch staging admin`: path `admin` (covers `/admin` and everything below it); policy `Owner only`; session 24 hours. The more specific application wins and inherits nothing, so testers never pass `/admin` |
+| Checked (6 Nov 2026) | Before Access: HTTP 530 from Cloudflare (`-WAW`, tunnel without a connector); with Access: HTTP 302 to the team domain's login page (§4.21) |
+
+### 1.7 Healthchecks.io (heartbeat)
+
+| Item | Value |
+| --- | --- |
+| Plan | Hobbyist, $0 (20 checks) |
+| Check | `cinemawatch-staging`: simple schedule, period 5 minutes, grace 10 minutes (an alert after about 15 minutes without a ping; the nightly reboot at 03:30 UTC takes 1-2 minutes); e-mail to the owner. Status "new" until the first ping: a new check never alerts |
+| Ping address | `https://hc-ping.com/…` - a secret (whoever has it can pretend the server is alive); copied in 4.4 straight into `.env` (`SAAS_HEARTBEAT_URL`); the app never logs it |
 
 ---
 
@@ -202,6 +247,25 @@ cinemawatch-probe.timer (every 10-12 min, also after a reboot)
   into that folder: `sudo cat /var/lib/cinemawatch-probe/requests-*.csv` fails with "No such file". Use the full
   name or let a root shell expand it: `sudo sh -c 'cat /var/lib/cinemawatch-probe/requests-*.csv'`.
 - **Nothing opened.** The probe only connects out; `ufw`, SSH and the users are unchanged.
+
+### 2.4 The way in to the app (from stage 4)
+
+```
+Browser --HTTPS--> Cloudflare (WAW)
+                     |-- Access: is the visitor signed in? if not -> login page of damiankowalski.cloudflareaccess.com
+                     |           (e-mail -> one-time PIN); /admin: owner only, the rest: owner and testers
+                     '-- tunnel staging-cinemawatch <--outbound connection-- cloudflared (container on the VPS)
+                                                                               '-> http://web:8080 (app container)
+                                                                                   '-> its own sign-in (accounts by invitation)
+```
+
+- **Two gates.** Access decides who may see anything at all (e-mail + PIN); the app's own sign-in decides which
+  account it is. A tester must be on the Access list before the app's invitation link can be opened (§4.22).
+- **No open web ports.** `cloudflared` connects out to Cloudflare; the VPS's address appears nowhere (the DNS answer is
+  Cloudflare's own addresses). `ufw` keeps SSH as the only way in.
+- **HTTPS ends at Cloudflare.** The tunnel carries the request to `http://web:8080`; the app trusts the tunnel's
+  `X-Forwarded-Proto` (`Saas:TrustForwardedHeaders`), so it knows the visitor used HTTPS.
+- **E-mail goes out separately**: the app → Resend over SMTP (port 587, outbound) → recipients; nothing comes back in.
 
 ---
 
@@ -316,6 +380,30 @@ cinemawatch-probe.timer (every 10-12 min, also after a reboot)
 4. **Result: green**, decided on 3.1 days instead of the planned 5 ([`SAAS.md`](SAAS.md) §9): no sign of a block, 5xx far
    under 1% and also seen from home. Limit as before: about 1,600 requests a day is a desktop user's load, not the SaaS
    load. The probe keeps running until the reinstall (4.3).
+
+### Stage 4 - container image and accounts (4.1, 4.2; 6 Nov 2026)
+
+1. **4.1 merged** (#8, `main` `ee72c6e`): CI green including the new `container` job (image built, started from
+   `infra/compose/compose.yaml` with PostgreSQL, checked). Tag `web-v0.5.0-beta.1` published the image to GHCR as
+   `0.5.0-beta.1` and `sha-75f16cb`; the package was made public once (package settings → visibility).
+2. **E-mail provider: Resend** ([`SAAS.md`](SAAS.md) §9): account with a password from the password manager (no
+   social login) and TOTP; domain `mail.damiankowalski.pl` added in region Ireland. Resend's page lists the DNS
+   records read-only - they are copied into Cloudflare (*Add record*), not typed in Resend. "Auto configure" was not
+   used: it would give Resend access to the whole zone.
+3. **Mail DNS** in Cloudflare: DKIM TXT, two CNAMEs set to *DNS only* (Cloudflare proposes *Proxied* for CNAMEs),
+   DMARC `p=none` on the apex; checked with §4.20; Resend: Verified.
+4. **Delivery test** from the PC with a temporary sending key (`Send-MailMessage`, the key typed into a credential
+   prompt, never saved): Gmail inbox, SPF / DKIM / DMARC pass; key deleted. Then DMARC tightened to `p=reject`.
+5. **Zero Trust organization** `damiankowalski` on plan Free; Cloudflare requires a payment card even for the free plan.
+6. **Tunnel and route.** First attempt: the route's subdomain got the tunnel's name (`cinemawatch-staging…`), so
+   `staging-cinemawatch…` answered NXDOMAIN. Route deleted and added again with the right name. Lessons: a name that
+   was just looked up as "does not exist" stays cached as such (by 1.1.1.1, Windows and Chrome) for up to the SOA's
+   30 minutes - ask the zone's own server (`-Server faye.ns.cloudflare.com`) or bypass DNS with
+   `curl.exe --resolve` (§4.21). Result: HTTP 530 from Cloudflare (tunnel known, no connector yet).
+7. **One-time PIN** added as a login method; **two Access applications** (whole host; path `admin`); checked: HTTP 302
+   to the Access login page (§4.21).
+8. **Healthchecks.io**: account with 2FA, check `cinemawatch-staging` (5 / 10 minutes), e-mail alerts; the ping
+   address stays unused until 4.4.
 
 ---
 
@@ -680,19 +768,65 @@ sudo rm -rf /opt/cinemawatch-probe /etc/cinemawatch-probe /var/lib/private/cinem
 
 ---
 
+### 4.20 Check the e-mail DNS records
+
+Windows (PowerShell):
+
+```powershell
+Resolve-DnsName -Name resend._domainkey.mail.damiankowalski.pl -Type TXT -Server 1.1.1.1
+Resolve-DnsName -Name rsend.mail.damiankowalski.pl -Type CNAME -Server 1.1.1.1
+Resolve-DnsName -Name send.mail.damiankowalski.pl -Type CNAME -Server 1.1.1.1
+Resolve-DnsName -Name _dmarc.damiankowalski.pl -Type TXT -Server 1.1.1.1
+Resolve-DnsName -Name damiankowalski.pl -Type TXT -Server 1.1.1.1
+```
+
+Expected: the DKIM `TXT` starting `p=MIGfMA0GCSqG`; two `CNAME` rows ending in `.forge.rmta.net` (not `A` rows with
+Cloudflare addresses - that would mean *Proxied*); `v=DMARC1; p=reject;`; the apex `v=spf1 -all`. Resend's domain page
+shows every record as Verified. Delivery itself is checked with the app's test e-mail (account page): in Gmail
+*Show original* → SPF, DKIM (`mail.damiankowalski.pl`) and DMARC all PASS.
+
+### 4.21 Check the tunnel and Access from outside
+
+Windows (PowerShell). `--resolve` sends the request to a Cloudflare address directly, so a stale DNS cache on the PC
+does not matter (use an address from `Resolve-DnsName staging-cinemawatch.damiankowalski.pl -Server 1.1.1.1`):
+
+```powershell
+curl.exe -sI https://staging-cinemawatch.damiankowalski.pl --resolve staging-cinemawatch.damiankowalski.pl:443:188.114.96.11
+foreach ($p in '/', '/admin') {
+  $loc = curl.exe -sI "https://staging-cinemawatch.damiankowalski.pl$p" --resolve staging-cinemawatch.damiankowalski.pl:443:188.114.96.11 | Select-String '^Location:'
+  if ("$loc" -match 'kid=([0-9a-f]{12})') { "$p -> app $($Matches[1])" } else { "$p -> no Access redirect" }
+}
+```
+
+Expected: `HTTP/1.1 302` with `Location: https://damiankowalski.cloudflareaccess.com/cdn-cgi/access/login/…`; two
+different application ids for `/` and `/admin` (the same id means the admin application lost its path). Anything
+other than 302 without a sign-in means Access does not protect the host: stop and check *Access controls →
+Applications*. After signing in (browser): until 4.4 Cloudflare's error 1033 (HTTP 530: tunnel without a connector),
+afterwards the app's sign-in page.
+
+### 4.22 Add a tester
+
+Order matters: Access first, then the app.
+
+1. Cloudflare → Zero Trust → *Access controls → Applications* → `CinemaWatch staging` → policy `Owner and testers` →
+   add the tester's e-mail to *Include → Emails* → save. Never to `CinemaWatch staging admin`.
+2. The app → `/admin` → users → invite the same address (the invitation e-mail goes through Resend).
+3. The tester opens the link: Access asks for their e-mail and sends a PIN, then the app's set-password page opens.
+4. Remove a tester in the reverse order: delete the account in the app, then the e-mail from the policy.
+
+---
+
 ## 5. Next infrastructure steps
 
 Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- 4.2, panels only (no server work): an e-mail provider account with 2FA and its DNS records (SPF, DKIM, DMARC) for a
-  subdomain used only for mail; Cloudflare Zero Trust (team, tunnel with its token, Access for staging and for
-  `/admin*` by one-time PIN); a Healthchecks.io account with 2FA, one check per environment (period 5 min, grace
-  10 min), its ping address only as a secret on the server (`SAAS_HEARTBEAT_URL` in `.env`).
 - 4.3: the Ansible playbook run on the server itself (stage 2 hardening as code, swap, Docker from Docker's repository
   with automatic security updates, `/opt/cinemawatch`), verified by a reinstall; before it, stop and remove the probe
   (§4.19).
 - 4.4: the first deployment from `infra/compose/compose.yaml` with `.env` on the server (template
-  `infra/compose/env.example`); 4.5 backups; 4.6 optional deployment from GitHub Actions.
+  `infra/compose/env.example`): the Resend key, the tunnel token and the ping address go straight into `.env`; tests
+  per [`SAAS.md`](SAAS.md) §7 (invitation by real e-mail, test e-mail, "Check now" from the server, heartbeat alert by
+  stopping the container); stable tag `web-v0.5.0`. Then 4.5 backups; 4.6 optional deployment from GitHub Actions.
 
 Each step will be added to §1 and §3 of this file.
 
@@ -765,6 +899,10 @@ Each step will be added to §1 and §3 of this file.
 | SPF | TXT record listing the servers allowed to send e-mail for the domain; `v=spf1 -all` means none |
 | DKIM | Signature in every e-mail; the public key is published in DNS |
 | DMARC | Policy telling receivers what to do with e-mails that fail SPF / DKIM, plus reports to the owner |
+| DMARC policy (`p=`) | `none`: only observe; `quarantine`: to spam; `reject`: refuse. Applies to e-mails claiming the domain or a subdomain that fail both aligned SPF and aligned DKIM |
+| Alignment | DMARC passes only if the domain that passed SPF or DKIM belongs to the same organizational domain as the visible From address |
+| Return path (envelope sender, bounce address) | The address bounces go to; SPF is checked on its domain, not on the From address |
+| Transactional e-mail | E-mail sent by an application to one person because of something they did (invitation, password reset, notification), not a newsletter |
 
 ### Certificates
 
@@ -792,6 +930,16 @@ Each step will be added to §1 and §3 of this file.
 | Cloudflare Free plan | Free DNS, DNSSEC, proxy, TLS certificates and basic protection |
 | AI crawler policy / Bot Preference Sync | Zone settings that tell AI and search bots what they may do on the owner's site, written into robots.txt |
 | robots.txt | File that tells crawlers what they may visit; a convention, not enforcement |
+| Zero Trust (Cloudflare One) | Cloudflare's products for access control (Access) and private connectivity (Tunnel); organized as one organization per account |
+| Team domain | `<team>.cloudflareaccess.com`: where Access login pages live |
+| Cloudflare Tunnel, `cloudflared` | An outbound connection from a server to Cloudflare that carries the visitors' requests in; `cloudflared` is the program (here a container) that keeps it open. A tunnel token lets anyone run it |
+| Published application (route) | A tunnel rule: public host name → local service (`http://web:8080`); creates the proxied DNS record |
+| Cloudflare Access application | A host name (and optional path) whose visitors must sign in first; policies (Allow + e-mails) decide who passes; the most specific path wins |
+| One-time PIN | Access login method: a code e-mailed to an allowed address, valid 10 minutes |
+| Seat | One person who signed in through Access; the free plan has 50 |
+| Error 1033 / HTTP 530 | Cloudflare's answer when a tunnel has no running connector |
+| Negative caching | Resolvers also remember "no such name" (NXDOMAIN), for up to the SOA's TTL - a name added right after a failed lookup can stay "missing" for a while |
+| Heartbeat ("dead man's switch") | A regular ping from the app to an outside service, which alerts when the pings stop - the only way to learn that the server or the app is down |
 
 ### Servers and Linux
 

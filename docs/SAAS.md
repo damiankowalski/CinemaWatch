@@ -9,12 +9,11 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 5 November 2026. Status: **stage 4 in progress** (deploy to the VPS, staging). Stage 3 done: MVP 0
-> complete on the development PC (SaaS 0.4.0). Risk test R1 closed **green** on 5 Nov 2026 with 3.1 days of probe data
-> (4,997 requests, no block, no challenge; §7 stage 4, §9). Increment 4.1 (`saas-container`, SaaS 0.5.0): the app
-> runs behind the tunnel (forwarded headers, Secure cookies, migrations at start-up, platform check, `/healthz`), the
-> container image, `infra/compose/compose.yaml` and a container test in CI. Next: 4.2 (accounts: e-mail provider,
-> Cloudflare Zero Trust, Healthchecks.io), then 4.3 (Ansible + reinstall), 4.4 (first deployment).
+> Last updated: 6 November 2026. Status: **stage 4 in progress** (deploy to the VPS, staging). Stage 3 done: MVP 0
+> complete on the development PC. Risk test R1 closed **green** on 5 Nov 2026 (§7 stage 4, §9). 4.1 done (SaaS 0.5.0:
+> the app behind the tunnel, container image `web-v0.5.0-beta.1` on GHCR, container test in CI). 4.2 done: e-mail
+> through Resend from `mail.damiankowalski.pl` (DMARC `p=reject`), Cloudflare Zero Trust with the tunnel and Access
+> for staging and `/admin`, Healthchecks.io. Next: 4.3 (Ansible + reinstall), 4.4 (first deployment).
 
 ---
 
@@ -40,7 +39,7 @@
 | --- | --- | --- |
 | R1 | Cloudflare in front of Cinema City blocks or challenges requests from datacenter IPs (KB §10) | Tested first (stage 2): green on 5 Nov 2026 - 4,997 requests from the VPS in 3.1 days, no block or challenge (§7 stage 4). The poller's request log (`check_log`, operator's panel) keeps measuring. Fallback: pollers on residential IPs (§11) |
 | R2 | Terms of use: a public (and possibly paid) service built on an unofficial API is a different category than a personal tool | Terms read in Oct 2026: personal and learning use within the guardrails; no public launch or payments without written consent from Cinema City (§9) |
-| R3 | Personal data (GDPR): e-mail addresses, notification history | EU hosting, privacy notice, account deletion, store only what the service needs |
+| R3 | Personal data (GDPR): e-mail addresses, notification history | EU hosting, privacy notice, account deletion, store only what the service needs. Exception: the e-mail provider Resend keeps account data (recipients, logs) in the US; the privacy notice names it (§9) |
 | R4 | The request budget grows with users | De-duplicate screenings, adaptive intervals, global rate limiter, limits per account (§4.3, §5) |
 | R5 | Real payments mean being a seller (VAT, consumer law, invoices) | Payments only in test mode; a Merchant of Record if it ever becomes real (§4.5) |
 
@@ -102,9 +101,9 @@ Stripe (later): Checkout, Billing, webhooks                       --> web app
 | Poller | Checks watched screenings (KB §5.4) | Yes (in the worker) | Separate service, several instances |
 | Notifier | Sends e-mails about newly free seats | Yes (in the worker) | Separate service behind a queue |
 | Operator's panel | Status of the components, request statistics, events, pause switch, poller settings (owner only) | Yes (`/admin`) | Alerts beyond e-mail |
-| Heartbeat monitor (external) | E-mails the owner when the server stops reporting ("dead man's switch") | Code yes; service in stage 4 | - |
+| Heartbeat monitor (external) | E-mails the owner when the server stops reporting ("dead man's switch") | Yes: Healthchecks.io (account and check since 4.2) | - |
 | Queue | Poller → notifier events | No | RabbitMQ (learning) |
-| E-mail provider | Transactional e-mail with SPF / DKIM / DMARC | Yes | - |
+| E-mail provider | Transactional e-mail with SPF / DKIM / DMARC | Yes: Resend over SMTP, from `mail.damiankowalski.pl` (4.2) | - |
 | Stripe | Payments | No | Test mode first |
 
 ### 4.2 Data model (sketch)
@@ -203,7 +202,8 @@ safety net against application bugs.
   origin stays unknown, so nobody can bypass Cloudflare.
 - **Edge:** Cloudflare Free plan in front. The server runs `cloudflared` (Cloudflare Tunnel): it opens an outbound
   connection to Cloudflare, so no web ports are opened on the server (only SSH) and no TLS certificates are needed
-  on the server. Cloudflare Access protects staging. The host firewall (`ufw`) lets in SSH only. Containers publish no
+  on the server. Cloudflare Access protects staging (team domain `damiankowalski.cloudflareaccess.com`, one-time PIN by
+  e-mail; the whole host for the owner and testers, `/admin` for the owner only). The host firewall (`ufw`) lets in SSH only. Containers publish no
   ports: ports published by Docker bypass `ufw`.
 - **Domain:** `damiankowalski.pl` - one "umbrella" domain for all future products, subdomains per product and
   environment (e.g. `cinemawatch.damiankowalski.pl`, `staging-cinemawatch.damiankowalski.pl`; first-level names, so
@@ -303,7 +303,8 @@ In scope:
 - Limits in configuration (`Saas:Limits`): 5 profiles per account (enabled, disabled and ended alike; the owner can
   set another limit per account, 1-50), 20 screenings per profile, minimum interval 10 minutes; a global request
   budget (`Saas:Poller`, 120 an hour).
-- Privacy notice page (draft until stage 4 names the e-mail provider); UI in Polish and English like the desktop app.
+- Privacy notice page (draft until it names the e-mail provider - Resend, data in the US - before 4.4); UI in Polish
+  and English like the desktop app.
 - Operator's panel at `/admin` (owner only): status of the components as a checklist (poller, Cinema City, e-mail,
   database, heartbeat), events, requests per hour, answers per HTTP status, the latest requests, poller settings and a
   pause switch; a heartbeat for an external "dead man's switch".
@@ -440,16 +441,20 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       Cloudflare Warsaw; median 66-118 ms, 25 answers over 2 s (longest 13.4 s). Control group at home: one HTTP 500
       too (3 Nov), so 5xx are Cinema City's, not a block. Result: **green**. The probe keeps running until the
       reinstall in 4.3 (then removed, `SAAS_INFRA.md` §4.19); the poller's `check_log` keeps measuring after it.
-- [ ] 4.1 `saas-container` (SaaS 0.5.0): `Saas:TrustForwardedHeaders` (forwarded headers from the tunnel), Secure
+- [x] 4.1 `saas-container` (SaaS 0.5.0; merged 6 Nov 2026, #8): `Saas:TrustForwardedHeaders` (forwarded headers from the tunnel), Secure
       sign-in cookies for an https `Saas:BaseUrl`, `Saas:MigrateDatabaseOnStart`, a start-up check for tzdata and ICU,
       `GET /healthz`; `src/CinemaWatch.Web/Dockerfile`, `infra/compose/` (compose file, `.env` template, container
-      test); CI job `container`; `web-image.yml` (GHCR on `web-v*`). A beta tag tests the publishing; the package is
-      made public once.
-- [ ] 4.2 Accounts and DNS (panels only, side by side with 4.1): e-mail provider with 2FA (Brevo or Resend, §10),
-      sending from a subdomain used only for mail, SPF / DKIM / DMARC records in Cloudflare (the apex keeps
-      `v=spf1 -all`); Cloudflare Zero Trust (team, tunnel and its token, Access for staging and for `/admin*` with a
-      one-time PIN by e-mail; may ask for a card even on the free plan - stop and decide); Healthchecks.io with 2FA,
-      one check per environment (period 5 min, grace 10 min; the nightly reboot at 03:30 UTC stays below it).
+      test); CI job `container`; `web-image.yml` (GHCR on `web-v*`). Done: CI green, `web-v0.5.0-beta.1` published as
+      `0.5.0-beta.1` and `sha-75f16cb`, package public.
+- [x] 4.2 Accounts and DNS (6 Nov 2026; `SAAS_INFRA.md` §1.5-1.7): Resend (TOTP) with the domain
+      `mail.damiankowalski.pl` in region Ireland; DKIM TXT and two return-path CNAMEs (DNS only) in Cloudflare; test
+      e-mail from the PC: Gmail inbox, SPF / DKIM / DMARC pass; DMARC on the apex tightened from `p=none` to `p=reject`;
+      the apex keeps `v=spf1 -all`. Cloudflare Zero Trust Free (a card on file), team `damiankowalski`; tunnel
+      `staging-cinemawatch` with the route `staging-cinemawatch.damiankowalski.pl` → `http://web:8080` (Inactive until
+      4.4); one-time PIN; Access applications for the whole host (owner and testers, 1 week) and for the path `admin`
+      (owner only, 24 h); checked from outside (530 before Access, 302 to the login after). Healthchecks.io (2FA),
+      check `cinemawatch-staging`, period 5 min, grace 10 min. No secret copied anywhere yet: the Resend key, the tunnel
+      token and the ping address go straight into `.env` in 4.4.
 - [ ] 4.3 `infra/ansible/` + reinstall: playbook run on the server itself (`ansible-playbook` with a local
       connection, repository cloned there): the stage 2 hardening, swap file (2 GB), Docker from Docker's repository
       in `unattended-upgrades`, `/opt/cinemawatch`; verified by reinstalling the VPS from scratch. The real inventory
@@ -457,7 +462,7 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
 - [ ] 4.4 First deployment (staging): `.env` on the server (root only), `docker compose up`, the owner's invitation
       by real e-mail, test e-mail (inbox or spam), profile import, one "Check now" from the server's IP, heartbeat
       tested by stopping the container (the alert arrives), `docker stats`; the deployment script (`pg_dump` → pull a
-      named version → `up -d` → `/healthz`).
+      named version → `up -d` → `/healthz`). Before it: the privacy notice names Resend; stable tag `web-v0.5.0`.
 - [ ] 4.5 Backups: daily `pg_dump` off the server (destination chosen then); restore tested once.
 - [ ] 4.6 (optional) Deployment from GitHub Actions: a `deploy` user whose key may only run the deployment script
       (`command=` in `authorized_keys`), not membership of the `docker` group (that equals root).
@@ -465,7 +470,8 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
 ### Stage 5 - First SaaS test
 - [ ] 3-5 invited people (possibly only the owner, §9), free, behind Cloudflare Access, 2 weeks. Watch requests
       per hour, 403/429, notification latency, spam placement, errors.
-- [ ] Write the lessons into §9 and decide on MVP 1.
+- [ ] Write the lessons into §9 and plan MVP 1 (§5.2): creating profiles on the site - wizard and hall map with seat
+      selection like the desktop app - is the next product step (confirmed Nov 2026), not an option.
 
 ### Stage 6 - MVP 1 (§5.2)
 
@@ -510,8 +516,10 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 
 ### 8.3 Other services
 
-- E-mail provider (chosen in stage 4): Resend, Brevo, Postmark, Amazon SES or Cloudflare Email Sending (beta, Workers
-  Paid plan). Check free plans and .NET support when choosing.
+- E-mail provider: **Resend** (chosen 6 Nov 2026, §9). Compared: Brevo (EU data, 300 e-mails a day, but its logo in every
+  e-mail on the free plan and a manual review before transactional sending); Scaleway TEM noted as an EU fallback (free
+  300 e-mails a month); Postmark, Amazon SES and Cloudflare Email Sending dropped earlier.
+- Heartbeat monitor: Healthchecks.io (Hobbyist, free, 20 checks; 4.2).
 - Registrar: OVHcloud (chosen in stage 1, §9). Cloudflare Registrar does not sell `.pl`.
 
 ---
@@ -621,6 +629,17 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | E-mail from a subdomain used only for mail; the apex keeps `v=spf1 -all`; shortlist Brevo and Resend | A name with the tunnel's CNAME (`cinemawatch.…`) cannot carry other records; mail reputation stays apart from other products |
 | Nov 2026 | Cloudflare Access login by one-time PIN e-mailed to the owner or tester (supersedes "owner's Google account" for `/admin*`) | No OAuth client in Google Cloud to maintain; the Gmail inbox has 2FA anyway; Google as identity provider can be added later |
 | Nov 2026 | Stage 4 runs staging only; the poller is on in exactly one environment on this server's IP | A second poller would double the traffic to Cinema City from the same address |
+| Nov 2026 | E-mail provider: Resend (free plan: 3,000 a month, 100 a day, one domain; SMTP; region Ireland) | No logo in the e-mails and no manual review before sending (Brevo's free plan has both); a sending-only key limited to one domain is the narrowest secret on the server; 100 a day covers MVP 0. Cost: Resend keeps account data (recipients, logs) in the US whatever the region - an exception to R3, named in the privacy notice; switching provider is configuration only |
+| Nov 2026 | Sender `CinemaWatch <cinemawatch@mail.damiankowalski.pl>`; the subdomain `mail.` serves all future products (the free plan has one domain); no mailbox, nothing received | One verified domain on the free plan; replies are not part of the product |
+| Nov 2026 | DMARC on the apex: `p=none` until a real e-mail passed SPF, DKIM and DMARC, then `p=reject` (6 Nov 2026); no reports (no mailbox) | The apex and every subdomain cannot be spoofed; our mail passes aligned DKIM with `mail.damiankowalski.pl` |
+| Nov 2026 | DNS records for providers are typed in Cloudflare by hand, never by a provider's "auto configure" | Auto configure would give the provider access to the whole zone, which carries everything else |
+| Nov 2026 | Cloudflare Zero Trust Free with a payment card on file (required even for the free plan); team `damiankowalski` | The tunnel and Access live only in Zero Trust; nothing is charged without a paid plan or add-on; the team name serves future products too |
+| Nov 2026 | One tunnel per environment (`staging-cinemawatch`), remotely managed in the dashboard; its route `staging-cinemawatch.damiankowalski.pl` → `http://web:8080` | A leaked token exposes one environment only; no configuration file on the server |
+| Nov 2026 | Access: two applications - the whole host (owner and testers, session 1 week) and the path `admin` (owner only, 24 h); login by one-time PIN only, with Instant Auth | The more specific path wins and inherits nothing, so testers never reach `/admin`; a weekly PIN is enough because the app has its own sign-in |
+| Nov 2026 | A tester is added to the Access policy before the app invites them (`SAAS_INFRA.md` §4.22) | Otherwise the invitation link stops at Access |
+| Nov 2026 | Healthchecks.io check per environment: period 5 min, grace 10 min, e-mail to the owner | The app pings at most every 5 minutes; the nightly reboot (1-2 min) stays below the grace |
+| Nov 2026 | Secrets from provider panels (Resend key, tunnel token, ping address) are copied only once, straight into `.env` on the server; never into the chat, the PC or a file in the repository; a temporary test key is deleted right after the test | Each one can be shown again or replaced in its panel; fewer copies, fewer leaks |
+| Nov 2026 | MVP 1 (wizard and hall map with seat selection in the browser, profiles created on the site) confirmed as the next product step after the first SaaS test (stage 6) | The owner wants the site to create profiles, not only import them from the desktop app |
 
 ---
 
@@ -630,9 +649,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | --- | --- |
 | Check interval | MVP 0: the profile's interval with a server minimum of 10 minutes (decided Nov 2026); the adaptive rules (§4.3) tuned with the stage 4 data |
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
-| Heartbeat service | Recommended: Healthchecks.io (free Hobbyist plan: 20 checks, no card; open source); the code is ready (§4.3), the account and checks come in 4.2 |
 | Backup destination | Chosen in 4.5: OVHcloud Object Storage, Backblaze B2 or a copy pulled to the PC; the dumps are megabytes |
-| E-mail provider | Shortlist Brevo (EU company) and Resend (EU region): compare the current free plan, SMTP and sending from a subdomain at the start of 4.2; SES, Cloudflare Email Sending and Postmark dropped (AWS account and sandbox, paid Workers plan, very small free limit) |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
 | Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
 
