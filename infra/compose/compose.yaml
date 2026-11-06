@@ -1,0 +1,83 @@
+# CinemaWatch on the server (docs/SAAS.md §4.4): the web app with the poller, PostgreSQL and the Cloudflare Tunnel.
+#
+# No container publishes a port. The only way in is the tunnel: cloudflared connects out to Cloudflare and forwards the
+# requests for the public host name to http://web:8080 (set in the Cloudflare dashboard). Ports published by Docker
+# would bypass ufw, so there are none.
+#
+# Settings and secrets come from the file .env next to this file (template: env.example; never in git). Docker Compose
+# reads it by itself and puts each value only into the container that names it below.
+#
+# CI starts postgres and web from this same file with a throwaway .env (infra/compose/smoke-test.sh).
+
+name: cinemawatch
+
+# Container logs: at most 3 files of 10 MB per container (Docker keeps them forever by default).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    # Major version pinned (data on disk belong to it); minor updates come with "docker compose pull".
+    image: postgres:18-trixie
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cinemawatch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: cinemawatch
+    volumes:
+      # PostgreSQL 18 images keep the data under /var/lib/postgresql/18/docker.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cinemawatch -d cinemawatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    logging: *logging
+
+  web:
+    # The version deployed is always named (CINEMAWATCH_VERSION in .env, e.g. 0.5.0) - never "latest".
+    image: ${CINEMAWATCH_IMAGE:-ghcr.io/damiankowalski/cinemawatch-web}:${CINEMAWATCH_VERSION:?set CINEMAWATCH_VERSION in .env}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__CinemaWatch: "Host=postgres;Database=cinemawatch;Username=cinemawatch;Password=${POSTGRES_PASSWORD}"
+      Saas__BaseUrl: ${SAAS_BASE_URL:?set SAAS_BASE_URL in .env}
+      Saas__OwnerEmail: ${SAAS_OWNER_EMAIL:?set SAAS_OWNER_EMAIL in .env}
+      # Behind the tunnel: trust its X-Forwarded-Proto; apply database migrations at start-up (one instance).
+      Saas__TrustForwardedHeaders: "true"
+      Saas__MigrateDatabaseOnStart: "true"
+      # The poller runs in exactly one environment on this server's IP (docs/SAAS.md §9).
+      Saas__Poller__Enabled: ${SAAS_POLLER_ENABLED:-true}
+      Saas__Heartbeat__Url: ${SAAS_HEARTBEAT_URL:-}
+      Mail__Host: ${MAIL_HOST:?set MAIL_HOST in .env}
+      Mail__Port: ${MAIL_PORT:-587}
+      Mail__Security: ${MAIL_SECURITY:-StartTls}
+      Mail__UserName: ${MAIL_USERNAME:-}
+      Mail__Password: ${MAIL_PASSWORD:-}
+      Mail__FromAddress: ${MAIL_FROM_ADDRESS:?set MAIL_FROM_ADDRESS in .env}
+      Mail__FromName: ${MAIL_FROM_NAME:-CinemaWatch}
+    # The app writes nothing to its own disk (data and keys live in PostgreSQL); .NET only needs /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    logging: *logging
+
+  cloudflared:
+    # Pinned; update deliberately (a release at least two weeks old).
+    image: cloudflare/cloudflared:2026.10.3
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      # From the Cloudflare dashboard (Zero Trust > Networks > Tunnels); whoever has it can serve the host name.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    depends_on:
+      - web
+    logging: *logging
+
+volumes:
+  pgdata:

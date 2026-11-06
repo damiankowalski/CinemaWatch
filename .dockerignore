@@ -1,0 +1,18 @@
+# Build context of src/CinemaWatch.Web/Dockerfile (the repository root): only what the image build needs.
+**/bin/
+**/obj/
+**/*.user
+.git/
+.github/
+.vs/
+.vscode/
+artifacts/
+docs/
+infra/
+scripts/
+tests/
+tools/
+src/CinemaWatch.App/
+src/CinemaWatch.ViewModels/
+**/appsettings.Development.json
+**/*.cinemawatch.json

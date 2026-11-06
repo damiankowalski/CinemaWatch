@@ -1,7 +1,7 @@
 # CinemaWatch.Web - SaaS web app (MVP 0)
 
 Private web app for the owner and invited friends (plan: [`docs/SAAS.md`](../../docs/SAAS.md) §5.1). Today
-(increments 1-4, the whole MVP 0): accounts by invitation, sign-in, password reset, account page, data download,
+(stage 3, the whole MVP 0, plus the container image of stage 4): accounts by invitation, sign-in, password reset, account page, data download,
 account deletion, Polish/English UI, privacy page (draft); import of desktop profiles (`*.cinemawatch.json`), the
 profile list, a profile limit per account; background checks of the watched screenings, notification e-mails with the
 booking link, the notification history, "Check now" and a test e-mail; the operator's panel (status of the components,
@@ -14,7 +14,7 @@ request statistics, events, a pause switch, poller settings) and a heartbeat for
 | `tests/CinemaWatch.Saas.Tests` | Logic tests, database tests and the whole web flow (real app in memory, e-mails recorded) |
 
 How it works:
-- Every page needs a signed-in user, except sign-in, password help, set-password, privacy, errors.
+- Every page needs a signed-in user, except sign-in, password help, set-password, privacy, errors and `/healthz`.
 - Accounts exist only by invitation. At start-up the owner's account (`Saas:OwnerEmail`) is created and invited once;
   only the owner sees **Operator** and **Users** and can invite. The invited person sets a password through the e-mail link, which also
   confirms the address. Links work 24 hours and once. "Forgot your password?" sends a reset link to an active account
@@ -135,6 +135,15 @@ the PC: every stop of the app would otherwise raise an alarm). The service and i
 | `Saas:Heartbeat:Url` | empty (off); user secrets for a test | a secret; empty or https; start-up fails otherwise |
 | `Saas:Heartbeat:IntervalMinutes` | `appsettings.json`: `5` | 1-60; the external check's period should be at least this |
 | `Mail:Host`, `Mail:Port`, `Mail:Security`, `Mail:UserName`, `Mail:Password`, `Mail:FromAddress`, `Mail:FromName` | `appsettings.json`: `localhost`, `2525`, `None` (smtp4dev) | the provider is chosen in stage 4; its password only in secrets |
+| `Saas:TrustForwardedHeaders` | `false` | server: `true` - trust `X-Forwarded-Proto` / `X-Forwarded-For` from the tunnel (only where nothing else can reach the app) |
+| `Saas:MigrateDatabaseOnStart` | `false` (start refused with missing migrations) | server: `true` - missing migrations are applied at start-up |
+
+An https `Saas:BaseUrl` also makes the sign-in cookies Secure. The form (antiforgery) cookie follows the request: it is
+Secure behind the trusted tunnel, and a page never fails because a header is missing.
+
+At start-up the app checks that the system has the time-zone data (Europe/Warsaw) and ICU (Polish dates) and refuses
+to start without them. `GET /healthz` answers `ok` (200) when the database answers, `503` otherwise; it needs no
+sign-in and reveals nothing else.
 
 The minimum interval and the `Saas:Poller` values for the budget, the pauses, `ManualFreshMinutes`, `JitterPercent`
 and `ReuseScreeningDetails` are defaults: the operator's panel can change them within fixed ranges.
@@ -262,6 +271,22 @@ dotnet ef database update --project src\CinemaWatch.Server --startup-project src
 The test "the migrations match the code" fails when a model change has no migration. Undo a migration that is already
 applied: `dotnet ef database update <previous migration>` (its `Down` runs), then
 `dotnet ef migrations remove` (same `--project` / `--startup-project` arguments).
+
+## Container image (server)
+
+The server runs the app as a container ([`docs/SAAS.md`](../../docs/SAAS.md) §4.4):
+
+| File | Contents |
+| --- | --- |
+| `src/CinemaWatch.Web/Dockerfile` | Build on `sdk:10.0-resolute`, run on `aspnet:10.0-resolute-chiseled-extra` (Ubuntu 26.04: no shell, non-root user `app`, port 8080, ICU and tzdata); build context = the repository root (`.dockerignore`) |
+| `infra/compose/compose.yaml` | `postgres` (18), `web` (the image, read-only file system), `cloudflared` (the tunnel); no published ports; log size limits |
+| `infra/compose/env.example` | Template of the server's `.env` (secrets and settings; never in git) |
+| `infra/compose/smoke-test.sh` | Container test: starts `postgres` and `web` from `compose.yaml` with throwaway settings and checks the running app |
+
+CI (`.github/workflows/ci.yml`, job `container`) builds the image and runs the container test on every push - no
+Docker is needed on the PC. A tag `web-vX.Y.Z` (or `web-vX.Y.Z-beta.N`) runs `.github/workflows/web-image.yml`: the
+same build and test, then the image is published as `ghcr.io/damiankowalski/cinemawatch-web:X.Y.Z` (and
+`sha-<commit>`). The tag must match `<Version>` in `CinemaWatch.Web.csproj`. Desktop tags (`v*`) never match it.
 
 ### What lands outside the repository, and how to remove it
 

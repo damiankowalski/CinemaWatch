@@ -3,3 +3,7 @@
 # systemd units are read on Linux: a CR at a line end would become part of the value (e.g. a path in ExecStart).
 *.service text eol=lf
 *.timer text eol=lf
+# Read on Linux (containers, the server): shell scripts, the Dockerfile and the server's files need LF line ends.
+*.sh text eol=lf
+Dockerfile text eol=lf
+infra/** text eol=lf

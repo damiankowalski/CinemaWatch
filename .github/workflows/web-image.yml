@@ -1,0 +1,51 @@
+name: Web image
+
+# Push a tag like web-v0.5.0 (or web-v0.5.0-beta.1 from a feature branch) to build the SaaS container image, test it
+# like CI does, and publish it to GitHub Container Registry as ghcr.io/damiankowalski/cinemawatch-web:<version>
+# (plus sha-<commit>). The tag must match <Version> in src/CinemaWatch.Web/CinemaWatch.Web.csproj (a beta suffix is
+# allowed). Desktop tags (v*) do not match here, and this workflow creates no GitHub release.
+on:
+  push:
+    tags: ['web-v*']
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/damiankowalski/cinemawatch-web
+
+jobs:
+  image:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Version from the tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#web-v}"
+          project="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/CinemaWatch.Web/CinemaWatch.Web.csproj)"
+          if [ "${version%%-*}" != "$project" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the project version $project"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        run: docker build -f src/CinemaWatch.Web/Dockerfile --build-arg VERSION=${{ steps.version.outputs.version }} -t "$IMAGE:${{ steps.version.outputs.version }}" .
+
+      - name: Container test
+        run: bash infra/compose/smoke-test.sh "$IMAGE" "${{ steps.version.outputs.version }}"
+
+      - name: Publish to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag "$IMAGE:${{ steps.version.outputs.version }}" "$IMAGE:${{ steps.version.outputs.sha }}"
+          docker push "$IMAGE:${{ steps.version.outputs.version }}"
+          docker push "$IMAGE:${{ steps.version.outputs.sha }}"
+          docker logout ghcr.io
+          echo "Published $IMAGE:${{ steps.version.outputs.version }} and $IMAGE:${{ steps.version.outputs.sha }}" >> "$GITHUB_STEP_SUMMARY"

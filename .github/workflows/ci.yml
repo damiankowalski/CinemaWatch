@@ -68,3 +68,16 @@ jobs:
       - name: Publish probe (linux-x64, single file)
         shell: pwsh
         run: ./tools/CinemaWatch.Probe/publish.ps1
+
+  # SaaS: the container image, built and started from infra/compose/compose.yaml like on the server (web + PostgreSQL;
+  # no tunnel, no e-mail, no poller). Nothing is published here; tags web-v* publish (web-image.yml).
+  container:
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -f src/CinemaWatch.Web/Dockerfile --build-arg VERSION=ci -t cinemawatch-web:ci .
+
+      - name: Container test
+        run: bash infra/compose/smoke-test.sh cinemawatch-web ci
