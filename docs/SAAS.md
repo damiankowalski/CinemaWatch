@@ -10,10 +10,10 @@
 > `SAAS_INFRA.md` after every infrastructure change.
 >
 > Last updated: 6 November 2026. Status: **stage 4 in progress** (deploy to the VPS, staging). Stage 3 done: MVP 0
-> complete on the development PC. Risk test R1 closed **green** on 5 Nov 2026 (§7 stage 4, §9). 4.1 done (SaaS 0.5.0:
-> the app behind the tunnel, container image `web-v0.5.0-beta.1` on GHCR, container test in CI). 4.2 done: e-mail
-> through Resend from `mail.damiankowalski.pl` (DMARC `p=reject`), Cloudflare Zero Trust with the tunnel and Access
-> for staging and `/admin`, Healthchecks.io. Next: 4.3 (Ansible + reinstall), 4.4 (first deployment).
+> complete on the development PC. Risk test R1 closed **green** on 5 Nov 2026 (§7 stage 4, §9). 4.1 done (container
+> image on GHCR, container test in CI). 4.2 done: e-mail through Resend, Cloudflare tunnel and Access, Healthchecks.io.
+> 4.3 done (SaaS 0.5.1): the VPS reinstalled and configured by `infra/ansible` (hardening, swap, Docker), checked in CI;
+> the privacy notice names the services. Next: 4.4 (first deployment).
 
 ---
 
@@ -456,14 +456,15 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       (owner only, 24 h); checked from outside (530 before Access, 302 to the login after). Healthchecks.io (2FA),
       check `cinemawatch-staging`, period 5 min, grace 10 min. No secret copied anywhere yet: the Resend key, the tunnel
       token and the ping address go straight into `.env` in 4.4.
-- [ ] 4.3 `saas-ansible` (SaaS 0.5.1): `infra/ansible/site.yml` run on the server itself (`ansible-playbook` with a
+- [x] 4.3 `saas-ansible` (SaaS 0.5.1; 6 Nov 2026): `infra/ansible/site.yml` run on the server itself (`ansible-playbook` with a
       local connection, repository cloned there): the stage 2 hardening (SSH drop-in, `ufw`, automatic updates with
       the 03:30 reboot), swap file (2 GB, swappiness 10), Docker from Docker's repository (key fingerprint checked,
       origin in `unattended-upgrades`, `daemon.json` with log limits and `live-restore`), `/opt/cinemawatch`; refuses
       to switch passwords off without a key in `authorized_keys`; CI job `ansible` (syntax check, `ansible-lint
       --profile production`, Ubuntu 26.04 packages). The privacy notice names OVHcloud, Cloudflare (Access), Resend and
-      Healthchecks.io and is no longer a draft. Verified by reinstalling the VPS from scratch (`SAAS_INFRA.md` §4.13):
-      dry run, real run, SSH tests, second run `changed=0`.
+      Healthchecks.io and is no longer a draft. Verified by reinstalling the VPS from scratch (`SAAS_INFRA.md` §4.13,
+      §3): dry run `failed=0`, real run, reboot for the new kernel, second run `changed=0`, SSH tests, Docker 29.9.3 /
+      Compose v5.7.0, swap 2 GB, containers reach the internet. The probe went with the old system.
 - [ ] 4.4 First deployment (staging): `.env` on the server (root only), `docker compose up`, the owner's invitation
       by real e-mail, test e-mail (inbox or spam), profile import, one "Check now" from the server's IP, heartbeat
       tested by stopping the container (the alert arrives), `docker stats`; the deployment script (`pg_dump` → pull a

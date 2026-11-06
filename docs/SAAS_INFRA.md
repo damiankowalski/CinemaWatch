@@ -10,10 +10,10 @@
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 6 November 2026 - stage 4: R1 closed green (5 Nov); 4.1 done (container image `web-v0.5.0-beta.1` on
-> GHCR, public); 4.2 done: e-mail through Resend from `mail.damiankowalski.pl` (§1.5), Cloudflare Zero Trust with the
-> tunnel and two Access applications (§1.6), Healthchecks.io (§1.7). No server changes yet in stage 4;
-> `CinemaWatch.Probe` keeps running until the reinstall (4.3).
+> Last updated: 6 November 2026 - stage 4: R1 closed green (5 Nov); 4.1 done (container image on GHCR, public);
+> 4.2 done: e-mail through Resend from `mail.damiankowalski.pl` (§1.5), Cloudflare Zero Trust with the tunnel and two
+> Access applications (§1.6), Healthchecks.io (§1.7); 4.3 done: the VPS reinstalled and configured by
+> `infra/ansible` (§1.3, §4.13) - the probe is gone with the old system. Next: the first deployment (4.4).
 
 ---
 
@@ -32,7 +32,7 @@
 | DNS records | Six (6 Nov 2026): apex `TXT "v=spf1 -all"` (the apex sends no e-mail); `TXT _dmarc "v=DMARC1; p=reject;"`; e-mail through Resend for `mail.` - `TXT resend._domainkey.mail` (DKIM), `CNAME rsend.mail` and `CNAME send.mail` (both DNS only); `CNAME staging-cinemawatch` to the tunnel (Proxied). Details §1.5, §1.6 |
 | DNSSEC | On since 31 Oct 2026: Cloudflare signs the zone; DS at the registry with key tag 2371, algorithm 13, digest type 2 |
 | Cloudflare zone extras | AI crawler policy at defaults (allow); Bot Preference Sync on (robots.txt) - irrelevant until a site exists |
-| Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026, hardened (§1.3); runs `CinemaWatch.Probe` (§1.4) |
+| Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026; reinstalled on 6 Nov 2026 and configured by `infra/ansible` (§1.3): hardened, swap, Docker; no containers yet (4.4) |
 | Website | `staging-cinemawatch.damiankowalski.pl`: tunnel and Access ready (§1.6), the app comes in 4.4 (until then Cloudflare answers 530 behind the Access login) |
 | E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
 | Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `sha-75f16cb` (6 Nov 2026) |
@@ -79,23 +79,27 @@ address, not an address on the new domain: losing the domain must not lock the o
 
 | Item | Value |
 | --- | --- |
-| Provider / model | OVHcloud, range "VPS 2027", model VPS-1: 2 vCores, 4 GB RAM, 40 GB NVMe (38 GB usable); no swap yet |
+| Provider / model | OVHcloud, range "VPS 2027", model VPS-1: 2 vCores, 4 GB RAM, 40 GB NVMe (38 GB usable) |
 | Location | Warsaw (WAW), Poland; OpenStack region `os-waw2` |
 | Ordered / billing | 1 Nov 2026; monthly, no commitment |
-| Provider backup | Automated Backup Standard (daily, last 24 h), in the order as a promotion - check the invoice |
+| Provider backup | Automated Backup Standard (daily, last 24 h), in the order as a promotion - check the invoice; `qemu-guest-agent` active (OVHcloud recommends it for consistent backups) |
 | Addresses | One IPv4, one IPv6 - **not recorded here** (password manager, OVHcloud panel) |
-| System | Ubuntu 26.04.1 LTS; kernel 7.0.0-42 after the first update; `sudo` is sudo-rs (Ubuntu 26.04 default) |
+| System | Ubuntu 26.04.1 LTS, reinstalled 6 Nov 2026 (image with kernel 7.0.0-28); kernel 7.0.0-43 after the playbook's update and a reboot; `sudo` is sudo-rs (Ubuntu 26.04 default) |
+| Configuration | `infra/ansible/site.yml` run on the server itself from the clone `~/CinemaWatch` (§4.13); a second run gives `changed=0` |
 | Time | Time zone `Etc/UTC` (decision: stays UTC); clock synchronised |
-| Host key (server identity) | ED25519 `SHA256:87XQpd1kTc/ZaNB2h6C3FpNUb+e6hZpTSgX2moBx+uI` - compare on the first connection from any device |
+| Host key (server identity) | ED25519 `SHA256:cf/CvkJV0J6LJnarxF3ZJdMQDfz8pjZT40hTLv+Y/vk` since the reinstall on 6 Nov 2026 (before: `SHA256:87XQpd1k…`) - compare on the first connection from any device |
 | Login | User `ubuntu`, SSH key only; password login off; root login off (§4.10) |
 | Owner's SSH key | ed25519 with a passphrase on the development PC, `SHA256:OSzKjZeroCXb1qjlUzWLZBaUcrzAB0t2PnirmonCrew`; the encrypted key file is backed up in the password manager |
-| `ubuntu` password | In the password manager; used only on the KVM console |
+| `ubuntu` password | In the password manager (new since the reinstall: OVHcloud's start password had to be changed at the first login); used only on the KVM console |
 | sudo | Passwordless for `ubuntu`, granted by the cloud image (a sudoers drop-in), not by the `sudo` group |
 | SSH settings | Drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (§2.2, §4.10) |
-| Firewall | `ufw` active: incoming denied except 22/tcp (IPv4 + IPv6), outgoing allowed, routed disabled, logging low (§4.11) |
-| Updates | `unattended-upgrades` installs security updates daily; `/etc/apt/apt.conf.d/52unattended-upgrades-local` reboots at 03:30 UTC when needed (§4.12) |
-| Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9) |
-| Our services | `CinemaWatch.Probe` (systemd service + timer) since 2 Nov 2026 (§1.4), until the reinstall of 4.3; then the configuration of `infra/ansible` (§4.13) and, from 4.4, the containers |
+| Firewall | `ufw` active: incoming denied except 22/tcp (IPv4 + IPv6), outgoing allowed, logging low (§4.11). Routed: `deny` since Docker switched on packet forwarding; Docker's own rules come first, so containers still reach the internet; they publish no ports |
+| Updates | `unattended-upgrades` installs security updates daily, Docker's packages included; `/etc/apt/apt.conf.d/52unattended-upgrades-local` reboots at 03:30 UTC when needed (§4.12) |
+| Swap | `/swapfile`, 2 GB, in `/etc/fstab`; `vm.swappiness=10` (`/etc/sysctl.d/60-cinemawatch.conf`) |
+| Docker | Docker Engine 29.9.3 and Compose v5.7.0 from Docker's repository (`/etc/apt/sources.list.d/docker.sources`, key `/etc/apt/keyrings/docker.asc`, fingerprint checked by the playbook); `/etc/docker/daemon.json`: logs 3 × 10 MB, `live-restore`; `ubuntu` is not in the `docker` group (that equals root) - use `sudo docker` |
+| App folder | `/opt/cinemawatch` (root, `0750`), empty until 4.4 |
+| Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9); after the reinstall with the new password - test it once |
+| Our services | None yet; from 4.4 the containers of `infra/compose/compose.yaml`. `CinemaWatch.Probe` ran 2-6 Nov 2026 and went with the reinstall (§1.4) |
 
 ### 1.4 CinemaWatch.Probe (stage 2, risk test R1)
 
@@ -111,7 +115,7 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Control group | The desktop app at home; "would notify" matched the desktop toast on 2 Nov. In fact only the Diuna profile (5 of the 6 screenings) ran in the home Task Scheduler, and only while the PC was on (found in the final check, §3) |
 | Known issue | Column `bytes` stays empty for compressed responses (.NET does not report the size after decompression); irrelevant for R1, fixed only if the probe is used again |
 | Result | R1 green on 5 Nov 2026 (§3, stage 4 step 1) |
-| Ends | Runs until the reinstall in stage 4, increment 4.3 ([`SAAS.md`](SAAS.md) §7); stop and remove with §4.19 |
+| Ended | 6 Nov 2026: removed with the whole system by the reinstall of 4.3; the data of 2-5 Nov is on the PC (`C:\DEV\CINEMAWATCH\probe\gate`). §2.3 and runbooks §4.15-4.19 stay as the record of how it ran |
 
 ### 1.5 E-mail (Resend)
 
@@ -225,7 +229,7 @@ If files in `C:\Users\<user>\.ssh` are lost:
 | `id_ed25519` | **Private key** | No SSH access (passwords are off): restore it from the password manager, or use the KVM console and add a new key (§4.8) |
 | `id_ed25519` stolen | - | The thief also needs the passphrase. Rotate anyway: new key in, old line out of `authorized_keys` (§4.8) |
 
-### 2.3 The probe on the server
+### 2.3 The probe on the server (2-6 Nov 2026)
 
 ```
 cinemawatch-probe.timer (every 10-12 min, also after a reboot)
@@ -405,6 +409,28 @@ Browser --HTTPS--> Cloudflare (WAW)
 8. **Healthchecks.io**: account with 2FA, check `cinemawatch-staging` (5 / 10 minutes), e-mail alerts; the ping
    address stays unused until 4.4.
 
+### Stage 4 - Ansible and the reinstall (4.3; 6 Nov 2026)
+
+1. **Branch `feature/saas-ansible`.** The first commit landed on the local `main` (the `git switch -c` step was
+   missed); the push then failed with `src refspec … does not match any`, so nothing reached GitHub. Fixed locally:
+   `git switch -c feature/saas-ansible` at that commit, `git branch -f main origin/main`. Lesson: check
+   `git branch --show-current` before committing.
+2. **CI job `ansible` failed** with "Ansible CLI (2.21.5) and python module (2.20.1) versions do not match": the GitHub
+   runner brings its own Ansible (pipx) earlier on `PATH`. The job now puts `/usr/bin` first and prints both versions.
+3. **Reinstall** from the OVHcloud panel (Ubuntu 26.04 LTS, the public key pasted into the form; same IP addresses).
+   The automated backup of the same evening was visible beforehand as the way back.
+4. **First login** with the key; Ubuntu demanded a password change at once (OVHcloud's start password is expired):
+   start password from the e-mail, new password from the password manager - now the KVM console password. New host
+   key `SHA256:cf/CvkJV…`, the same seen from both sides; passwordless sudo works.
+5. **Ansible** from Ubuntu's packages (`ansible`, `git`, `python3-debian`), clone of the branch, dry run: `ok=25
+   changed=15 failed=0 skipped=10` (Docker's installation skipped, as expected). Real run, a reboot for the new kernel
+   (7.0.0-28 → 7.0.0-43), second run `ok=30 changed=0 failed=0`.
+6. **SSH tests** in a new window: key login works, password and root refused. A first attempt went to a wrong address
+   (`Connection timed out`) - hence the `$vps` tip in §4.7.
+7. **Checks** (§4.13 step 9): all as expected; `qemu-guest-agent` already active in OVHcloud's image; `ufw` routed now
+   `deny` because Docker switched on forwarding.
+8. **The probe is gone** with the old system; its data of 2-5 Nov is on the PC.
+
 ---
 
 ## 4. Runbooks
@@ -475,6 +501,9 @@ Windows (PowerShell):
 ```powershell
 ssh ubuntu@<server-ip>
 ```
+
+Tip: keep the address in a variable for the session, `$vps = "<server-ip>"`, then `ssh ubuntu@$vps` - a mistyped
+address only ends in `Connection timed out` (seen on 6 Nov 2026).
 
 Expected: the passphrase prompt for `id_ed25519`, then the server prompt `ubuntu@vps-…:~$`. On the first connection
 from a device (or after `known_hosts` was lost) `ssh` asks about the host key: answer `yes` only if the fingerprint
@@ -644,14 +673,17 @@ ssh-keygen -R <server-ip>
 ssh ubuntu@<server-ip>
 ```
 
-   `ssh` shows the new host key's fingerprint; answer `yes`. With the password variant, add the key first (§4.8,
-   the `mkdir -p ~/.ssh …` command) and reconnect with the key.
-3. Server (bash, over SSH) - a password for the KVM console (§4.9), which works only with a password; generate it in
-   the password manager and replace the old entry:
+   `ssh` shows the new host key's fingerprint; answer `yes` (copy the `SHA256:…` line for step 3). With the password
+   variant, add the key first (§4.8, the `mkdir -p ~/.ssh …` command) and reconnect with the key.
+3. The image starts with an expired password: even after a key login, Ubuntu asks `Current password:` at once. Enter
+   OVHcloud's start password (from the reinstall e-mail), then a new one twice - generated in the password manager,
+   letters and digits only (the KVM console's keyboard layout mangles special characters), about 24 characters; it
+   replaces the old entry and is the KVM console password (§4.9). The connection then closes; reconnect, and check
+   the host key from the server side and passwordless sudo:
 
 ```bash
-sudo passwd ubuntu
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+sudo -n true && echo "sudo OK"
 ```
 
    The fingerprint must equal the one `ssh` showed in step 2 (record it in §1.3).
@@ -691,11 +723,15 @@ docker compose version
 sudo cat /etc/docker/daemon.json
 apt-config dump | grep -i "origin=Docker"
 ls -ld /opt/cinemawatch
+systemctl is-active qemu-guest-agent
 sudo docker run --rm hello-world && sudo docker image rm hello-world
+sudo docker run --rm alpine:3 wget -q -O /dev/null https://github.com && echo "containers reach the internet"; sudo docker image rm alpine:3
 ```
 
    Expected: `/swapfile` 2G; a Docker and a Compose version; the `daemon.json` of the playbook; the Docker origin line;
-   `drwxr-x--- root root /opt/cinemawatch`; "Hello from Docker!".
+   `drwxr-x--- root root /opt/cinemawatch`; `active`; "Hello from Docker!"; "containers reach the internet" (the app
+   needs it for Cinema City, Resend and the tunnel; `ufw` shows routed `deny` once Docker runs, Docker's own rules
+   come first).
 10. Update §1.3 (host key, kernel, swap, Docker) and the work log (§3).
 
 Undo: none - a reinstall is final. The way back is the OVHcloud backup (restore from the panel) within its 24 hours.
@@ -892,13 +928,11 @@ Order matters: Access first, then the app.
 
 Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- 4.3: the Ansible playbook run on the server itself (stage 2 hardening as code, swap, Docker from Docker's repository
-  with automatic security updates, `/opt/cinemawatch`), verified by a reinstall; before it, stop and remove the probe
-  (§4.19).
-- 4.4: the first deployment from `infra/compose/compose.yaml` with `.env` on the server (template
-  `infra/compose/env.example`): the Resend key, the tunnel token and the ping address go straight into `.env`; tests
-  per [`SAAS.md`](SAAS.md) §7 (invitation by real e-mail, test e-mail, "Check now" from the server, heartbeat alert by
-  stopping the container); stable tag `web-v0.5.0`. Then 4.5 backups; 4.6 optional deployment from GitHub Actions.
+- 4.4: the first deployment from `infra/compose/compose.yaml` into `/opt/cinemawatch` with `.env` (root only;
+  template `infra/compose/env.example`): the Resend key, the tunnel token and the ping address go straight into
+  `.env`; image `web-v0.5.1`; tests per [`SAAS.md`](SAAS.md) §7 (invitation by real e-mail, test e-mail, "Check now"
+  from the server, heartbeat alert by stopping the container, `docker stats`); the deployment script.
+- 4.5 backups (`pg_dump` off the server, a restore test); 4.6 optional deployment from GitHub Actions.
 
 Each step will be added to §1 and §3 of this file.
 
