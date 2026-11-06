@@ -655,7 +655,12 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         var owner = app.CreateBrowser();
         Assert.Equal("/Account/Login?ReturnUrl=%2F", Location(await owner.GetAsync("/")));
         Assert.True((await owner.GetAsync("/Account/Register")).StatusCode != HttpStatusCode.OK);
-        Assert.True((await owner.PageAsync("/privacy")).Contains("Prywatność"));
+        var privacy = await owner.PageAsync("/privacy");
+        Assert.True(privacy.Contains("Prywatność"));
+        // The notice names every service that receives personal data, and is no longer a draft.
+        foreach (var service in new[] { "OVHcloud", "Cloudflare Access", "Resend (USA)", "Healthchecks.io" })
+            Assert.True(privacy.Contains(service), $"privacy notice lacks {service}");
+        Assert.True(!privacy.Contains("Wersja robocza"));
         Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync("/app.css")).StatusCode);
 
         // The owner's invitation: set the password, which activates the account.
