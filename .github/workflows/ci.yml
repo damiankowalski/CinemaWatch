@@ -94,5 +94,9 @@ jobs:
       - name: Syntax check and lint
         working-directory: infra/ansible
         run: |
+          # The runner image brings its own, newer Ansible (pipx) earlier on PATH; use Ubuntu's, as on the server.
+          export PATH="/usr/bin:$PATH"
+          ansible --version
+          ansible-lint --version
           ansible-playbook site.yml --syntax-check
           ansible-lint --profile production site.yml
