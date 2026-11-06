@@ -303,8 +303,8 @@ In scope:
 - Limits in configuration (`Saas:Limits`): 5 profiles per account (enabled, disabled and ended alike; the owner can
   set another limit per account, 1-50), 20 screenings per profile, minimum interval 10 minutes; a global request
   budget (`Saas:Poller`, 120 an hour).
-- Privacy notice page (draft until it names the e-mail provider - Resend, data in the US - before 4.4); UI in Polish
-  and English like the desktop app.
+- Privacy notice page (names the services that receive personal data: OVHcloud, Cloudflare with Access, Resend,
+  Healthchecks.io; since SaaS 0.5.1); UI in Polish and English like the desktop app.
 - Operator's panel at `/admin` (owner only): status of the components as a checklist (poller, Cinema City, e-mail,
   database, heartbeat), events, requests per hour, answers per HTTP status, the latest requests, poller settings and a
   pause switch; a heartbeat for an external "dead man's switch".
@@ -335,7 +335,7 @@ interchangeable.
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
-  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.5.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.5.1). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
   database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
@@ -343,7 +343,8 @@ interchangeable.
   publishes the probe; the `container` job builds the web image and runs `infra/compose/smoke-test.sh` (postgres + web
   from the compose file, no tunnel, no e-mail, no poller). Tags `web-vX.Y.Z` (betas `web-vX.Y.Z-beta.N`) run
   `web-image.yml`: the same build and test, then the image goes to GHCR as `cinemawatch-web:X.Y.Z` and `sha-<commit>`;
-  no GitHub release. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
+  no GitHub release. The `ansible` job checks `infra/ansible` with the Ubuntu 26.04 packages (`ansible`,
+  `ansible-lint`): `--syntax-check` and `ansible-lint --profile production`. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
 - Conventions from KB §7 apply: English code and docs, UI texts via `T("polski", "English")`, tests for every
   behaviour change, no secrets in the repository (configuration via environment variables and GitHub Secrets).
 
@@ -455,10 +456,14 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       (owner only, 24 h); checked from outside (530 before Access, 302 to the login after). Healthchecks.io (2FA),
       check `cinemawatch-staging`, period 5 min, grace 10 min. No secret copied anywhere yet: the Resend key, the tunnel
       token and the ping address go straight into `.env` in 4.4.
-- [ ] 4.3 `infra/ansible/` + reinstall: playbook run on the server itself (`ansible-playbook` with a local
-      connection, repository cloned there): the stage 2 hardening, swap file (2 GB), Docker from Docker's repository
-      in `unattended-upgrades`, `/opt/cinemawatch`; verified by reinstalling the VPS from scratch. The real inventory
-      stays out of git.
+- [ ] 4.3 `saas-ansible` (SaaS 0.5.1): `infra/ansible/site.yml` run on the server itself (`ansible-playbook` with a
+      local connection, repository cloned there): the stage 2 hardening (SSH drop-in, `ufw`, automatic updates with
+      the 03:30 reboot), swap file (2 GB, swappiness 10), Docker from Docker's repository (key fingerprint checked,
+      origin in `unattended-upgrades`, `daemon.json` with log limits and `live-restore`), `/opt/cinemawatch`; refuses
+      to switch passwords off without a key in `authorized_keys`; CI job `ansible` (syntax check, `ansible-lint
+      --profile production`, Ubuntu 26.04 packages). The privacy notice names OVHcloud, Cloudflare (Access), Resend and
+      Healthchecks.io and is no longer a draft. Verified by reinstalling the VPS from scratch (`SAAS_INFRA.md` §4.13):
+      dry run, real run, SSH tests, second run `changed=0`.
 - [ ] 4.4 First deployment (staging): `.env` on the server (root only), `docker compose up`, the owner's invitation
       by real e-mail, test e-mail (inbox or spam), profile import, one "Check now" from the server's IP, heartbeat
       tested by stopping the container (the alert arrives), `docker stats`; the deployment script (`pg_dump` → pull a
@@ -640,6 +645,15 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Healthchecks.io check per environment: period 5 min, grace 10 min, e-mail to the owner | The app pings at most every 5 minutes; the nightly reboot (1-2 min) stays below the grace |
 | Nov 2026 | Secrets from provider panels (Resend key, tunnel token, ping address) are copied only once, straight into `.env` on the server; never into the chat, the PC or a file in the repository; a temporary test key is deleted right after the test | Each one can be shown again or replaced in its panel; fewer copies, fewer leaks |
 | Nov 2026 | MVP 1 (wizard and hall map with seat selection in the browser, profiles created on the site) confirmed as the next product step after the first SaaS test (stage 6) | The owner wants the site to create profiles, not only import them from the desktop app |
+| Nov 2026 | Ansible as one playbook (`infra/ansible/site.yml`) with tagged parts and a `files/` folder, no roles | One server and a handful of tasks: a single file reads top to bottom; roles can follow if a second kind of server appears |
+| Nov 2026 | Ansible from Ubuntu's own packages on the server (`ansible` 13.1, `ansible-core` 2.20, `python3-debian` for the repository module); CI checks with the same packages | Nothing installed from outside the distribution; CI and the server agree on versions |
+| Nov 2026 | The inventory (`localhost`, local connection) lives in git (supersedes "the real inventory stays out of git") | It holds no address; a remote inventory with the address would stay private |
+| Nov 2026 | Docker's release key is checked against its published fingerprint before the repository is added | A wrong or swapped key stops the run instead of being trusted for root-level packages |
+| Nov 2026 | `daemon.json`: default log limits (3 × 10 MB) for every container and `live-restore` | Covers containers started by hand too; an automatic Docker update no longer restarts the app |
+| Nov 2026 | Swap file 2 GB with `vm.swappiness=10` | A safety net against out-of-memory kills, not extra memory; RAM stays preferred |
+| Nov 2026 | The playbook refuses to switch password login off while the admin user has no key in `authorized_keys` | The one step that could lock the owner out is guarded in code, not only in the runbook |
+| Nov 2026 | After a reinstall the `ubuntu` user gets a new password (password manager) for the KVM console | A key-only install leaves no usable console password; the console is the way back when SSH fails |
+| Nov 2026 | The privacy notice names OVHcloud, Cloudflare (Access), Resend (USA) and Healthchecks.io and is no longer a draft (SaaS 0.5.1) | Everyone who signs in is told which services see their data before the first deployment |
 
 ---
 

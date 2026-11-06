@@ -1,0 +1,303 @@
+# CinemaWatch server: brings a fresh Ubuntu 26.04 VPS to the state described in docs/SAAS_INFRA.md §1.3.
+# Runs on the server itself as the admin user (passwordless sudo):
+#   cd ~/CinemaWatch/infra/ansible && ansible-playbook site.yml --check --diff   (dry run: shows what would change)
+#   cd ~/CinemaWatch/infra/ansible && ansible-playbook site.yml                  (apply)
+# Safe to run again at any time: a second run changes nothing ("changed=0") unless something drifted.
+# One part only: --tags ssh | firewall | updates | swap | docker | app.
+
+- name: CinemaWatch server
+  hosts: cinemawatch
+  become: true
+
+  vars:
+    admin_user: ubuntu
+    swap_file: /swapfile
+    swap_size_mb: 2048
+    app_dir: /opt/cinemawatch
+    # Docker's release key (https://docs.docker.com/engine/install/ubuntu/); the download is checked against it.
+    docker_key_url: https://download.docker.com/linux/ubuntu/gpg
+    docker_key_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+
+  pre_tasks:
+    - name: Check the system (Ubuntu 26.04 on x86-64)
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.distribution == 'Ubuntu'
+          - ansible_facts.distribution_version == '26.04'
+          - ansible_facts.architecture == 'x86_64'
+        fail_msg: "This playbook is written for Ubuntu 26.04 on x86-64 (docs/SAAS.md §4.6)."
+      tags: always
+
+    - name: Read the admin user's SSH keys
+      ansible.builtin.slurp:
+        src: "/home/{{ admin_user }}/.ssh/authorized_keys"
+      register: authorized_keys
+      failed_when: false
+      tags: [always]
+
+    - name: Refuse to switch passwords off before a key can log in
+      ansible.builtin.assert:
+        that:
+          - authorized_keys.content is defined
+          - (authorized_keys.content | b64decode) is search('ssh-(ed25519|rsa) ')
+        fail_msg: >-
+          /home/{{ admin_user }}/.ssh/authorized_keys has no SSH key. Add the key first (docs/SAAS_INFRA.md §4.8),
+          otherwise switching password login off would lock you out.
+      tags: always
+
+  tasks:
+    # ---- Packages, time zone -------------------------------------------------------------------------------------
+    - name: Update the system
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+        upgrade: dist
+      environment:
+        NEEDRESTART_MODE: a
+      tags: updates
+
+    - name: Install the base packages
+      ansible.builtin.apt:
+        name: [ca-certificates, curl, git, gnupg, python3-debian, ufw, unattended-upgrades]
+        state: present
+      environment:
+        NEEDRESTART_MODE: a
+      tags: updates
+
+    - name: Read the server's time zone
+      ansible.builtin.command: timedatectl show --property=Timezone --value
+      register: time_zone
+      changed_when: false
+      check_mode: false
+      tags: updates
+
+    - name: Keep the server's clock in UTC (the app converts to Europe/Warsaw itself)
+      ansible.builtin.command: timedatectl set-timezone Etc/UTC
+      when: time_zone.stdout != 'Etc/UTC'
+      changed_when: true
+      tags: updates
+
+    # ---- SSH: key-only login, no root (SAAS_INFRA.md §4.10) -------------------------------------------------------
+    - name: SSH settings drop-in
+      ansible.builtin.copy:
+        src: files/00-hardening.conf
+        dest: /etc/ssh/sshd_config.d/00-hardening.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: SSH settings changed
+      tags: ssh
+
+    # ---- Firewall: incoming SSH only (SAAS_INFRA.md §4.11) --------------------------------------------------------
+    - name: Allow SSH (before the firewall is switched on)
+      community.general.ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+        comment: SSH
+      tags: firewall
+
+    - name: Default policies (incoming denied, outgoing allowed)
+      community.general.ufw:
+        direction: "{{ item.direction }}"
+        default: "{{ item.policy }}"
+      loop:
+        - { direction: incoming, policy: deny }
+        - { direction: outgoing, policy: allow }
+      tags: firewall
+
+    - name: Firewall on, logging low
+      community.general.ufw:
+        state: enabled
+        logging: "low"
+      tags: firewall
+
+    # ---- Automatic updates with a night reboot (SAAS_INFRA.md §4.12) ----------------------------------------------
+    - name: Automatic update settings
+      ansible.builtin.copy:
+        src: "files/{{ item }}"
+        dest: "/etc/apt/apt.conf.d/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [20auto-upgrades, 52unattended-upgrades-local]
+      tags: updates
+
+    # ---- Swap: a safety net when the 4 GB RAM run out ------------------------------------------------------------
+    - name: Look for the swap file
+      ansible.builtin.stat:
+        path: "{{ swap_file }}"
+      register: swap_stat
+      tags: swap
+
+    - name: Create and format the swap file
+      ansible.builtin.shell: "fallocate -l {{ swap_size_mb }}M {{ swap_file }} && chmod 600 {{ swap_file }} && mkswap {{ swap_file }}"
+      args:
+        creates: "{{ swap_file }}"
+      tags: swap
+
+    - name: Swap file readable by root only
+      ansible.builtin.file:
+        path: "{{ swap_file }}"
+        owner: root
+        group: root
+        mode: "0600"
+      when: swap_stat.stat.exists or not ansible_check_mode
+      tags: swap
+
+    - name: Is the swap file in use?
+      ansible.builtin.command: swapon --show=NAME --noheadings
+      register: swap_active
+      changed_when: false
+      check_mode: false
+      tags: swap
+
+    - name: Use the swap file now
+      ansible.builtin.command: "swapon {{ swap_file }}"
+      when: swap_file not in swap_active.stdout_lines and not ansible_check_mode
+      changed_when: true
+      tags: swap
+
+    - name: Use the swap file after every reboot
+      ansible.posix.mount:
+        src: "{{ swap_file }}"
+        path: none
+        fstype: swap
+        opts: sw
+        state: present
+      tags: swap
+
+    - name: Prefer RAM, swap only under pressure
+      ansible.posix.sysctl:
+        name: vm.swappiness
+        value: "10"
+        sysctl_file: /etc/sysctl.d/60-cinemawatch.conf
+        reload: true
+      tags: swap
+
+    # ---- Docker from Docker's repository (SAAS.md §4.4) -------------------------------------------------------------
+    - name: Folder for repository keys
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags: docker
+
+    - name: Download Docker's release key
+      ansible.builtin.get_url:
+        url: "{{ docker_key_url }}"
+        dest: /etc/apt/keyrings/docker.asc
+        owner: root
+        group: root
+        mode: "0644"
+      register: docker_key
+      tags: docker
+
+    - name: Read the key's fingerprint
+      ansible.builtin.command: gpg --show-keys --with-colons /etc/apt/keyrings/docker.asc
+      register: docker_key_info
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode or not docker_key is changed
+      tags: docker
+
+    - name: Refuse a key that is not Docker's
+      ansible.builtin.assert:
+        that:
+          - ("fpr:::::::::" ~ docker_key_fingerprint ~ ":") in docker_key_info.stdout
+        fail_msg: "The downloaded key is not Docker's release key {{ docker_key_fingerprint }}. Stop and check."
+      when: docker_key_info is not skipped
+      tags: docker
+
+    - name: Docker's package repository
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: [deb]
+        uris: https://download.docker.com/linux/ubuntu
+        suites: ["{{ ansible_facts.distribution_release }}"]
+        components: [stable]
+        architectures: [amd64]
+        signed_by: /etc/apt/keyrings/docker.asc
+      register: docker_repo
+      tags: docker
+
+    # A dry run (--check) adds no repository, so before the first real run it cannot install from it either.
+    - name: Install Docker Engine and Compose
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+        state: present
+        update_cache: "{{ docker_repo is changed }}"
+      environment:
+        NEEDRESTART_MODE: a
+      when: not (ansible_check_mode and docker_repo is changed)
+      tags: docker
+
+    - name: Folder for Docker's settings
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      tags: docker
+
+    - name: Docker settings (log size limits; containers keep running while Docker itself is updated)
+      ansible.builtin.copy:
+        src: files/daemon.json
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart Docker
+      tags: docker
+
+    - name: Docker starts at boot
+      ansible.builtin.systemd_service:
+        name: docker
+        enabled: true
+        state: started
+      when: not (ansible_check_mode and docker_repo is changed)
+      tags: docker
+
+    # ---- The app's folder (compose file and .env come in the deployment, SAAS.md §7 4.4) ----------------------------
+    - name: App folder, root only
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0750"
+      tags: app
+
+  post_tasks:
+    - name: Does an update need a reboot?
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+      tags: always
+
+    - name: Reboot reminder
+      ansible.builtin.debug:
+        msg: "An update needs a reboot. Run: sudo reboot   (then reconnect after 1-2 minutes)"
+      when: reboot_required.stat.exists
+      tags: always
+
+  handlers:
+    - name: Check the SSH settings
+      ansible.builtin.command: sshd -t
+      changed_when: false
+      listen: SSH settings changed
+
+    - name: Reload SSH
+      ansible.builtin.systemd_service:
+        name: ssh
+        state: reloaded
+      listen: SSH settings changed
+
+    - name: Restart Docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: restarted
+      when: not (ansible_check_mode and docker_repo is changed)

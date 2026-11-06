@@ -95,7 +95,7 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Firewall | `ufw` active: incoming denied except 22/tcp (IPv4 + IPv6), outgoing allowed, routed disabled, logging low (§4.11) |
 | Updates | `unattended-upgrades` installs security updates daily; `/etc/apt/apt.conf.d/52unattended-upgrades-local` reboots at 03:30 UTC when needed (§4.12) |
 | Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9) |
-| Our services | `CinemaWatch.Probe` (systemd service + timer) since 2 Nov 2026 (§1.4); containers: stage 4 |
+| Our services | `CinemaWatch.Probe` (systemd service + timer) since 2 Nov 2026 (§1.4), until the reinstall of 4.3; then the configuration of `infra/ansible` (§4.13) and, from 4.4, the containers |
 
 ### 1.4 CinemaWatch.Probe (stage 2, risk test R1)
 
@@ -616,17 +616,89 @@ origins include `-security`; no `ERROR` or `Traceback`. After an update that nee
 03:30 UTC. Logs: `/var/log/unattended-upgrades/`. Undo: `sudo rm /etc/apt/apt.conf.d/52unattended-upgrades-local`
 (updates continue, without the automatic reboot).
 
-### 4.13 Rebuild the server from scratch (until the Ansible playbook exists)
+### 4.13 Rebuild the server from scratch (Ansible)
 
-1. OVHcloud panel: reinstall the VPS with Ubuntu 26.04 LTS (all data on the server is lost).
-2. Windows (PowerShell): `ssh-keygen -R <server-ip>` (forget the old host key).
-3. First login with the password from OVHcloud (§4.7); note the new host key fingerprint.
-4. Add the key (§4.8, `mkdir -p ~/.ssh …` variant) and test key login.
-5. Updates and reboot (§4.12, manual part).
-6. SSH hardening (§4.10), firewall (§4.11), automatic reboot (§4.12, automatic part).
-7. Check the state (§4.14); update §1.3 (host key fingerprint, kernel) and the work log (§3).
+Wipes everything on the server; about 30-45 minutes. The playbook (`infra/ansible/site.yml`,
+[README](../infra/ansible/README.md)) replaces the manual steps of §4.10-4.12; those runbooks stay as the
+explanation and as the way to fix one thing by hand.
 
-About 30 minutes. In stage 4 this becomes one Ansible run ([`SAAS.md`](SAAS.md) §7).
+Before:
+
+1. Nothing on the server may still be needed. Today: only the probe (R1 closed). From 4.4 on: `pg_dump` and a copy of
+   `/opt/cinemawatch/.env` first (4.5).
+2. OVHcloud panel → the VPS → backups: note the latest automatic backup - the way back for about 24 hours.
+3. Windows (PowerShell) - the public key, to paste in step 1:
+
+```powershell
+Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"
+```
+
+Steps:
+
+1. OVHcloud panel → the VPS → **Reinstall** → Ubuntu 26.04 LTS. If the form has an SSH key field, paste the one line
+   `ssh-ed25519 …` from above; otherwise OVHcloud e-mails a password. The IP addresses stay the same.
+2. Windows (PowerShell) - forget the old host key, then connect (§4.7):
+
+```powershell
+ssh-keygen -R <server-ip>
+ssh ubuntu@<server-ip>
+```
+
+   `ssh` shows the new host key's fingerprint; answer `yes`. With the password variant, add the key first (§4.8,
+   the `mkdir -p ~/.ssh …` command) and reconnect with the key.
+3. Server (bash, over SSH) - a password for the KVM console (§4.9), which works only with a password; generate it in
+   the password manager and replace the old entry:
+
+```bash
+sudo passwd ubuntu
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+   The fingerprint must equal the one `ssh` showed in step 2 (record it in §1.3).
+4. Server - Ansible, the repository and a dry run (to test a branch before merging: `git clone -b <branch> …`):
+
+```bash
+sudo apt update && sudo apt install -y ansible git python3-debian
+git clone https://github.com/damiankowalski/CinemaWatch.git ~/CinemaWatch
+cd ~/CinemaWatch/infra/ansible
+ansible-playbook site.yml --check --diff
+```
+
+   Expected: `ok` / `changed` lines and `PLAY RECAP … failed=0`; the Docker installation is `skipping` (a dry run adds
+   no repository). A `fatal` line: stop and read its `msg`.
+5. Server - apply:
+
+```bash
+ansible-playbook site.yml
+```
+
+   Expected: `failed=0`; possibly the message `An update needs a reboot`. Keep this session open.
+6. Windows (PowerShell), in a **new** window - the SSH tests of §4.10 (key works; password and root refused).
+7. Server - if step 5 asked for it: `sudo reboot`, reconnect after 1-2 minutes.
+8. Server - the second run must change nothing (idempotency):
+
+```bash
+cd ~/CinemaWatch/infra/ansible && ansible-playbook site.yml
+```
+
+   Expected: `changed=0 … failed=0`.
+9. Server - check (plus §4.14):
+
+```bash
+swapon --show
+sudo docker version --format 'Docker {{.Server.Version}}'
+docker compose version
+sudo cat /etc/docker/daemon.json
+apt-config dump | grep -i "origin=Docker"
+ls -ld /opt/cinemawatch
+sudo docker run --rm hello-world && sudo docker image rm hello-world
+```
+
+   Expected: `/swapfile` 2G; a Docker and a Compose version; the `daemon.json` of the playbook; the Docker origin line;
+   `drwxr-x--- root root /opt/cinemawatch`; "Hello from Docker!".
+10. Update §1.3 (host key, kernel, swap, Docker) and the work log (§3).
+
+Undo: none - a reinstall is final. The way back is the OVHcloud backup (restore from the panel) within its 24 hours.
 
 ### 4.14 Check the server state (read only)
 
