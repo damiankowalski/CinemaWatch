@@ -924,6 +924,78 @@ Order matters: Access first, then the app.
 
 ---
 
+### 4.23 Create the `.env` (first deployment)
+
+The server keeps every secret of the app in one file, `/opt/cinemawatch/.env` (root only, mode 600). Secrets are
+copied from the panels straight into the editor on the server - never into the chat, a file on the PC or the
+repository. Each one can be shown again or replaced in its panel, except the database password (keep it in the
+password manager).
+
+1. Resend → **API Keys → Create API key**: name `staging-server`, permission **Sending access**, domain
+   `mail.damiankowalski.pl`. The key is shown once; copy it in step 5.
+2. Cloudflare → Zero Trust → **Networking → Tunnels** → `staging-cinemawatch` → the install command: the token is the
+   long string after `--token`. Copy only the token in step 5; run none of the commands.
+3. Healthchecks.io → check `cinemawatch-staging` → its ping URL (`https://hc-ping.com/…`), copied in step 5.
+4. Server (bash, over SSH) - the template and a database password:
+
+```bash
+sudo install -m 600 -o root -g root ~/CinemaWatch/infra/compose/env.example /opt/cinemawatch/.env
+openssl rand -hex 32
+```
+
+   Save the printed 64 characters in the password manager ("CinemaWatch staging database").
+5. Server - fill in the file: `sudo nano /opt/cinemawatch/.env`. Paste (right click in the Windows terminal) after the
+   `=` of: `POSTGRES_PASSWORD` (step 4), `SAAS_OWNER_EMAIL` (the owner's Gmail, the same as in Access),
+   `SAAS_HEARTBEAT_URL` (step 3), `MAIL_PASSWORD` (step 1), `TUNNEL_TOKEN` (step 2). No spaces, no quotes.
+   `CINEMAWATCH_VERSION` is set by `deploy.sh`. Save: `Ctrl+O`, `Enter`; exit: `Ctrl+X`.
+6. Server - check without showing a secret:
+
+```bash
+sudo stat -c '%a %U:%G' /opt/cinemawatch/.env
+sudo awk -F= '/^[A-Z_]+=/ { print $1, ($2 == "" ? "EMPTY" : "set") }' /opt/cinemawatch/.env
+```
+
+   Expected: `600 root:root`; every line `set` (none `EMPTY`).
+
+Changing a value later: edit the file the same way, then `sudo bash ~/CinemaWatch/infra/compose/deploy.sh <running
+version>` (the containers read `.env` only when they are created). A leaked secret is replaced in its panel first.
+
+### 4.24 Deploy, roll back, look around
+
+Server (bash, over SSH). Deploy a version that has its tag `web-vX.Y.Z` on GitHub (and its image in GHCR):
+
+```bash
+cd ~/CinemaWatch && git pull
+sudo bash ~/CinemaWatch/infra/compose/deploy.sh 0.5.1
+```
+
+What it does (`infra/compose/deploy.sh`): checks `.env`, the version and the tag; `pg_dump` of the running database
+to `/opt/cinemawatch/backups` (the newest 10 stay); copies `infra/compose/compose.yaml` **of the tag** to
+`/opt/cinemawatch/compose.yaml`; writes the version into `.env`; `docker compose pull`, `up -d`; waits up to 2 minutes
+for `/healthz` = `ok` and checks that `postgres`, `web` and `cloudflared` run. Expected end: `== Done: 0.5.1` and the
+three containers. On an error it prints the log of the failing container and stops; nothing is rolled back by
+itself. Git runs as the clone's owner (`runuser`), so the clone never gets root-owned files.
+
+Roll back: the same command with the previous version (the script prints it). If the new version's database
+migration is the problem, restore the dump taken before it first:
+
+```bash
+cw() { sudo docker compose -f /opt/cinemawatch/compose.yaml "$@"; }
+sudo ls -lt /opt/cinemawatch/backups
+cw stop web
+sudo cat /opt/cinemawatch/backups/<file>.dump | cw exec -T postgres pg_restore -U cinemawatch -d cinemawatch --clean --if-exists
+sudo bash ~/CinemaWatch/infra/compose/deploy.sh <previous version>
+```
+
+Look around (the `cw` helper above saves typing; `/opt/cinemawatch` itself is root only):
+
+```bash
+cw ps
+cw logs --tail 100 web
+cw logs -f cloudflared
+sudo docker stats --no-stream
+```
+
 ## 5. Next infrastructure steps
 
 Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.

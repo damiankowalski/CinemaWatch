@@ -465,10 +465,12 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       Healthchecks.io and is no longer a draft. Verified by reinstalling the VPS from scratch (`SAAS_INFRA.md` §4.13,
       §3): dry run `failed=0`, real run, reboot for the new kernel, second run `changed=0`, SSH tests, Docker 29.9.3 /
       Compose v5.7.0, swap 2 GB, containers reach the internet. The probe went with the old system.
-- [ ] 4.4 First deployment (staging): `.env` on the server (root only), `docker compose up`, the owner's invitation
-      by real e-mail, test e-mail (inbox or spam), profile import, one "Check now" from the server's IP, heartbeat
-      tested by stopping the container (the alert arrives), `docker stats`; the deployment script (`pg_dump` → pull a
-      named version → `up -d` → `/healthz`). Before it: the privacy notice names Resend; stable tag `web-v0.5.0`.
+- [ ] 4.4 `saas-deploy` - first deployment (staging): `infra/compose/deploy.sh` (checks; `pg_dump` before every
+      deployment, the newest 10 kept; the compose file of the tag; the version into `.env`; pull, `up -d`, `/healthz`
+      and all services running; no automatic rollback); CI runs `shellcheck` on the scripts. On the server
+      (`SAAS_INFRA.md` §4.23, §4.24): `.env` (root only), first deployment of `0.5.1`; the owner's invitation by real
+      e-mail, test e-mail (inbox, DKIM / DMARC pass), Access in front of the app and of `/admin`, profile import, one
+      "Check now" from the server's IP, heartbeat (check up, alert after stopping `web`), `docker stats`.
 - [ ] 4.5 Backups: daily `pg_dump` off the server (destination chosen then); restore tested once.
 - [ ] 4.6 (optional) Deployment from GitHub Actions: a `deploy` user whose key may only run the deployment script
       (`command=` in `authorized_keys`), not membership of the `docker` group (that equals root).
@@ -655,6 +657,14 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | The playbook refuses to switch password login off while the admin user has no key in `authorized_keys` | The one step that could lock the owner out is guarded in code, not only in the runbook |
 | Nov 2026 | After a reinstall the `ubuntu` user gets a new password (password manager) for the KVM console | A key-only install leaves no usable console password; the console is the way back when SSH fails |
 | Nov 2026 | The privacy notice names OVHcloud, Cloudflare (Access), Resend (USA) and Healthchecks.io and is no longer a draft (SaaS 0.5.1) | Everyone who signs in is told which services see their data before the first deployment |
+| Nov 2026 | Deployment script `infra/compose/deploy.sh <version>`: the compose file comes from the tag `web-v<version>` (copied to `/opt/cinemawatch`), the version is written into `.env` | The compose file and the image always belong to the same version; a later `docker compose up -d` or a reboot keeps the deployed version |
+| Nov 2026 | A `pg_dump` before every deployment into `/opt/cinemawatch/backups`, the newest 10 kept (off the server in 4.5) | A migration that breaks the database can be undone |
+| Nov 2026 | No automatic rollback: on a failed `/healthz` or a stopped service the script prints the log and stops; rollback = the script with the previous version (after `pg_restore` if a migration was the problem) | An automatic rollback across a schema change can do more harm than a deliberate one |
+| Nov 2026 | Git in the script runs as the clone's owner (`runuser`) | As root git refuses another user's clone ("dubious ownership") or leaves root-owned files that break the next `git pull` |
+| Nov 2026 | The poller is on in staging from the first deployment; no request leaves before a profile is imported | Staging is the only environment on this IP; R1 is green |
+| Nov 2026 | Secrets are pasted into `/opt/cinemawatch/.env` with `sudo nano` on the server; the database password is generated there (`openssl rand -hex 32`) and kept in the password manager | Nothing in the shell history, the chat or the PC; the database password is the one secret no panel can show again |
+| Nov 2026 | `SAAS_OWNER_EMAIL` = the owner's Gmail, the same address as in the Access policies | The Access gate and the app's owner account are the same person |
+| Nov 2026 | CI runs `shellcheck` (Ubuntu 26.04's 0.11) on `infra/compose/*.sh` | The deployment script runs as root on the server; static checks catch quoting and pipe mistakes early |
 
 ---
 

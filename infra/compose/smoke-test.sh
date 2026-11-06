@@ -45,7 +45,9 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
 
 user="$(docker image inspect -f '{{.Config.User}}' "$image:$tag")"
-[ -n "$user" ] && [ "$user" != "root" ] && [ "$user" != "0" ] || fail "the image runs as root (User='$user')"
+if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "0" ]; then
+  fail "the image runs as root (User='$user')"
+fi
 pass "image runs as user $user"
 
 compose up -d postgres web
