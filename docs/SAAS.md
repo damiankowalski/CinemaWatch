@@ -9,12 +9,12 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 5 November 2026. Status: **stage 3 done** - MVP 0 complete on the development PC; increments 1
-> (`saas-skeleton`: accounts by invitation, e-mail, Polish/English UI), 2 (`saas-profiles`: profile import, list,
-> profile limit per account), 3 (`saas-poller`: background checks, notification e-mails, history, "check now",
-> test e-mail) and 4 (`saas-operator`: operator's panel, pause switch, poller settings in the database, heartbeat;
-> SaaS 0.4.0) built and tested against a fake of Cinema City. `CinemaWatch.Probe` 0.1.0 keeps running on the VPS;
-> risk test R1 provisionally green (full check at the start of stage 4). Next: stage 4 (deploy to the VPS).
+> Last updated: 5 November 2026. Status: **stage 4 in progress** (deploy to the VPS, staging). Stage 3 done: MVP 0
+> complete on the development PC (SaaS 0.4.0). Risk test R1 closed **green** on 5 Nov 2026 with 3.1 days of probe data
+> (4,997 requests, no block, no challenge; §7 stage 4, §9). Increment 4.1 (`saas-container`, SaaS 0.5.0): the app
+> runs behind the tunnel (forwarded headers, Secure cookies, migrations at start-up, platform check, `/healthz`), the
+> container image, `infra/compose/compose.yaml` and a container test in CI. Next: 4.2 (accounts: e-mail provider,
+> Cloudflare Zero Trust, Healthchecks.io), then 4.3 (Ansible + reinstall), 4.4 (first deployment).
 
 ---
 
@@ -38,7 +38,7 @@
 
 | # | Risk | What we do about it |
 | --- | --- | --- |
-| R1 | Cloudflare in front of Cinema City blocks or challenges requests from datacenter IPs (KB §10) | Test it first, before building the web app (plan stage 2). Fallback: pollers on residential IPs (§11) |
+| R1 | Cloudflare in front of Cinema City blocks or challenges requests from datacenter IPs (KB §10) | Tested first (stage 2): green on 5 Nov 2026 - 4,997 requests from the VPS in 3.1 days, no block or challenge (§7 stage 4). The poller's request log (`check_log`, operator's panel) keeps measuring. Fallback: pollers on residential IPs (§11) |
 | R2 | Terms of use: a public (and possibly paid) service built on an unofficial API is a different category than a personal tool | Terms read in Oct 2026: personal and learning use within the guardrails; no public launch or payments without written consent from Cinema City (§9) |
 | R3 | Personal data (GDPR): e-mail addresses, notification history | EU hosting, privacy notice, account deletion, store only what the service needs |
 | R4 | The request budget grows with users | De-duplicate screenings, adaptive intervals, global rate limiter, limits per account (§4.3, §5) |
@@ -209,8 +209,15 @@ safety net against application bugs.
   environment (e.g. `cinemawatch.damiankowalski.pl`, `staging-cinemawatch.damiankowalski.pl`; first-level names, so
   Cloudflare's free certificate covers them). Registrar OVHcloud, DNS on Cloudflare, DNSSEC on. Current state and
   runbooks: [`SAAS_INFRA.md`](SAAS_INFRA.md).
-- **Images and deployment:** GitHub Actions builds container images → GitHub Container Registry (GHCR) → the server
-  pulls them. No build tools on the server.
+- **Images and deployment:** GitHub Actions builds container images → GitHub Container Registry (GHCR, public
+  package: the server pulls without a token) → the server pulls a named version (never `latest`). No build tools on
+  the server. The web image: `aspnet:10.0-resolute-chiseled-extra` (Ubuntu 26.04, no shell, non-root, ICU and
+  tzdata), read-only file system; `infra/compose/compose.yaml` with `postgres` (18), `web`, `cloudflared`, log size
+  limits; secrets in `.env` on the server (template `infra/compose/env.example`). The app applies database migrations
+  at start-up (`Saas:MigrateDatabaseOnStart`; one instance, a `pg_dump` before every deployment). Deployment starts by
+  hand (one script on the server); automation from GitHub Actions is optional (§7, 4.6).
+- **Docker on the server:** from Docker's own repository, with its origin added to `unattended-upgrades` (security
+  updates arrive by themselves); configured by Ansible run on the server itself (§9).
 - **Backups:** daily `pg_dump` copied off the server, plus the provider's backup.
 - **Kubernetes:** not needed at this scale; a learning item for later (k3s), same images.
 
@@ -327,12 +334,15 @@ interchangeable.
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
-  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.4.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.5.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
   database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
   release) with a PostgreSQL 18 service container (`CINEMAWATCH_REQUIRE_DB=1`: a missing database fails the job) and
-  publishes the probe; container images come in stage 4. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
+  publishes the probe; the `container` job builds the web image and runs `infra/compose/smoke-test.sh` (postgres + web
+  from the compose file, no tunnel, no e-mail, no poller). Tags `web-vX.Y.Z` (betas `web-vX.Y.Z-beta.N`) run
+  `web-image.yml`: the same build and test, then the image goes to GHCR as `cinemawatch-web:X.Y.Z` and `sha-<commit>`;
+  no GitHub release. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
 - Conventions from KB §7 apply: English code and docs, UI texts via `T("polski", "English")`, tests for every
   behaviour change, no secrets in the repository (configuration via environment variables and GitHub Secrets).
 
@@ -422,28 +432,35 @@ Every increment ends with something testable in the browser on the PC (`src/Cine
       with increment 4's test, before its merge.
 
 ### Stage 4 - Deploy to the VPS (staging)
-- [ ] Final R1 check first: at least 5 days of probe data (`SAAS_INFRA.md` §4.18) against the gate criteria of
-      stage 2. Red → evaluate the residential-poller fallback (§11) before deploying. Then stop and remove the probe
-      (`SAAS_INFRA.md` §4.19) unless it is still useful.
-- [ ] Ansible playbook in `infra/ansible/` (first): the stage 2 hardening plus the setup below; the real inventory
-      (server address) stays out of git; verified by reinstalling the VPS from scratch. Control node: §10.
-- [ ] Swap file (2 GB) before Docker.
-- [ ] Docker + Compose on the VPS: `web` (with the poller inside, one process in MVP 0, §9), `postgres`,
-      `cloudflared`; containers publish no ports (§4.4).
-- [ ] GitHub Actions: build images → GHCR; deploy = pull + restart on the VPS through a dedicated `deploy` user
-      with limited rights (its SSH key in GitHub Secrets).
-- [ ] Cloudflare Tunnel hostname for staging + Cloudflare Access for testers.
-- [ ] Cloudflare Access on `/admin*` (staging and production): only the owner's Google account (with 2FA), a second
-      gate in front of the operator's panel besides the app's own owner check (§9).
-- [ ] E-mail provider account with 2FA (moved from stage 1).
-- [ ] E-mail domain: SPF (replaces `v=spf1 -all`), DKIM, DMARC.
-- [ ] Backups: daily `pg_dump` off the server; restore tested once.
-- [ ] Heartbeat monitor ("dead man's switch"; the code is in increment 4): Healthchecks.io account with 2FA (free
-      plan), one check per environment with period 5 min and grace 10 min (alert about 15 minutes after an outage; the
-      nightly reboot at 03:30 UTC stays below it), the ping address as a secret on the server
-      (`Saas__Heartbeat__Url`), tested by stopping the container once. The service e-mails the owner when the pings stop
-      (server, process or poller down). Works behind Cloudflare Access, because the server calls out. Planned stops:
-      pause the check in Healthchecks first.
+Increments like stage 3; code on `feature/saas-<name>` branches, server and account work recorded in `SAAS_INFRA.md`.
+Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
+- [x] 4.0 R1 final check (5 Nov 2026, brought forward from "at least 5 days", §9): 3.1 days of probe data
+      (2 Nov 15:44 - 5 Nov 19:21 UTC), 410 runs without a gap, 4,997 requests on both hosts: 4,995 HTTP 200, 2 HTTP 500
+      (0.04%, about 5 s each, one screening), no 403 / 429, no `cf-mitigated`, every answer JSON, every request through
+      Cloudflare Warsaw; median 66-118 ms, 25 answers over 2 s (longest 13.4 s). Control group at home: one HTTP 500
+      too (3 Nov), so 5xx are Cinema City's, not a block. Result: **green**. The probe keeps running until the
+      reinstall in 4.3 (then removed, `SAAS_INFRA.md` §4.19); the poller's `check_log` keeps measuring after it.
+- [ ] 4.1 `saas-container` (SaaS 0.5.0): `Saas:TrustForwardedHeaders` (forwarded headers from the tunnel), Secure
+      sign-in cookies for an https `Saas:BaseUrl`, `Saas:MigrateDatabaseOnStart`, a start-up check for tzdata and ICU,
+      `GET /healthz`; `src/CinemaWatch.Web/Dockerfile`, `infra/compose/` (compose file, `.env` template, container
+      test); CI job `container`; `web-image.yml` (GHCR on `web-v*`). A beta tag tests the publishing; the package is
+      made public once.
+- [ ] 4.2 Accounts and DNS (panels only, side by side with 4.1): e-mail provider with 2FA (Brevo or Resend, §10),
+      sending from a subdomain used only for mail, SPF / DKIM / DMARC records in Cloudflare (the apex keeps
+      `v=spf1 -all`); Cloudflare Zero Trust (team, tunnel and its token, Access for staging and for `/admin*` with a
+      one-time PIN by e-mail; may ask for a card even on the free plan - stop and decide); Healthchecks.io with 2FA,
+      one check per environment (period 5 min, grace 10 min; the nightly reboot at 03:30 UTC stays below it).
+- [ ] 4.3 `infra/ansible/` + reinstall: playbook run on the server itself (`ansible-playbook` with a local
+      connection, repository cloned there): the stage 2 hardening, swap file (2 GB), Docker from Docker's repository
+      in `unattended-upgrades`, `/opt/cinemawatch`; verified by reinstalling the VPS from scratch. The real inventory
+      stays out of git.
+- [ ] 4.4 First deployment (staging): `.env` on the server (root only), `docker compose up`, the owner's invitation
+      by real e-mail, test e-mail (inbox or spam), profile import, one "Check now" from the server's IP, heartbeat
+      tested by stopping the container (the alert arrives), `docker stats`; the deployment script (`pg_dump` → pull a
+      named version → `up -d` → `/healthz`).
+- [ ] 4.5 Backups: daily `pg_dump` off the server (destination chosen then); restore tested once.
+- [ ] 4.6 (optional) Deployment from GitHub Actions: a `deploy` user whose key may only run the deployment script
+      (`command=` in `authorized_keys`), not membership of the `docker` group (that equals root).
 
 ### Stage 5 - First SaaS test
 - [ ] 3-5 invited people (possibly only the owner, §9), free, behind Cloudflare Access, 2 weeks. Watch requests
@@ -588,6 +605,22 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | E-mail addresses are cut out of mail error texts kept for the operator (events, `component_status`) | SMTP replies often quote the recipient; events are kept 90 days and must hold no personal data |
 | Nov 2026 | The panel does not reload itself; "Odśwież" reloads it; the database section counts rows exactly | A reload would wipe the settings form; PostgreSQL's statistics lag behind and the tables are small |
 | Nov 2026 | Privacy text reviewed against what is stored (owner's view of accounts, request log and events without personal data, heartbeat without user data, retention); stays a draft until stage 4 names the e-mail provider | The notice must describe the real service before anyone else uses it |
+| Nov 2026 | R1 gate closed early: green on 5 Nov 2026 with 3.1 days instead of "at least 5 days" | 4,997 requests, no block or challenge, 5xx 0.04% and also seen from home; two more days add little - the probe never measured the SaaS load anyway (§7 stage 2). The probe keeps running until the reinstall, and the poller's `check_log` and its block handling (§4.3) keep measuring on staging |
+| Nov 2026 | The R1 control group covered one of the two profiles: only the Diuna profile (5 of 6 screenings) ran in the home Task Scheduler, and only while the PC was on (about 23 h of the 75 h) | Found in the final check; enough for the question "blocked or not", since the control group only had to show that Cinema City answers from home at the same time |
+| Nov 2026 | Database migrations are applied by the app at start-up when `Saas:MigrateDatabaseOnStart` is on (the container); off everywhere else, where missing migrations still refuse the start; a `pg_dump` before every deployment | One instance, so no race; an EF Core migration bundle would be a second artefact to build and run |
+| Nov 2026 | Web image: build on `sdk:10.0-resolute`, run on `aspnet:10.0-resolute-chiseled-extra` (Ubuntu 26.04 like the server: no shell, non-root `app`, ICU and tzdata), read-only file system with a `/tmp` in memory; GHCR package public; deployments name a version, never `latest` | Smaller attack surface; the repository is public anyway, so a public image needs no token on the server; a named version makes going back exact |
+| Nov 2026 | The app refuses to start without tzdata (Europe/Warsaw) or ICU (Polish day names) | A wrong image would otherwise fail at the first check or show dates in the wrong language; the container test in CI catches it before deployment |
+| Nov 2026 | Behind the tunnel: `Saas:TrustForwardedHeaders` trusts `X-Forwarded-Proto` / `-For` from any sender in the container network; an https `Saas:BaseUrl` makes the sign-in cookies Secure always; the form (antiforgery) cookie follows the request | Only `cloudflared` can reach the app (no published ports). Forcing Secure on the antiforgery cookie makes ASP.NET Core refuse every form on a non-HTTPS request (found in the tests): a missing header would break all pages instead of dropping one flag |
+| Nov 2026 | `GET /healthz`: anonymous, "ok" or 503 (database), nothing else | The container test and the deployment script need a check without a sign-in |
+| Nov 2026 | No Docker on the development PC: the image is built and started only in CI (job `container`: postgres + web from `infra/compose/compose.yaml`, throwaway `.env`, no tunnel, no e-mail, poller off) | Docker Desktop needs WSL2 (a system change); CI tests the very compose file the server uses |
+| Nov 2026 | Images published by `web-image.yml` on tags `web-v*` (betas allowed, tag must match the project version), as `X.Y.Z` and `sha-<commit>`; no GitHub release for SaaS versions | Betas can be deployed to staging; the desktop's `release.yml` (`v*`) never matches |
+| Nov 2026 | Pinned images: `postgres:18-trixie` (major only; minor updates with a pull), `cloudflare/cloudflared:2026.10.3` (the newest release at least two weeks old on 5 Nov) | Data on disk belong to the major version; a fresh release can carry a regression or worse |
+| Nov 2026 | Ansible runs on the server itself (local connection, repository cloned there), not from WSL2 or GitHub Actions | No system change on the PC and no SSH key with sudo in GitHub Secrets; the same playbook can later run remotely with another inventory |
+| Nov 2026 | Docker from Docker's own repository, added to `unattended-upgrades`; container log limits in the compose file (3 × 10 MB) | Docker's supported route for 26.04; without the origin its updates would not install by themselves; default logs grow without limit on a 38 GB disk |
+| Nov 2026 | Deployment by hand first (one script on the server); automation later and only with a key restricted to that script | A user in the `docker` group is root in practice, so "limited rights" means a forced command, not a group |
+| Nov 2026 | E-mail from a subdomain used only for mail; the apex keeps `v=spf1 -all`; shortlist Brevo and Resend | A name with the tunnel's CNAME (`cinemawatch.…`) cannot carry other records; mail reputation stays apart from other products |
+| Nov 2026 | Cloudflare Access login by one-time PIN e-mailed to the owner or tester (supersedes "owner's Google account" for `/admin*`) | No OAuth client in Google Cloud to maintain; the Gmail inbox has 2FA anyway; Google as identity provider can be added later |
+| Nov 2026 | Stage 4 runs staging only; the poller is on in exactly one environment on this server's IP | A second poller would double the traffic to Cinema City from the same address |
 
 ---
 
@@ -597,13 +630,11 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | --- | --- |
 | Check interval | MVP 0: the profile's interval with a server minimum of 10 minutes (decided Nov 2026); the adaptive rules (§4.3) tuned with the stage 4 data |
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
-| Heartbeat service | Recommended: Healthchecks.io (free Hobbyist plan: 20 checks, no card; open source); the code is ready (§4.3), the account and checks come in stage 4 |
-| E-mail provider | See §8.3 |
+| Heartbeat service | Recommended: Healthchecks.io (free Hobbyist plan: 20 checks, no card; open source); the code is ready (§4.3), the account and checks come in 4.2 |
+| Backup destination | Chosen in 4.5: OVHcloud Object Storage, Backblaze B2 or a copy pulled to the PC; the dumps are megabytes |
+| E-mail provider | Shortlist Brevo (EU company) and Resend (EU region): compare the current free plan, SMTP and sending from a subdomain at the start of 4.2; SES, Cloudflare Email Sending and Postmark dropped (AWS account and sandbox, paid Workers plan, very small free limit) |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
 | Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
-| Migrations in production | Applied by the app at start-up vs an EF Core migration bundle in the deployment step (stage 4) |
-| Container image | The web app formats dates with the pl-PL / en-GB cultures, so the image needs ICU (stage 4) |
-| Ansible control node | WSL2 on the development PC (a system change there) vs a GitHub Actions Linux runner with the SSH key in GitHub Secrets (fits the stage 4 deployment) |
 
 ---
 

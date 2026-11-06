@@ -11,9 +11,15 @@ using CinemaWatch.Server.Profiles;
 using CinemaWatch.Tests;
 using CinemaWatch.Web;
 using CinemaWatch.Web.Components.Account;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using static CinemaWatch.Saas.Tests.Browser;
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -509,6 +515,73 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
              "poller_settings", "poller_state", "profiles", "seat_plans", "service_events", "user_claims", "user_logins", "user_tokens",
              "users", "watched_screenings"],
             await database.TablesAsync());
+    });
+
+    TestRunner.Add("Database: missing migrations are refused at start-up unless Saas:MigrateDatabaseOnStart applies them (an empty database gets all)", async () =>
+    {
+        await using var empty = await database.CreateEmptySiblingAsync();
+        var options = new DbContextOptionsBuilder<AppDbContext>();
+        options.UseCinemaWatchDatabase(empty.ConnectionString);
+        await using var db = new AppDbContext(options.Options);
+        var all = db.Database.GetMigrations().ToList();
+        Assert.True(all.Count > 0);
+
+        string? refusal = null;
+        try
+        {
+            await db.EnsureMigratedAsync(applyMissing: false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            refusal = ex.Message;
+        }
+        Assert.True(refusal is not null && refusal.Contains($"missing {all.Count} migration(s)") && refusal.Contains("Saas:MigrateDatabaseOnStart"), refusal ?? "not refused");
+        Assert.Equal(0, (await db.Database.GetAppliedMigrationsAsync()).Count());
+
+        Assert.SequenceEqual(all, await db.EnsureMigratedAsync(applyMissing: true));
+        Assert.Equal(0, (await db.EnsureMigratedAsync(applyMissing: false)).Count); // up to date: nothing to do, no refusal
+        Assert.SequenceEqual(all, await db.Database.GetAppliedMigrationsAsync());
+    });
+
+    TestRunner.Add("Behind the proxy: health check without sign-in; forwarded HTTPS only when trusted; an https BaseUrl makes the sign-in cookies Secure", async () =>
+    {
+        // Health check: anonymous, plain text, no redirect to the sign-in page.
+        var anonymous = app.CreateBrowser();
+        var health = await anonymous.GetAsync("/healthz");
+        Assert.Equal(HttpStatusCode.OK, health.StatusCode);
+        Assert.Equal("ok", await health.Content.ReadAsStringAsync());
+
+        // The form cookie of a fresh visit to the sign-in page, with or without the tunnel's X-Forwarded-Proto.
+        static async Task<string> FormCookieAsync(WebApplicationFactory<CinemaWatch.Web.Components.App> factory, bool forwardedHttps)
+        {
+            using var client = factory.CreateClient(new() { AllowAutoRedirect = false, HandleCookies = false });
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/Account/Login");
+            if (forwardedHttps)
+                request.Headers.Add("X-Forwarded-Proto", "https");
+            using var response = await client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return response.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith(".AspNetCore.Antiforgery.", StringComparison.Ordinal));
+        }
+        static bool IsSecure(string cookie) => cookie.Split(';').Any(part => part.Trim().Equals("secure", StringComparison.OrdinalIgnoreCase));
+        static WebApplicationFactory<CinemaWatch.Web.Components.App> With(TestApp app, Dictionary<string, string?> settings) =>
+            app.WithWebHostBuilder(builder => builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(settings)));
+        static CookieSecurePolicy SignInCookie(WebApplicationFactory<CinemaWatch.Web.Components.App> factory, string scheme) =>
+            factory.Services.GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>().Get(scheme).Cookie.SecurePolicy;
+
+        // Development and tests (http://localhost, not trusted): a forged header changes nothing.
+        Assert.True(!IsSecure(await FormCookieAsync(app, forwardedHttps: false)));
+        Assert.True(!IsSecure(await FormCookieAsync(app, forwardedHttps: true)));
+        Assert.Equal(CookieSecurePolicy.SameAsRequest, SignInCookie(app, IdentityConstants.ApplicationScheme));
+
+        // The server: https address, trusted tunnel. The visitor's HTTPS reaches the app, so the form cookie is Secure;
+        // the sign-in cookies are Secure always. Without the header the pages still work (no Secure form cookie then).
+        using var server = With(app, new() { ["Saas:BaseUrl"] = "https://cinemawatch.example", ["Saas:TrustForwardedHeaders"] = "true" });
+        Assert.True(IsSecure(await FormCookieAsync(server, forwardedHttps: true)));
+        Assert.True(!IsSecure(await FormCookieAsync(server, forwardedHttps: false)));
+        Assert.Equal(CookieSecurePolicy.Always, SignInCookie(server, IdentityConstants.ApplicationScheme));
+        Assert.Equal(CookieSecurePolicy.Always, SignInCookie(server, IdentityConstants.ExternalScheme));
+        var serverHealth = await server.CreateClient().GetAsync("/healthz");
+        Assert.Equal(HttpStatusCode.OK, serverHealth.StatusCode);
     });
 
     TestRunner.Add("Start-up: the owner's account is created once and invited in Polish", async () =>

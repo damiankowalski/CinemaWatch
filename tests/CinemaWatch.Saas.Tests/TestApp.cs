@@ -241,18 +241,24 @@ internal sealed class TestDatabase : IAsyncDisposable
 
     public string ConnectionString { get; }
 
-    public static async Task<TestDatabase> CreateAsync(string adminConnectionString)
+    public static async Task<TestDatabase> CreateAsync(string adminConnectionString, bool migrate = true)
     {
         var name = "cinemawatch_test_" + Guid.NewGuid().ToString("N")[..8];
         await ExecuteAsync(adminConnectionString, $"CREATE DATABASE \"{name}\"");
         var connectionString = new NpgsqlConnectionStringBuilder(adminConnectionString) { Database = name }.ConnectionString;
 
-        var options = new DbContextOptionsBuilder<AppDbContext>();
-        options.UseCinemaWatchDatabase(connectionString);
-        await using (var db = new AppDbContext(options.Options))
+        if (migrate)
+        {
+            var options = new DbContextOptionsBuilder<AppDbContext>();
+            options.UseCinemaWatchDatabase(connectionString);
+            await using var db = new AppDbContext(options.Options);
             await db.Database.MigrateAsync();
+        }
         return new TestDatabase(adminConnectionString, name, connectionString);
     }
+
+    /// <summary>Another database on the same server, without any migration (like a fresh container's).</summary>
+    public Task<TestDatabase> CreateEmptySiblingAsync() => CreateAsync(_adminConnectionString, migrate: false);
 
     public async Task<IReadOnlyList<string>> TablesAsync()
     {

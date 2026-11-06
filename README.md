@@ -182,6 +182,9 @@ beta and merged through a pull request.
 | `src/CinemaWatch.ViewModels` | Wizard view models without WPF references (fully testable) |
 | `src/CinemaWatch.App` | WPF app: views, hall map, Windows notifications, dialogs |
 | `tests/CinemaWatch.Tests` | Dependency-free tests using captured API responses |
+| `src/CinemaWatch.Server`, `src/CinemaWatch.Web` | SaaS (private web app, [details](src/CinemaWatch.Web/README.md)): accounts, profiles, the poller and e-mails; the container image (`src/CinemaWatch.Web/Dockerfile`) |
+| `tests/CinemaWatch.Saas.Tests` | SaaS tests: logic, database and the whole web flow |
+| `infra/compose` | SaaS on the server: Docker Compose file, `.env` template, container test |
 | `tools/CinemaWatch.Probe` | SaaS risk test: checks profiles from a server and logs every request, no notifications ([details](tools/CinemaWatch.Probe/README.md)) |
 | `tests/CinemaWatch.Probe.Tests` | Tests of the probe |
 | `scripts/CinemaWatch.ps1` | Standalone PowerShell monitor with e-mail notifications (the project's origin) |

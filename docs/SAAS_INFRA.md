@@ -10,8 +10,8 @@
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 2 November 2026 - stage 2 done: VPS hardened; `CinemaWatch.Probe` runs every 10-12 minutes since
-> 2 Nov 2026 (risk test R1, provisional result green; it keeps running during stage 3).
+> Last updated: 5 November 2026 - stage 4 started: risk test R1 closed green with the probe data of 2-5 Nov 2026
+> (§3); `CinemaWatch.Probe` keeps running until the reinstall of stage 4 (4.3). No server changes yet in stage 4.
 
 ---
 
@@ -97,9 +97,10 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Units | `/etc/systemd/system/cinemawatch-probe.service` (oneshot, temporary user `DynamicUser`, sandboxed, `MemoryMax=300M`) and `cinemawatch-probe.timer` (1 min after the timer starts, then every 10 min plus up to 2 min random delay); timer enabled since 2 Nov 2026, so it also starts after every reboot |
 | Output | The journal: `journalctl -u cinemawatch-probe.service` |
 | Load | About 12 requests per run (2 per screening; hall layout cached for 7 days) plus the repertoire once an hour: about 1,600 requests a day. One run: about 2.5 s, 1.2 s CPU, memory peak 75 MB |
-| Control group | The same profiles in the desktop app's Task Scheduler at home; "would notify" matched the desktop toast on 2 Nov |
+| Control group | The desktop app at home; "would notify" matched the desktop toast on 2 Nov. In fact only the Diuna profile (5 of the 6 screenings) ran in the home Task Scheduler, and only while the PC was on (found in the final check, §3) |
 | Known issue | Column `bytes` stays empty for compressed responses (.NET does not report the size after decompression); irrelevant for R1, fixed only if the probe is used again |
-| Ends | Runs until the final R1 check before stage 4 ([`SAAS.md`](SAAS.md) §7); stop and remove with §4.19 |
+| Result | R1 green on 5 Nov 2026 (§3, stage 4 step 1) |
+| Ends | Runs until the reinstall in stage 4, increment 4.3 ([`SAAS.md`](SAAS.md) §7); stop and remove with §4.19 |
 
 ---
 
@@ -296,6 +297,25 @@ cinemawatch-probe.timer (every 10-12 min, also after a reboot)
     /tmp/cinemawatch-probe-upload` from inside it) makes later commands print `getcwd() failed` - harmless, `cd ~`.
 17. **Provisional gate** (2 Nov): green. The probe keeps running during stage 3; the full check with at least
     5 days of data comes before the first deployment in stage 4 ([`SAAS.md`](SAAS.md) §9).
+
+### Stage 4 - final R1 check (5 Nov 2026)
+
+1. **Data copied** with §4.18 (CSV of requests, `would-notify.log`) plus the desktop's background log at home
+   (`%LOCALAPPDATA%\CinemaWatch\Logs\cinemawatch.log`); nothing changed on the server, `/tmp` cleaned afterwards.
+2. **Server (probe):** 2 Nov 15:44 - 5 Nov 19:21 UTC (75.6 h), 410 runs, gaps 10-12 minutes without a miss (apart
+   from the switch from the run by hand to the timer on 2 Nov), 12-13 requests per run, median 61 requests an hour
+   (at most 74). 4,997 requests: `tickets.cinema-city.pl` 4,920, `www.cinema-city.pl` 77 (repertoire); 4,995 HTTP 200
+   and 2 HTTP 500 (2 Nov 19:34 and 3 Nov 10:56 UTC, both screening 1765592, both after about 5 s: 0.04%); no 403, no
+   429, no `cf-mitigated`, no `Retry-After`, no network error; every answer `application/json`; every `cf-ray` ends in
+   `-WAW`. Duration median 118 ms (details) and 66 ms (free seats), 95th percentile 544 / 352 ms, 25 answers over 2 s,
+   the longest 13.4 s (the client's timeout is 30 s). "Would notify": only the first run (2 Nov, row 6: 14, 21).
+3. **Home (control group):** only the Diuna profile ran in the background (every 5 minutes) and only while the PC was
+   on: 2 Nov 16:44 - 22:59, 3 Nov 14:54 - 23:54 and 4 Nov 15:54 - 5 Nov 00:04 (Polish time), about 23 h of
+   overlap. One HTTP 500 there too (3 Nov 22:24 UTC, screening of 18 Dec 16:30). No newly freed watched seats on either
+   side during the overlap, so no notifications to compare.
+4. **Result: green**, decided on 3.1 days instead of the planned 5 ([`SAAS.md`](SAAS.md) §9): no sign of a block, 5xx far
+   under 1% and also seen from home. Limit as before: about 1,600 requests a day is a desktop user's load, not the SaaS
+   load. The probe keeps running until the reinstall (4.3).
 
 ---
 
@@ -662,15 +682,17 @@ sudo rm -rf /opt/cinemawatch-probe /etc/cinemawatch-probe /var/lib/private/cinem
 
 ## 5. Next infrastructure steps
 
-- During stage 3 (development on the PC, no server work): the probe keeps running; a look with §4.16 now and then.
-- Start of stage 4: the final R1 check with at least 5 days of probe data (§4.18), then stop and remove the probe
-  (§4.19) unless it is still useful.
-- Stage 4, from the SaaS code of stage 3 ([`SAAS.md`](SAAS.md) §7): Cloudflare Access on `/admin*` (the operator's
-  panel; owner's Google account only) and a Healthchecks.io account with 2FA, one check per environment (period 5 min,
-  grace 10 min), its ping address only as a secret on the server (`Saas__Heartbeat__Url`).
-- Stage 4: the Ansible playbook first (stage 2 hardening as code, verified by a reinstall), then swap, Docker and
-  Compose, a `deploy` user, Cloudflare Tunnel and Access, e-mail records, backups, and an external heartbeat monitor
-  for the poller ("dead man's switch", [`SAAS.md`](SAAS.md) §7).
+Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.
+
+- 4.2, panels only (no server work): an e-mail provider account with 2FA and its DNS records (SPF, DKIM, DMARC) for a
+  subdomain used only for mail; Cloudflare Zero Trust (team, tunnel with its token, Access for staging and for
+  `/admin*` by one-time PIN); a Healthchecks.io account with 2FA, one check per environment (period 5 min, grace
+  10 min), its ping address only as a secret on the server (`SAAS_HEARTBEAT_URL` in `.env`).
+- 4.3: the Ansible playbook run on the server itself (stage 2 hardening as code, swap, Docker from Docker's repository
+  with automatic security updates, `/opt/cinemawatch`), verified by a reinstall; before it, stop and remove the probe
+  (§4.19).
+- 4.4: the first deployment from `infra/compose/compose.yaml` with `.env` on the server (template
+  `infra/compose/env.example`); 4.5 backups; 4.6 optional deployment from GitHub Actions.
 
 Each step will be added to §1 and §3 of this file.
 

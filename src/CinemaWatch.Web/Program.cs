@@ -99,6 +99,8 @@ builder.Services.AddRazorComponents();
 builder.Services.Configure<WebEncoderOptions>(options => options.TextEncoderSettings = new TextEncoderSettings(UnicodeRanges.All));
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityRedirectManager>();
+// On the server behind Cloudflare Tunnel: forwarded headers and Secure cookies (Saas:TrustForwardedHeaders, Saas:BaseUrl).
+builder.Services.AddBehindProxy();
 
 builder.Services.AddSingleton(TimeProvider.System);
 // Every e-mail's outcome is recorded for the operator's panel (component_status).
@@ -111,6 +113,8 @@ builder.Services.AddPoller();
 
 var app = builder.Build();
 
+// First, so everything after it sees the visitor's HTTPS (does nothing unless Saas:TrustForwardedHeaders is on).
+app.UseForwardedHeaders();
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
@@ -121,6 +125,7 @@ app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapStaticAssets().AllowAnonymous();
+app.MapHealthCheck();
 app.MapRazorComponents<App>();
 app.MapAccountEndpoints();
 app.MapProfileEndpoints();
