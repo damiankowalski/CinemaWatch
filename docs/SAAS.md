@@ -12,8 +12,8 @@
 > Last updated: 7 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
 > skipped on purpose (§11). CinemaWatch runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026
 > (now 0.5.2), behind Cloudflare Access; e-mail through Resend; heartbeat and backup monitored by Healthchecks.io; daily
-> encrypted backups to Backblaze B2, restore tested; testers invited. Open in stage 5 (§7, §10): the access model, the
-> owner deleting accounts, an account request form, `cloudflared` 2026.10.7.
+> encrypted backups to Backblaze B2, restore tested; testers invited, the two-week test runs since 7 Nov 2026. Decided
+> (§9): access model A, no public account request form, the owner deletes accounts; next: SaaS 0.6.0 (§7, 5.2-5.5).
 
 ---
 
@@ -494,27 +494,37 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
 - [x] 5.1 Documents (7 Nov 2026): this list, the open questions (§10), the backlog (§11); in `SAAS_INFRA.md` the lesson
       about the Access policy (testers invited in the app but missing from the policy got no PIN; a duplicate policy
       appeared while editing) and runbook §4.22 made more precise.
-- [ ] 5.2 Access model (§10): today access is granted in two places (the e-mail list of the Access policy and the
-      app's invitation), which is inconvenient and error-prone. Decide between A (Access only on `/admin`, the rest
-      behind the app's own sign-in plus a Cloudflare rate limiting rule), B (Access for everybody with a PIN) and C (the
-      app edits the Access list through the Cloudflare API); then the plan, the hardening the choice needs, the change
-      in Cloudflare and the runbooks (`SAAS_INFRA.md` §2.4, §4.21, §4.22).
-- [ ] 5.3 The owner deletes an account in `/admin/users`: with all its data (profiles, notification state, history),
-      after a confirmation, enforced on the server (owner policy, antiforgery, never the owner's own account); a pending
-      invitation can be withdrawn the same way. Runbook §4.22 ("remove a tester") then uses it.
-- [ ] 5.4 "Request an account" (§10): decide whether to build it now, later or not at all. Idea: a public form (with
-      Turnstile) creates a request that does nothing (no profile import, no checks, later no profiles created on the
-      site) until the owner approves it in `/admin`; e-mails to the owner and to the person; the restriction enforced
-      in the API and the poller, not only in the UI. Needs a public page, so it depends on 5.2.
-- [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026; two weeks old on 13 Nov 2026): keep the two-week
-      rule or make an exception (§10). Change in `infra/compose/compose.yaml`, a new SaaS version and tag `web-vX.Y.Z`,
-      `deploy.sh`, then the connector's version in the dashboard (*Tunnels → staging-cinemawatch*).
-- [ ] 5.6 The test: 3-5 invited people (possibly fewer, §9), free, 2 weeks. Watch: requests per hour against the
-      budget (120), answers other than HTTP 200 (403 / 429 / `cf-mitigated` / HTML = a block), notification latency
-      (the e-mail against the desktop toast at home for the same seats), spam placement per mail provider, errors and
-      events in `/admin`, the Healthchecks checks (heartbeat, backup), memory and disk (`docker stats`, `df -h`).
+- [ ] 5.2 Access model: **decided A** (7 Nov 2026, §9): Cloudflare Access only on `/admin`; everything else behind the
+      app's own sign-in; accounts only by the owner's invitation. Rule: a visitor without an account can cause no cost
+      and no damage (§9). Order: (1) SaaS 0.6.0 hardens everything a visitor without an account can reach - password
+      help e-mails limited per account and per day and sent in the background, sign-in and password help answer in the
+      same time whether the account exists or not, `/admin` only in lower case, `/healthz` only from inside the server,
+      `robots.txt` and `noindex`, a test that anonymous requests write nothing to the database; (2) deploy and test;
+      (3) one Cloudflare rate limiting rule on the account forms, `curl` checks (`SAAS_INFRA.md` §4.21); (4) only then
+      remove the Access application of the whole host; `/admin` keeps its own. Runbooks §2.4, §4.21, §4.22 updated.
+- [ ] 5.3 The owner deletes an account in `/admin/users` (SaaS 0.6.0; decided 7 Nov 2026, §9): with all its data
+      (profiles, notification state, history), after a confirmation, enforced on the server (owner policy,
+      antiforgery, never the owner's own account); a pending invitation is withdrawn the same way. The person gets a
+      short e-mail (active accounts only); the event names no e-mail address; sessions are re-checked every minute,
+      so a deleted account is signed out at once. Runbook §4.22 ("remove a tester") then uses it.
+- [x] 5.4 "Request an account": **dropped** (7 Nov 2026, §9). New accounts come only from the owner's invitation by
+      e-mail; there is no public form.
+- [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). Part of SaaS
+      0.6.0: the compose change is committed and the stable tag `web-v0.6.0` set on or after 13 Nov 2026 (the image built
+      then also carries the .NET patch of 10 Nov 2026); a beta before that keeps 2026.10.3. Then `deploy.sh` and the
+      connector's version in the dashboard (*Tunnels → staging-cinemawatch*).
+- [ ] 5.6 The test (**started 7 Nov 2026**, about 2 weeks to 21 Nov; runs alongside 0.6.0, which does not change the
+      poller; daily and weekly checks: `SAAS_INFRA.md` §4.27): 3-5 invited people (possibly fewer, §9), free. Watch:
+      requests per hour against the budget (120), answers other than HTTP 200 (403 / 429 / `cf-mitigated` / HTML = a
+      block), notification latency (the e-mail against the desktop toast at home for the same seats), spam placement per
+      mail provider, errors and events in `/admin`, the Healthchecks checks (heartbeat, backup), memory and disk
+      (`docker stats`, `df -h`).
 - [ ] 5.7 Write the lessons into §9 and plan MVP 1 (§5.2): creating profiles on the site - wizard and hall map with
       seat selection like the desktop app - is the next product step (confirmed Nov 2026), not an option.
+- [ ] 5.8 Updates of every component (discussion with the owner, then a runbook; §10): list everything that must be
+      kept up to date and how - Ubuntu and its kernel, Docker, PostgreSQL, .NET in our image, NuGet packages,
+      `cloudflared`, the CI tools; which update themselves and which only when we deploy; the order, the checks and
+      the way back for each. Safety first: no component left unpatched for long, no update without a way back.
 
 ### Stage 6 - MVP 1 (§5.2)
 
@@ -713,6 +723,14 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | A restore test (`restore-test.sh`): after the setup, every 3 months and after a schema change, with a temporary read-only B2 key deleted afterwards; it restores into a scratch database and compares every table | A backup that was never restored is only a hope; the live database is only read |
 | Nov 2026 | `.gitignore` keeps the Visual Studio template but excludes `infra/backup/` from its `Backup*/` rule | On Windows Git ignores case, so the rule hid the backup scripts from `git add` (found by CI) |
 | Nov 2026 | rclone runs with `--config ""` (configuration in memory, from environment variables) | No `rclone.conf` with a key on disk, and no notice about the missing file in every log |
+| Nov 2026 | Access model **A** (stage 5.2): Cloudflare Access only on `/admin`; the rest of the site behind the app's own sign-in; Access for the whole host removed only after SaaS 0.6.0's hardening is deployed and checked | Granting access in two places (Access policy and invitation) caused the missing-PIN incident (`SAAS_INFRA.md` §3). B keeps two sign-ins and lets anyone take one of the 50 seats; C needs a Cloudflare API token (no password, §10) and a secret on the server that can open Access |
+| Nov 2026 | Rule for everything public: **a visitor without an account can cause no cost and no damage** - no database rows (only the failed-sign-in counter of an existing account), no Cinema City requests, a bounded number of e-mails, no way into `/admin`, nothing that tells whether an address has an account | The sign-in page becomes public with model A; this is the test every public page and form must pass. Accepted rest: a stranger who knows an address can lock that account for 15 minutes; floods are Cloudflare's to absorb |
+| Nov 2026 | No public "request an account" form, now or later: new accounts only by the owner's invitation by e-mail | A public form creates data and e-mails for strangers, needs Turnstile (third-party JavaScript) and moves towards a public service (R2); a closed group needs none of it |
+| Nov 2026 | The owner deletes accounts in `/admin/users` (with all data, after a confirmation, never the owner's own); an active account's person gets a short e-mail, a withdrawn invitation none; the event in the panel names no e-mail address; sessions are re-checked every minute (was 30) | People should know their data is gone; events keep no personal data (90 days); a deleted account must not stay signed in for half an hour; one check per minute and visitor costs nothing at this size |
+| Nov 2026 | Password help e-mails are limited per account and per day and sent in the background; sign-in and password help answer in the same time whether the account exists or not | Resend Free stops at 100 e-mails a day: unlimited password help e-mails could stop every seat notification for a day; the time of an answer must not reveal who has an account |
+| Nov 2026 | `/healthz` answers only inside the server (requests through the tunnel get 404); `/admin` answers only in lower case | `deploy.sh` and the container test call it directly; outside it only costs a database query. ASP.NET ignores case in paths; other Cloudflare products match paths case-sensitively and Access is not documented either way: `/ADMIN` must not slip past the admin application |
+| Nov 2026 | No exception for `cloudflared` 2026.10.7: it comes with SaaS 0.6.0, tagged on or after 13 Nov 2026 | Its fixes touch nothing we use (metrics server, libraries, HTTP/2 fallback); `cloudflared` sees every request decrypted and holds the tunnel token, the worst place for a bad release; waiting six days also brings the .NET patch of 10 Nov 2026 into the same image |
+| Nov 2026 | The stage 5 test starts at once (7 Nov 2026), alongside 0.6.0 | 0.6.0 changes accounts and public pages, not the poller, so the measurements are not disturbed |
 
 ---
 
@@ -724,9 +742,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
 | Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
-| Access model (stage 5.2) | Today a tester needs an entry in the Access policy **and** an invitation in the app. (A) Access only on `/admin`; the rest behind the app's sign-in (invitation only, lockout after 5 failures) plus a Cloudflare rate limiting rule (Free: 1 rule, per IP, 10 s period, 10 s block); Turnstile possible later. Makes the sign-in page public. (B) Access for everybody with a one-time PIN: scanners stay out, but two sign-ins remain and anyone who receives a PIN takes one of the 50 free seats. (C) The app edits the Access list through the Cloudflare API: needs an API token (no Cloudflare password, §1.2 of `SAAS_INFRA.md`) and a secret on the server that can open Access. Proposed: A, after the hardening it needs |
-| Request an account (stage 5.4) | Build now, after stage 5 or never. A public form is a step towards a public service (R2) and needs a public page (5.2), Turnstile (third-party JavaScript, against the no-JavaScript decision) and limits on e-mails to unknown addresses |
-| `cloudflared` 2026.10.7 before 13 Nov 2026 (stage 5.5) | Exception to the two-week rule or wait; the newer releases fix the metrics server, dependencies and an HTTP/2 regression (we use QUIC) |
+| Updates of every component (stage 5.8) | Some parts update themselves (Ubuntu packages and kernel with the 03:30 reboot, Docker from its repository), others only when we deploy: PostgreSQL minor versions (pulled by `deploy.sh` only), .NET and the base image (only when a tag builds a new image), NuGet packages, `cloudflared` (pinned, two-week rule), CI tools. To decide: a regular cadence (e.g. a monthly release after the .NET patch Tuesday), how to notice security fixes, checks and the way back |
 
 ---
 
@@ -756,8 +772,9 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
   `deploy.sh` (`command=` in `authorized_keys`), never the `docker` group (equals root); the key in GitHub Secrets.
 - **Private repository:** the server clones the public repository without credentials (`deploy.sh`, Ansible). If the
   repository ever becomes private, the server needs a read-only deploy key for this repository only.
-- **Turnstile on public forms** (sign-in, password help, account request) if the rate limiting rule and the lockout
-  are not enough; it means a third-party script and a secret key on the server.
+- **Turnstile on the sign-in and password-help forms** only if the rate limiting rule and the app's own limits prove
+  not enough; it means a third-party script and a secret key on the server. (A public account request form was
+  dropped for good, §9.)
 
 ---
 

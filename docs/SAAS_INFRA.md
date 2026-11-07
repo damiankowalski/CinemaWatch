@@ -12,7 +12,9 @@
 >
 > Last updated: 7 November 2026 - stage 4 done (4.6 skipped on purpose): CinemaWatch runs on the VPS behind Cloudflare
 > Tunnel and Access since 6 Nov 2026, now 0.5.2; encrypted daily database backup to Backblaze B2 (EU Central), restore
-> tested (§1.8). Stage 5 started: testers added to the Access policy and invited in the app (§3, §4.22).
+> tested (§1.8). Stage 5 started: testers added to the Access policy and invited in the app (§3, §4.22); the two-week
+> test runs since 7 Nov 2026 (§4.27). Access model A decided ([`SAAS.md`](SAAS.md) §9): Access for the whole host goes
+> after SaaS 0.6.0.
 
 ---
 
@@ -513,6 +515,10 @@ Browser --HTTPS--> Cloudflare (WAW)
    *Access controls → Policies* that each name exists once and which application uses it; a tester who gets no PIN
    is first looked up in the policy. §4.22 now says so. Granting access in two places (policy and invitation) is the
    reason for the access-model question of stage 5.2 ([`SAAS.md`](SAAS.md) §10).
+4. **Decisions** (7 Nov 2026, [`SAAS.md`](SAAS.md) §9): access model A (Access only on `/admin` after SaaS 0.6.0), no
+   public account request form, the owner deletes accounts in `/admin`, `cloudflared` 2026.10.7 with 0.6.0 (on or
+   after 13 Nov). The two-week test started the same day with the testers already invited; daily and weekly checks in
+   §4.27.
 
 ---
 
@@ -1190,12 +1196,59 @@ cw start web
 
    Then sign in and check the profiles; the heartbeat check goes up again.
 
+### 4.27 Stage 5: daily and weekly check
+
+While the test runs (from 7 Nov 2026, about two weeks). Write down anything unusual with the date, the tester and
+the mail provider; the notes become the lessons of stage 5.7 ([`SAAS.md`](SAAS.md) §7).
+
+**Daily, about 5 minutes (browser):**
+
+1. `/admin`: the poller runs, is not paused and has no block in force; requests in the last 24 hours within the budget
+   (120 per hour); answers HTTP 200 (a rare 5xx is Cinema City's, as in R1); no new warning among the events.
+2. Healthchecks.io: `cinemawatch-staging` and `cinemawatch-backup` both up; no "DOWN" or failure e-mail in the inbox.
+3. Testers' reports: notification e-mails in the inbox or in spam (with the mail provider: Gmail, Outlook, WP, Onet,
+   Interia, o2…), missing or late notifications, errors on the site.
+4. Latency: for a screening watched both by the desktop app at home and by the SaaS (the same profile imported),
+   note the time of the desktop notification and of the e-mail. Expected: within one interval (about 12 minutes).
+
+**Weekly, about 10 minutes - server (bash, over SSH):**
+
+```bash
+cw() { sudo docker compose -f /opt/cinemawatch/compose.yaml "$@"; }
+cw exec -T postgres psql -U cinemawatch -d cinemawatch -c "
+select date_trunc('day', at)::date as day, count(*) as requests,
+       count(*) filter (where status = 200) as ok,
+       count(*) filter (where status in (403, 429) or cf_mitigated is not null) as blocked,
+       count(*) filter (where content_type is not null and content_type not like 'application/json%') as not_json,
+       count(*) filter (where status is null) as no_answer,
+       max(duration_ms) as slowest_ms
+from check_log where at > now() - interval '7 days' group by 1 order by 1;"
+cw exec -T postgres psql -U cinemawatch -d cinemawatch -c "
+select max(n) as busiest_hour from (select count(*) as n from check_log
+where at > now() - interval '7 days' group by date_trunc('hour', at)) h;"
+```
+
+Expected: `blocked` and `not_json` 0 every day (anything else: stop and look at `/admin` and §4.24 logs);
+`busiest_hour` at most 120. Then:
+
+```bash
+cw logs --since 168h web 2>&1 | grep -ciE 'fail|error|exception'
+sudo docker stats --no-stream
+df -h /
+```
+
+Expected: few error lines (read them: `cw logs --since 168h web 2>&1 | grep -iE 'fail|error|exception' | tail -20`),
+about 300 MiB for the three containers, the disk far from full. Nothing here changes anything on the server.
+
 ## 5. Next infrastructure steps
 
-Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.
+Stage 5 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- Stage 5 ([`SAAS.md`](SAAS.md) §7): the access model (5.2) may change the Access applications, §2.4, §4.21 and
-  §4.22; `cloudflared` 2026.10.7 (5.5) in `infra/compose/compose.yaml`, a new version, deployed with §4.24.
+- Stage 5 ([`SAAS.md`](SAAS.md) §7): SaaS 0.6.0 (account deletion, hardened public pages, `cloudflared` 2026.10.7,
+  stable tag on or after 13 Nov 2026) deployed with §4.24; then one Cloudflare rate limiting rule on the account
+  forms, the `curl` checks of §4.21 (also `/Admin`, `/ADMIN`, `/healthz` from outside) and the Access application of
+  the whole host removed (model A); §2.4, §4.21 and §4.22 rewritten for it.
+- Stage 5.8: an inventory of everything that needs updates and a runbook for it.
 - Restore test again in February 2027 (§4.26).
 - 4.6 (deployment from GitHub Actions) was skipped; it stays in the backlog ([`SAAS.md`](SAAS.md) §11).
 
