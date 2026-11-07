@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Profiles created next to a locally run exe: the profile files only, so source folders named Profiles stay tracked
 *.cinemawatch.json
+
+# SaaS backup scripts (the Visual Studio rule Backup*/ above would hide them on Windows)
+!infra/backup/
