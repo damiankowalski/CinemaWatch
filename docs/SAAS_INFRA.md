@@ -10,9 +10,9 @@
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 7 November 2026 - stage 4: 4.1-4.4 done (CinemaWatch runs on the VPS behind Cloudflare Tunnel and
-> Access since 6 Nov 2026, now 0.5.2); 4.5 done: an encrypted daily database backup to Backblaze B2 (EU Central),
-> restore from B2 tested (§1.8, §3). Next: stage 5, the first test with invited people (4.6 optional).
+> Last updated: 7 November 2026 - stage 4 done (4.6 skipped on purpose): CinemaWatch runs on the VPS behind Cloudflare
+> Tunnel and Access since 6 Nov 2026, now 0.5.2; encrypted daily database backup to Backblaze B2 (EU Central), restore
+> tested (§1.8). Stage 5 started: testers added to the Access policy and invited in the app (§3, §4.22).
 
 ---
 
@@ -32,7 +32,7 @@
 | DNSSEC | On since 31 Oct 2026: Cloudflare signs the zone; DS at the registry with key tag 2371, algorithm 13, digest type 2 |
 | Cloudflare zone extras | AI crawler policy at defaults (allow); Bot Preference Sync on (robots.txt) - irrelevant until a site exists |
 | Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026; reinstalled on 6 Nov 2026 and configured by `infra/ansible` (§1.3); runs the app's containers since 6 Nov 2026 |
-| Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch 0.5.1 since 6 Nov 2026, behind Cloudflare Access (§1.6) and the app's own sign-in |
+| Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch since 6 Nov 2026 (0.5.2 since 7 Nov), behind Cloudflare Access (§1.6) and the app's own sign-in |
 | E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
 | Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1`, `0.5.2` (deployed), with `sha-<commit>` tags |
 | Heartbeat monitor | Healthchecks.io, checks `cinemawatch-staging` (§1.7; the alarm by e-mail tested on 7 Nov 2026) and `cinemawatch-backup` (§1.8) |
@@ -143,7 +143,8 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Login methods | Cloudflare (default, added with the organization) and One-time PIN (code by e-mail from `noreply@notify.cloudflare.com`, valid 10 minutes); both applications accept the PIN only, with Instant Auth |
 | Tunnel | `staging-cinemawatch`, remotely managed (configured in the dashboard); Healthy since 6 Nov 2026: one connector (`cloudflared` 2026.10.3 in a container), 4 QUIC connections to Warsaw. Its token is a secret, only in the server's `.env` (`TUNNEL_TOKEN`) |
 | Route (published application) | `staging-cinemawatch.damiankowalski.pl` → `http://web:8080` (the app container in the compose network); DNS: `CNAME staging-cinemawatch` → `<tunnel id>.cfargotunnel.com`, Proxied. The CNAME's tunnel id must equal the tunnel's own id (*Tunnel details*): it pointed at a deleted tunnel until 6 Nov 2026 (error 1033) |
-| Access application 1 | `CinemaWatch staging`: the whole host; policy `Owner and testers` (Allow, Include: e-mails - the owner today); session 1 week |
+| Access application 1 | `CinemaWatch staging`: the whole host; policy `Owner and testers` (Allow, Include: e-mails - the owner and the invited testers, 7 Nov 2026); session 1 week |
+| Access policies | Reusable objects of their own (*Access controls → Policies*), attached to applications; Cloudflare accepts two policies with the same name. `Owner and testers` exists once again since a duplicate was removed on 7 Nov 2026 (§3) |
 | Access application 2 | `CinemaWatch staging admin`: path `admin` (covers `/admin` and everything below it); policy `Owner only`; session 24 hours. The more specific application wins and inherits nothing, so testers never pass `/admin` |
 | Checked (6 Nov 2026) | Before Access: HTTP 530 from Cloudflare (`-WAW`, tunnel without a connector); with Access: HTTP 302 to the team domain's login page (§4.21) |
 
@@ -494,6 +495,24 @@ Browser --HTTPS--> Cloudflare (WAW)
 5. **Restore test from B2** with a temporary read-only key: downloaded, decrypted with the private key typed in,
    restored into `cinemawatch_restore_test`, 16 tables compared (only `check_log` higher live: 6 requests after the
    backup), same last migration, `PASS`; the scratch database dropped, the temporary key deleted.
+
+---
+
+### Stage 5 - testers and the Access policy (7 Nov 2026)
+
+1. **Testers invited in the app** (`/admin/users`) before their e-mail addresses were in the Access policy
+   `Owner and testers`. The invitation e-mails arrived, but the link led to the Access login page and no PIN came:
+   Access sends a one-time PIN only to addresses its policy allows, and the page looks the same either way (it does not
+   reveal who is allowed). The order in §4.22 (Access first, then the app) had been skipped.
+2. **Fixed** by adding the testers' addresses to *Include → Emails* of `Owner and testers`. While editing, a second
+   policy named `Owner and testers` appeared, not used by any application; deleted. Cloudflare keeps policies as
+   separate, reusable objects and does not require unique names, so a duplicate is easy to miss on the application's
+   page.
+3. **Lessons:** edit the existing policy (the duplicate most likely came from adding a policy on the application's
+   page instead of editing the existing one); afterwards check under
+   *Access controls → Policies* that each name exists once and which application uses it; a tester who gets no PIN
+   is first looked up in the policy. §4.22 now says so. Granting access in two places (policy and invitation) is the
+   reason for the access-model question of stage 5.2 ([`SAAS.md`](SAAS.md) §10).
 
 ---
 
@@ -982,13 +1001,20 @@ afterwards the app's sign-in page.
 
 ### 4.22 Add a tester
 
-Order matters: Access first, then the app.
+Order matters: Access first, then the app. Valid while the whole host is behind Access (the access model may change
+in stage 5.2, [`SAAS.md`](SAAS.md) §10).
 
-1. Cloudflare → Zero Trust → *Access controls → Applications* → `CinemaWatch staging` → policy `Owner and testers` →
-   add the tester's e-mail to *Include → Emails* → save. Never to `CinemaWatch staging admin`.
-2. The app → `/admin` → users → invite the same address (the invitation e-mail goes through Resend).
-3. The tester opens the link: Access asks for their e-mail and sends a PIN, then the app's set-password page opens.
-4. Remove a tester in the reverse order: delete the account in the app, then the e-mail from the policy.
+1. Cloudflare → Zero Trust → *Access controls → Policies* → the **existing** policy `Owner and testers` → add the
+   tester's e-mail to *Include → Emails* → save. Do not add a new policy on the application's page: that most likely
+   created the duplicate of 7 Nov 2026 (§3). Never add testers to `Owner only`.
+2. Check: *Access controls → Policies* lists `Owner and testers` once, used by `CinemaWatch staging`, with the new
+   address in it.
+3. The app → `/admin/users` → invite the same address (the invitation e-mail goes through Resend).
+4. The tester opens the link: Access asks for their e-mail and sends a PIN (from `noreply@notify.cloudflare.com`, valid
+   10 minutes; check spam), then the app's set-password page opens. **No PIN** = the address is not in the policy
+   (Access shows the same page either way): go back to step 1 and compare the spelling.
+5. Remove a tester in the reverse order: delete the account in the app, then the e-mail from the policy. Until the
+   owner can delete accounts in `/admin` (stage 5.3) the tester deletes their own account (*Account → Delete account*).
 
 ---
 
@@ -1168,10 +1194,10 @@ cw start web
 
 Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- After 13 Nov 2026: `cloudflared` 2026.10.7 in `infra/compose/compose.yaml`, a new version, deployed with §4.24.
-- 4.6 (optional): deployment from GitHub Actions with a key restricted to the deployment script.
-- Stage 5: invited testers (Access policy first, then the app's invitation, §4.22); restore test again in February
-  2027 (§4.26).
+- Stage 5 ([`SAAS.md`](SAAS.md) §7): the access model (5.2) may change the Access applications, §2.4, §4.21 and
+  §4.22; `cloudflared` 2026.10.7 (5.5) in `infra/compose/compose.yaml`, a new version, deployed with §4.24.
+- Restore test again in February 2027 (§4.26).
+- 4.6 (deployment from GitHub Actions) was skipped; it stays in the backlog ([`SAAS.md`](SAAS.md) §11).
 
 Each step will be added to §1 and §3 of this file.
 

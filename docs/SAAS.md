@@ -9,10 +9,11 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 7 November 2026. Status: **stage 4 done** apart from the optional 4.6. CinemaWatch runs on the VPS at
-> `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 (now 0.5.2), behind Cloudflare Access; e-mail through
-> Resend; heartbeat and backup monitored by Healthchecks.io; daily encrypted backups to Backblaze B2, restore tested.
-> Next: stage 5 (first SaaS test with invited people); `cloudflared` 2026.10.7 after 13 Nov 2026.
+> Last updated: 7 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
+> skipped on purpose (§11). CinemaWatch runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026
+> (now 0.5.2), behind Cloudflare Access; e-mail through Resend; heartbeat and backup monitored by Healthchecks.io; daily
+> encrypted backups to Backblaze B2, restore tested; testers invited. Open in stage 5 (§7, §10): the access model, the
+> owner deleting accounts, an account request form, `cloudflared` 2026.10.7.
 
 ---
 
@@ -474,7 +475,7 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       about 280 MiB for the three containers. Found and fixed: the tunnel's DNS record pointed at a deleted tunnel
       (error 1033); the heartbeat check had no e-mail switched on. SaaS 0.5.2: no Kerberos probe in the log
       (`GSS Encryption Mode=Disable` in the compose file, checked by the container test) - to deploy.
-- [ ] `cloudflared` 2026.10.7 once it is two weeks old (13 Nov 2026): compose update, new version, deployment.
+- [x] `cloudflared` 2026.10.7: moved to stage 5 (5.5).
 - [x] 4.5 `saas-backup` (7 Nov 2026): `infra/backup/backup.sh` (`pg_dump` → `age` for a public key → Backblaze B2 EU Central with a
       write-only key → the newest 7 copies kept locally → Healthchecks `/start`, success or `/fail` with the reason);
       `infra/backup/restore-test.sh` (the newest local or B2 copy into a scratch database, every table compared with
@@ -483,14 +484,37 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       bucket with a 30-day lifecycle rule, write-only key, age key pair (private key only in the password manager),
       `/etc/cinemawatch/backup.env`, check `cinemawatch-backup`, the first backup, a restore test from B2. Done: first
       backup 56 KB uploaded with the write-only key; restore from B2 `PASS` (16 tables).
-- [ ] 4.6 (optional) Deployment from GitHub Actions: a `deploy` user whose key may only run the deployment script
-      (`command=` in `authorized_keys`), not membership of the `docker` group (that equals root).
+- [x] 4.6 (optional) Deployment from GitHub Actions: **skipped on purpose** (7 Nov 2026); deploying by hand with
+      `deploy.sh` is enough for one staging server. Kept in §11 with its design (a `deploy` user whose key may only run
+      the deployment script, `command=` in `authorized_keys`; not the `docker` group, which equals root).
 
 ### Stage 5 - First SaaS test
-- [ ] 3-5 invited people (possibly only the owner, §9), free, behind Cloudflare Access, 2 weeks. Watch requests
-      per hour, 403/429, notification latency, spam placement, errors.
-- [ ] Write the lessons into §9 and plan MVP 1 (§5.2): creating profiles on the site - wizard and hall map with seat
-      selection like the desktop app - is the next product step (confirmed Nov 2026), not an option.
+Started 7 Nov 2026. Decisions first (§10), then code on `feature/saas-<name>` branches as in stages 3 and 4; account
+and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and the owner's approval before any code.
+- [x] 5.1 Documents (7 Nov 2026): this list, the open questions (§10), the backlog (§11); in `SAAS_INFRA.md` the lesson
+      about the Access policy (testers invited in the app but missing from the policy got no PIN; a duplicate policy
+      appeared while editing) and runbook §4.22 made more precise.
+- [ ] 5.2 Access model (§10): today access is granted in two places (the e-mail list of the Access policy and the
+      app's invitation), which is inconvenient and error-prone. Decide between A (Access only on `/admin`, the rest
+      behind the app's own sign-in plus a Cloudflare rate limiting rule), B (Access for everybody with a PIN) and C (the
+      app edits the Access list through the Cloudflare API); then the plan, the hardening the choice needs, the change
+      in Cloudflare and the runbooks (`SAAS_INFRA.md` §2.4, §4.21, §4.22).
+- [ ] 5.3 The owner deletes an account in `/admin/users`: with all its data (profiles, notification state, history),
+      after a confirmation, enforced on the server (owner policy, antiforgery, never the owner's own account); a pending
+      invitation can be withdrawn the same way. Runbook §4.22 ("remove a tester") then uses it.
+- [ ] 5.4 "Request an account" (§10): decide whether to build it now, later or not at all. Idea: a public form (with
+      Turnstile) creates a request that does nothing (no profile import, no checks, later no profiles created on the
+      site) until the owner approves it in `/admin`; e-mails to the owner and to the person; the restriction enforced
+      in the API and the poller, not only in the UI. Needs a public page, so it depends on 5.2.
+- [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026; two weeks old on 13 Nov 2026): keep the two-week
+      rule or make an exception (§10). Change in `infra/compose/compose.yaml`, a new SaaS version and tag `web-vX.Y.Z`,
+      `deploy.sh`, then the connector's version in the dashboard (*Tunnels → staging-cinemawatch*).
+- [ ] 5.6 The test: 3-5 invited people (possibly fewer, §9), free, 2 weeks. Watch: requests per hour against the
+      budget (120), answers other than HTTP 200 (403 / 429 / `cf-mitigated` / HTML = a block), notification latency
+      (the e-mail against the desktop toast at home for the same seats), spam placement per mail provider, errors and
+      events in `/admin`, the Healthchecks checks (heartbeat, backup), memory and disk (`docker stats`, `df -h`).
+- [ ] 5.7 Write the lessons into §9 and plan MVP 1 (§5.2): creating profiles on the site - wizard and hall map with
+      seat selection like the desktop app - is the next product step (confirmed Nov 2026), not an option.
 
 ### Stage 6 - MVP 1 (§5.2)
 
@@ -700,6 +724,9 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
 | Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
+| Access model (stage 5.2) | Today a tester needs an entry in the Access policy **and** an invitation in the app. (A) Access only on `/admin`; the rest behind the app's sign-in (invitation only, lockout after 5 failures) plus a Cloudflare rate limiting rule (Free: 1 rule, per IP, 10 s period, 10 s block); Turnstile possible later. Makes the sign-in page public. (B) Access for everybody with a one-time PIN: scanners stay out, but two sign-ins remain and anyone who receives a PIN takes one of the 50 free seats. (C) The app edits the Access list through the Cloudflare API: needs an API token (no Cloudflare password, §1.2 of `SAAS_INFRA.md`) and a secret on the server that can open Access. Proposed: A, after the hardening it needs |
+| Request an account (stage 5.4) | Build now, after stage 5 or never. A public form is a step towards a public service (R2) and needs a public page (5.2), Turnstile (third-party JavaScript, against the no-JavaScript decision) and limits on e-mails to unknown addresses |
+| `cloudflared` 2026.10.7 before 13 Nov 2026 (stage 5.5) | Exception to the two-week rule or wait; the newer releases fix the metrics server, dependencies and an HTTP/2 regression (we use QUIC) |
 
 ---
 
@@ -725,6 +752,12 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 - **Second SSH key** on another device as a further way in (today: one key plus the KVM console).
 - **Ubuntu Pro (ESM):** extra security updates for packages outside the main repository; not needed now.
 - **Game server for swapDuel:** separate small VPS in Poland with real anti-DDoS, or a managed TURN service (§4.6).
+- **Deployment from GitHub Actions** (stage 4.6, skipped on purpose): a `deploy` user whose SSH key may only run
+  `deploy.sh` (`command=` in `authorized_keys`), never the `docker` group (equals root); the key in GitHub Secrets.
+- **Private repository:** the server clones the public repository without credentials (`deploy.sh`, Ansible). If the
+  repository ever becomes private, the server needs a read-only deploy key for this repository only.
+- **Turnstile on public forms** (sign-in, password help, account request) if the rate limiting rule and the lockout
+  are not enough; it means a third-party script and a secret key on the server.
 
 ---
 
