@@ -80,7 +80,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends shellcheck
           shellcheck --version
-          shellcheck infra/compose/*.sh
+          shellcheck infra/compose/*.sh infra/backup/*.sh
 
       - name: Build image
         run: docker build -f src/CinemaWatch.Web/Dockerfile --build-arg VERSION=ci -t cinemawatch-web:ci .

@@ -186,6 +186,7 @@ beta and merged through a pull request.
 | `tests/CinemaWatch.Saas.Tests` | SaaS tests: logic, database and the whole web flow |
 | `infra/compose` | SaaS on the server: Docker Compose file, `.env` template, container test, deployment script |
 | `infra/ansible` | SaaS server configuration: one Ansible playbook run on the server itself ([details](infra/ansible/README.md)) |
+| `infra/backup` | SaaS database backup (encrypted, off the server) and the restore test |
 | `tools/CinemaWatch.Probe` | SaaS risk test: checks profiles from a server and logs every request, no notifications ([details](tools/CinemaWatch.Probe/README.md)) |
 | `tests/CinemaWatch.Probe.Tests` | Tests of the probe |
 | `scripts/CinemaWatch.ps1` | Standalone PowerShell monitor with e-mail notifications (the project's origin) |

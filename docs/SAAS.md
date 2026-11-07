@@ -218,7 +218,8 @@ safety net against application bugs.
   hand (one script on the server); automation from GitHub Actions is optional (§7, 4.6).
 - **Docker on the server:** from Docker's own repository, with its origin added to `unattended-upgrades` (security
   updates arrive by themselves); configured by Ansible run on the server itself (§9).
-- **Backups:** daily `pg_dump` copied off the server, plus the provider's backup.
+- **Backups:** daily `pg_dump` encrypted with `age` and copied to Backblaze B2 (EU Central) with a write-only key,
+  the newest 7 also on the server, plus the provider's daily backup; restore tested (`SAAS_INFRA.md` §4.25, §4.26).
 - **Kubernetes:** not needed at this scale; a learning item for later (k3s), same images.
 
 ### 4.5 Plans, limits and payments (after MVP)
@@ -475,7 +476,13 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       (error 1033); the heartbeat check had no e-mail switched on. SaaS 0.5.2: no Kerberos probe in the log
       (`GSS Encryption Mode=Disable` in the compose file, checked by the container test) - to deploy.
 - [ ] `cloudflared` 2026.10.7 once it is two weeks old (13 Nov 2026): compose update, new version, deployment.
-- [ ] 4.5 Backups: daily `pg_dump` off the server (destination chosen then); restore tested once.
+- [ ] 4.5 `saas-backup`: `infra/backup/backup.sh` (`pg_dump` → `age` for a public key → Backblaze B2 EU Central with a
+      write-only key → the newest 7 copies kept locally → Healthchecks `/start`, success or `/fail` with the reason);
+      `infra/backup/restore-test.sh` (the newest local or B2 copy into a scratch database, every table compared with
+      the live one); the playbook installs `age`, `rclone`, the script and a systemd timer (02:30 UTC); CI runs
+      `shellcheck` on `infra/backup`. On the accounts and the server (`SAAS_INFRA.md` §4.25, §4.26): B2 account and
+      bucket with a 30-day lifecycle rule, write-only key, age key pair (private key only in the password manager),
+      `/etc/cinemawatch/backup.env`, check `cinemawatch-backup`, the first backup, a restore test from B2.
 - [ ] 4.6 (optional) Deployment from GitHub Actions: a `deploy` user whose key may only run the deployment script
       (`command=` in `authorized_keys`), not membership of the `docker` group (that equals root).
 
@@ -672,6 +679,14 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | The connection string in the compose file sets `GSS Encryption Mode=Disable` (SaaS 0.5.2); the container test fails on a `libgssapi` line | Npgsql 10 probes Kerberos encryption by default; the chiseled image has no Kerberos library, so every start printed an error line - harmless, but noise hides real errors |
 | Nov 2026 | A secret seen in a screenshot or a pasted output counts as leaked: it is replaced (the first heartbeat check was recreated on 7 Nov 2026) | Same rule as for the repository and the chat; replacing is cheaper than judging who could have seen it |
 | Nov 2026 | `cloudflared` follows the two-week rule like every pinned image: 2026.10.3 until 2026.10.7 is two weeks old (13 Nov 2026); the dashboard's "newer release" note is not a reason by itself | The newer releases' fixes concern the metrics server (not published) and HTTP/2 (we use QUIC); the version is changed in the compose file and deployed like the app |
+| Nov 2026 | Backups go to Backblaze B2, region EU Central (free up to 10 GB) | Another provider than the server (an OVHcloud account or outage cannot take both), free at our size, data in the EU. OVHcloud Object Storage (same account), a copy pulled to the PC (only while it is on) and Cloudflare R2 (needs an API token, §10) compared and dropped |
+| Nov 2026 | Backups are encrypted with `age` before they leave the server: only the public key is on the server, the private key only in the password manager | B2 sees ciphertext only; the database holds e-mail addresses and profiles (R3); losing the private key makes every backup unreadable, hence the password manager |
+| Nov 2026 | The server's B2 key may only write into the backup bucket; old backups are removed by the bucket's lifecycle rule after 30 days | Whoever takes over the server still cannot delete the existing backups |
+| Nov 2026 | Daily at 02:30 UTC by a systemd timer from the playbook (`Persistent`, up to 5 minutes random delay); the newest 7 encrypted copies also stay on the server; pre-deployment dumps of `deploy.sh` stay as they are | Before the 03:30 reboot window; a missed run is made up at boot; a local copy makes the common restore quick |
+| Nov 2026 | A Healthchecks check `cinemawatch-backup` (cron `30 2 * * *`, grace 2 h); the script reports start, success or failure with the reason | A backup that silently stopped would only be noticed on the day it is needed |
+| Nov 2026 | `.env` is not backed up | Secrets only; recreated with `SAAS_INFRA.md` §4.23 in about 10 minutes; the database password is in the password manager |
+| Nov 2026 | `pg_dump` + `age` + `rclone` (Ubuntu packages) rather than `restic` | `restic` on B2 needs the right to delete (locks), against the write-only key; deduplication buys nothing for a few megabytes |
+| Nov 2026 | A restore test (`restore-test.sh`): after the setup, every 3 months and after a schema change, with a temporary read-only B2 key deleted afterwards; it restores into a scratch database and compares every table | A backup that was never restored is only a hope; the live database is only read |
 
 ---
 
@@ -681,7 +696,6 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | --- | --- |
 | Check interval | MVP 0: the profile's interval with a server minimum of 10 minutes (decided Nov 2026); the adaptive rules (§4.3) tuned with the stage 4 data |
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
-| Backup destination | Chosen in 4.5: OVHcloud Object Storage, Backblaze B2 or a copy pulled to the PC; the dumps are megabytes |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
 | Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
 

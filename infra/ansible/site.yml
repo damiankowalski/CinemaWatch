@@ -3,7 +3,7 @@
 #   cd ~/CinemaWatch/infra/ansible && ansible-playbook site.yml --check --diff   (dry run: shows what would change)
 #   cd ~/CinemaWatch/infra/ansible && ansible-playbook site.yml                  (apply)
 # Safe to run again at any time: a second run changes nothing ("changed=0") unless something drifted.
-# One part only: --tags ssh | firewall | updates | swap | docker | app.
+# One part only: --tags ssh | firewall | updates | swap | docker | backup | app.
 
 - name: CinemaWatch server
   hosts: cinemawatch
@@ -260,6 +260,53 @@
         state: started
       when: not (ansible_check_mode and docker_repo is changed)
       tags: docker
+
+    # ---- Daily backup off the server (SAAS_INFRA.md §4.25) -----------------------------------------------------------
+    - name: Backup tools (age encrypts, rclone uploads)
+      ansible.builtin.apt:
+        name: [age, rclone]
+        state: present
+      environment:
+        NEEDRESTART_MODE: a
+      tags: backup
+
+    - name: Folder for the backup settings, root only (backup.env is created by hand, SAAS_INFRA.md §4.25)
+      ansible.builtin.file:
+        path: /etc/cinemawatch
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      tags: backup
+
+    - name: Backup script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../backup/backup.sh"
+        dest: /usr/local/sbin/cinemawatch-backup
+        owner: root
+        group: root
+        mode: "0755"
+      tags: backup
+
+    - name: Backup service and timer
+      ansible.builtin.copy:
+        src: "files/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: [cinemawatch-backup.service, cinemawatch-backup.timer]
+      register: backup_units
+      tags: backup
+
+    - name: Daily backup timer on
+      ansible.builtin.systemd_service:
+        name: cinemawatch-backup.timer
+        enabled: true
+        state: started
+        daemon_reload: "{{ backup_units is changed }}"
+      when: not (ansible_check_mode and backup_units is changed)
+      tags: backup
 
     # ---- The app's folder (compose file and .env come in the deployment, SAAS.md §7 4.4) ----------------------------
     - name: App folder, root only

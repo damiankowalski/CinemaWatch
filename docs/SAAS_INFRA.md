@@ -1033,6 +1033,101 @@ cw logs -f cloudflared
 sudo docker stats --no-stream
 ```
 
+### 4.25 Backups off the server (setup)
+
+Once; afterwards the timer runs it every day. Design ([`SAAS.md`](SAAS.md) §9): `pg_dump` → encrypted with `age` for a
+public key (the server can encrypt, not decrypt) → Backblaze B2 in EU Central with a **write-only** key (the server can
+add backups, never delete them; the bucket's lifecycle rule removes them after 30 days) → the newest 7 encrypted
+copies also stay in `/opt/cinemawatch/backups/daily` → Healthchecks.io check `cinemawatch-backup`. `.env` is not backed
+up (secrets; recreate it with §4.23).
+
+1. Backblaze (browser) - an account with the region **EU Central** (chosen at sign-up, cannot be changed later), the
+   owner's existing e-mail, a password from the password manager, two-step verification (authenticator app).
+2. Backblaze - **Buckets → Create a Bucket**: a globally unique name such as `cinemawatch-backup-<6 random letters>`,
+   files **Private**, default encryption on, Object Lock off. The bucket's endpoint must read
+   `s3.eu-central-003.backblazeb2.com` (or another `eu-central` one).
+3. Backblaze - the bucket → **Lifecycle Settings → custom rules**: file path `daily/`, hide after **30** days, delete
+   after **1** day.
+4. Server (bash, over SSH) - the playbook installs `age`, `rclone`, the script and the timer:
+
+```bash
+cd ~/CinemaWatch && git pull
+cd infra/ansible && ansible-playbook site.yml --tags backup
+```
+
+5. Server - the age key pair. `age-keygen` without `-o` only prints it; nothing is written to disk:
+
+```bash
+age-keygen
+```
+
+   Save all three lines (`# created`, `# public key: age1…`, `AGE-SECRET-KEY-1…`) in the password manager as
+   "CinemaWatch backup age key", then `clear`. Without the private key no backup can ever be read.
+6. Backblaze - **Application Keys → Add a New Application Key**: name `staging-server-backup`, bucket = the backup
+   bucket, type of access **Write Only**. keyID and applicationKey are shown once: paste them in step 8.
+7. Healthchecks.io - a check `cinemawatch-backup`: schedule **Cron** `30 2 * * *`, time zone UTC, grace **2 hours**;
+   the e-mail integration on (dark "@"). Its ping address goes into step 8, never into a screenshot.
+8. Server - the config:
+
+```bash
+sudo install -m 600 -o root -g root ~/CinemaWatch/infra/backup/backup.env.example /etc/cinemawatch/backup.env
+sudo nano /etc/cinemawatch/backup.env
+sudo awk -F= '/^[A-Z0-9_]+=/ { print $1, ($2 == "" ? "EMPTY" : "set") }' /etc/cinemawatch/backup.env
+```
+
+   Fill in `B2_KEY_ID`, `B2_KEY` (step 6), `B2_BUCKET` (step 2), `AGE_RECIPIENT` (the `age1…` public key of step 5),
+   `HEARTBEAT_URL` (step 7). Expected: five lines `set`.
+9. Server - the first backup by hand, then the timer:
+
+```bash
+sudo systemctl start cinemawatch-backup.service
+sudo journalctl -u cinemawatch-backup.service -n 20 --no-pager
+systemctl list-timers cinemawatch-backup.timer --no-pager
+```
+
+   Expected: `saved cinemawatch-….dump.age`, `uploaded to b2:…/daily/…`, `done`; the timer's NEXT at 02:30 UTC (plus up
+   to 5 minutes). Also: the file in the bucket (Backblaze → the bucket → Browse files → `daily/`); the Healthchecks
+   check up. An `ERROR` line names the reason; the check gets it as a failure message too.
+
+Daily check: nothing to do - a missing or failed backup e-mails the owner through Healthchecks.
+
+### 4.26 Restore test, and restoring for real
+
+**Restore test** - after the setup, then every 3 months and after a change of the database schema:
+
+1. Backblaze - a temporary key `restore-test`: the backup bucket, access **Read Only**.
+2. Server (bash, over SSH):
+
+```bash
+sudo bash ~/CinemaWatch/infra/backup/restore-test.sh --b2
+```
+
+   It asks for the temporary keyID and applicationKey and for the age private key (password manager; nothing is
+   shown or stored), downloads the newest backup from B2, restores it into the scratch database
+   `cinemawatch_restore_test`, prints the rows of every table next to the live database and drops the scratch
+   database. Expected: the table list and `PASS`. Without `--b2` it uses the newest local copy.
+3. Backblaze - delete the key `restore-test`.
+
+**Restoring for real** (the database is lost or broken; everything written after the backup is lost):
+
+1. Server gone: rebuild it (§4.13), recreate `.env` (§4.23; the database password from the password manager) and
+   deploy the version that matches the backup (`deploy.sh`, §4.24) - it starts with an empty database.
+2. Bring the backup to the server: the newest local copy in `/opt/cinemawatch/backups/daily`, or download it from
+   B2 (web UI, then `scp` to `/tmp`).
+3. Server - stop the app, load the backup over the database, start the app:
+
+```bash
+cw() { sudo docker compose -f /opt/cinemawatch/compose.yaml "$@"; }
+cw stop web
+read -rsp "age private key: " k; echo
+sudo cat <backup file> | age --decrypt --identity <(printf '%s\n' "$k") \
+  | cw exec -T postgres pg_restore -U cinemawatch -d cinemawatch --clean --if-exists --no-owner
+unset k
+cw start web
+```
+
+   Then sign in and check the profiles; the heartbeat check goes up again.
+
 ## 5. Next infrastructure steps
 
 Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.
