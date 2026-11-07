@@ -9,11 +9,11 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 6 November 2026. Status: **stage 4 in progress** (deploy to the VPS, staging). Stage 3 done: MVP 0
-> complete on the development PC. Risk test R1 closed **green** on 5 Nov 2026 (§7 stage 4, §9). 4.1 done (container
-> image on GHCR, container test in CI). 4.2 done: e-mail through Resend, Cloudflare tunnel and Access, Healthchecks.io.
-> 4.3 done (SaaS 0.5.1): the VPS reinstalled and configured by `infra/ansible` (hardening, swap, Docker), checked in CI;
-> the privacy notice names the services. Next: 4.4 (first deployment).
+> Last updated: 7 November 2026. Status: **stage 4 in progress** (deploy to the VPS, staging). Risk test R1 closed
+> **green** on 5 Nov 2026. 4.1-4.3 done (container image, accounts, the VPS rebuilt by Ansible). 4.4 done: CinemaWatch
+> runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 (0.5.1), behind Cloudflare Access; the
+> whole flow tested from the server (invitation, e-mail, "Check now", heartbeat alarm). Next: deploy 0.5.2, 4.5
+> (backups off the server).
 
 ---
 
@@ -335,7 +335,7 @@ interchangeable.
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
-  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.5.1). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.5.2). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
   database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
@@ -465,12 +465,16 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       Healthchecks.io and is no longer a draft. Verified by reinstalling the VPS from scratch (`SAAS_INFRA.md` §4.13,
       §3): dry run `failed=0`, real run, reboot for the new kernel, second run `changed=0`, SSH tests, Docker 29.9.3 /
       Compose v5.7.0, swap 2 GB, containers reach the internet. The probe went with the old system.
-- [ ] 4.4 `saas-deploy` - first deployment (staging): `infra/compose/deploy.sh` (checks; `pg_dump` before every
-      deployment, the newest 10 kept; the compose file of the tag; the version into `.env`; pull, `up -d`, `/healthz`
-      and all services running; no automatic rollback); CI runs `shellcheck` on the scripts. On the server
-      (`SAAS_INFRA.md` §4.23, §4.24): `.env` (root only), first deployment of `0.5.1`; the owner's invitation by real
-      e-mail, test e-mail (inbox, DKIM / DMARC pass), Access in front of the app and of `/admin`, profile import, one
-      "Check now" from the server's IP, heartbeat (check up, alert after stopping `web`), `docker stats`.
+- [x] 4.4 `saas-deploy` - first deployment (staging; 6-7 Nov 2026): `infra/compose/deploy.sh` (checks; `pg_dump`
+      before every deployment, the newest 10 kept; the compose file of the tag; the version into `.env`; pull, `up -d`,
+      `/healthz` and all services running; no automatic rollback); CI runs `shellcheck` on the scripts. On the server
+      (`SAAS_INFRA.md` §4.23, §4.24, §3): `.env`, deployment of `0.5.1`; invitation by real e-mail (inbox), test e-mail
+      (SPF / DKIM / DMARC pass), all cookies Secure, Access in front of the app and of `/admin`, profile import and
+      "Check now" from the server's IP (HTTP 200, notification e-mail), heartbeat alarm ("DOWN" and "UP" e-mails),
+      about 280 MiB for the three containers. Found and fixed: the tunnel's DNS record pointed at a deleted tunnel
+      (error 1033); the heartbeat check had no e-mail switched on. SaaS 0.5.2: no Kerberos probe in the log
+      (`GSS Encryption Mode=Disable` in the compose file, checked by the container test) - to deploy.
+- [ ] `cloudflared` 2026.10.7 once it is two weeks old (13 Nov 2026): compose update, new version, deployment.
 - [ ] 4.5 Backups: daily `pg_dump` off the server (destination chosen then); restore tested once.
 - [ ] 4.6 (optional) Deployment from GitHub Actions: a `deploy` user whose key may only run the deployment script
       (`command=` in `authorized_keys`), not membership of the `docker` group (that equals root).
@@ -665,6 +669,9 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Secrets are pasted into `/opt/cinemawatch/.env` with `sudo nano` on the server; the database password is generated there (`openssl rand -hex 32`) and kept in the password manager | Nothing in the shell history, the chat or the PC; the database password is the one secret no panel can show again |
 | Nov 2026 | `SAAS_OWNER_EMAIL` = the owner's Gmail, the same address as in the Access policies | The Access gate and the app's owner account are the same person |
 | Nov 2026 | CI runs `shellcheck` (Ubuntu 26.04's 0.11) on `infra/compose/*.sh` | The deployment script runs as root on the server; static checks catch quoting and pipe mistakes early |
+| Nov 2026 | The connection string in the compose file sets `GSS Encryption Mode=Disable` (SaaS 0.5.2); the container test fails on a `libgssapi` line | Npgsql 10 probes Kerberos encryption by default; the chiseled image has no Kerberos library, so every start printed an error line - harmless, but noise hides real errors |
+| Nov 2026 | A secret seen in a screenshot or a pasted output counts as leaked: it is replaced (the first heartbeat check was recreated on 7 Nov 2026) | Same rule as for the repository and the chat; replacing is cheaper than judging who could have seen it |
+| Nov 2026 | `cloudflared` follows the two-week rule like every pinned image: 2026.10.3 until 2026.10.7 is two weeks old (13 Nov 2026); the dashboard's "newer release" note is not a reason by itself | The newer releases' fixes concern the metrics server (not published) and HTTP/2 (we use QUIC); the version is changed in the compose file and deployed like the app |
 
 ---
 
