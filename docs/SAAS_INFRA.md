@@ -10,10 +10,9 @@
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 6 November 2026 - stage 4: R1 closed green (5 Nov); 4.1 done (container image on GHCR, public);
-> 4.2 done: e-mail through Resend from `mail.damiankowalski.pl` (§1.5), Cloudflare Zero Trust with the tunnel and two
-> Access applications (§1.6), Healthchecks.io (§1.7); 4.3 done: the VPS reinstalled and configured by
-> `infra/ansible` (§1.3, §4.13) - the probe is gone with the old system. Next: the first deployment (4.4).
+> Last updated: 7 November 2026 - stage 4: 4.1-4.3 done; 4.4 done: the first deployment - CinemaWatch 0.5.1 runs on
+> the VPS behind Cloudflare Tunnel and Access at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 (§1.3, §1.6,
+> §3); e-mail through Resend, heartbeat alarm tested. Next: 4.5 (backups off the server).
 
 ---
 
@@ -32,11 +31,11 @@
 | DNS records | Six (6 Nov 2026): apex `TXT "v=spf1 -all"` (the apex sends no e-mail); `TXT _dmarc "v=DMARC1; p=reject;"`; e-mail through Resend for `mail.` - `TXT resend._domainkey.mail` (DKIM), `CNAME rsend.mail` and `CNAME send.mail` (both DNS only); `CNAME staging-cinemawatch` to the tunnel (Proxied). Details §1.5, §1.6 |
 | DNSSEC | On since 31 Oct 2026: Cloudflare signs the zone; DS at the registry with key tag 2371, algorithm 13, digest type 2 |
 | Cloudflare zone extras | AI crawler policy at defaults (allow); Bot Preference Sync on (robots.txt) - irrelevant until a site exists |
-| Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026; reinstalled on 6 Nov 2026 and configured by `infra/ansible` (§1.3): hardened, swap, Docker; no containers yet (4.4) |
-| Website | `staging-cinemawatch.damiankowalski.pl`: tunnel and Access ready (§1.6), the app comes in 4.4 (until then Cloudflare answers 530 behind the Access login) |
+| Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026; reinstalled on 6 Nov 2026 and configured by `infra/ansible` (§1.3); runs the app's containers since 6 Nov 2026 |
+| Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch 0.5.1 since 6 Nov 2026, behind Cloudflare Access (§1.6) and the app's own sign-in |
 | E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
-| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `sha-75f16cb` (6 Nov 2026) |
-| Heartbeat monitor | Healthchecks.io, check `cinemawatch-staging` (§1.7) |
+| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1` (deployed), with `sha-<commit>` tags |
+| Heartbeat monitor | Healthchecks.io, check `cinemawatch-staging` (§1.7); the alarm by e-mail tested on 7 Nov 2026 |
 | Costs | Domain 16.69 PLN net (20.53 PLN gross) for the first year, then 58.99 PLN net (72.56 PLN gross) per year; Cloudflare Free 0; VPS about 19.20 PLN net (23.62 PLN gross) per month (cart price on 1 Nov 2026 - confirm on the first invoice); Cloudflare Zero Trust Free 0 (a payment card on file is required); Resend Free 0; Healthchecks.io Hobbyist 0 |
 
 ### 1.1 Accounts
@@ -97,9 +96,9 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Updates | `unattended-upgrades` installs security updates daily, Docker's packages included; `/etc/apt/apt.conf.d/52unattended-upgrades-local` reboots at 03:30 UTC when needed (§4.12) |
 | Swap | `/swapfile`, 2 GB, in `/etc/fstab`; `vm.swappiness=10` (`/etc/sysctl.d/60-cinemawatch.conf`) |
 | Docker | Docker Engine 29.9.3 and Compose v5.7.0 from Docker's repository (`/etc/apt/sources.list.d/docker.sources`, key `/etc/apt/keyrings/docker.asc`, fingerprint checked by the playbook); `/etc/docker/daemon.json`: logs 3 × 10 MB, `live-restore`; `ubuntu` is not in the `docker` group (that equals root) - use `sudo docker` |
-| App folder | `/opt/cinemawatch` (root, `0750`), empty until 4.4 |
+| App folder | `/opt/cinemawatch` (root, `0750`): `compose.yaml` (copied from the deployed tag), `.env` (root, `600`; §4.23), `backups/` (root, `0700`; a `pg_dump` before every deployment, the newest 10) |
 | Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9); after the reinstall with the new password - test it once |
-| Our services | None yet; from 4.4 the containers of `infra/compose/compose.yaml`. `CinemaWatch.Probe` ran 2-6 Nov 2026 and went with the reinstall (§1.4) |
+| Our services | Since 6 Nov 2026 the containers of `infra/compose/compose.yaml`, project `cinemawatch`: `postgres` (18), `web` (0.5.1), `cloudflared` (2026.10.3); deployed with `deploy.sh` (§4.24). Memory on 7 Nov: web 222 MiB, postgres 38 MiB, cloudflared 16 MiB. `CinemaWatch.Probe` ran 2-6 Nov 2026 and went with the reinstall (§1.4) |
 
 ### 1.4 CinemaWatch.Probe (stage 2, risk test R1)
 
@@ -129,7 +128,7 @@ address, not an address on the new domain: losing the domain must not lock the o
 | DMARC | `TXT _dmarc.damiankowalski.pl` = `v=DMARC1; p=reject;` since 6 Nov 2026 (first `p=none` until the test passed); applies to the apex and every subdomain; no reports (no mailbox to receive them) |
 | Apex SPF | `v=spf1 -all` unchanged: the apex sends nothing; Resend's e-mails use `send.mail…` as their return path |
 | Test (6 Nov 2026) | One e-mail over SMTP from the PC with a temporary key: inbox (not spam) in Gmail; SPF pass (IP 54.240.3.11), DKIM pass with `mail.damiankowalski.pl`, DMARC pass. The test key was deleted |
-| API keys | None now. The server gets its own key in 4.4: sending access, domain `mail.damiankowalski.pl` only, straight into `.env` (`MAIL_PASSWORD`) |
+| API keys | `staging-server` (6 Nov 2026): sending access, domain `mail.damiankowalski.pl` only; only in the server's `.env` (`MAIL_PASSWORD`). The test key of 4.2 was deleted |
 
 ### 1.6 Cloudflare Zero Trust: tunnel and Access
 
@@ -137,8 +136,8 @@ address, not an address on the new domain: losing the domain must not lock the o
 | --- | --- |
 | Organization | Team domain `damiankowalski.cloudflareaccess.com` (public: the login page testers see); plan Zero Trust Free, $0, 50 seats (one per person who signs in through Access) |
 | Login methods | Cloudflare (default, added with the organization) and One-time PIN (code by e-mail from `noreply@notify.cloudflare.com`, valid 10 minutes); both applications accept the PIN only, with Instant Auth |
-| Tunnel | `staging-cinemawatch`, remotely managed (configured in the dashboard); status Inactive until `cloudflared` runs on the server (4.4). Its token is a secret: shown in the tunnel's page in the dashboard, copied in 4.4 straight into `.env` (`TUNNEL_TOKEN`) |
-| Route (published application) | `staging-cinemawatch.damiankowalski.pl` → `http://web:8080` (the app container in the compose network); DNS: `CNAME staging-cinemawatch` → `<tunnel id>.cfargotunnel.com`, Proxied |
+| Tunnel | `staging-cinemawatch`, remotely managed (configured in the dashboard); Healthy since 6 Nov 2026: one connector (`cloudflared` 2026.10.3 in a container), 4 QUIC connections to Warsaw. Its token is a secret, only in the server's `.env` (`TUNNEL_TOKEN`) |
+| Route (published application) | `staging-cinemawatch.damiankowalski.pl` → `http://web:8080` (the app container in the compose network); DNS: `CNAME staging-cinemawatch` → `<tunnel id>.cfargotunnel.com`, Proxied. The CNAME's tunnel id must equal the tunnel's own id (*Tunnel details*): it pointed at a deleted tunnel until 6 Nov 2026 (error 1033) |
 | Access application 1 | `CinemaWatch staging`: the whole host; policy `Owner and testers` (Allow, Include: e-mails - the owner today); session 1 week |
 | Access application 2 | `CinemaWatch staging admin`: path `admin` (covers `/admin` and everything below it); policy `Owner only`; session 24 hours. The more specific application wins and inherits nothing, so testers never pass `/admin` |
 | Checked (6 Nov 2026) | Before Access: HTTP 530 from Cloudflare (`-WAW`, tunnel without a connector); with Access: HTTP 302 to the team domain's login page (§4.21) |
@@ -148,8 +147,8 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Item | Value |
 | --- | --- |
 | Plan | Hobbyist, $0 (20 checks) |
-| Check | `cinemawatch-staging`: simple schedule, period 5 minutes, grace 10 minutes (an alert after about 15 minutes without a ping; the nightly reboot at 03:30 UTC takes 1-2 minutes); e-mail to the owner. Status "new" until the first ping: a new check never alerts |
-| Ping address | `https://hc-ping.com/…` - a secret (whoever has it can pretend the server is alive); copied in 4.4 straight into `.env` (`SAAS_HEARTBEAT_URL`); the app never logs it |
+| Check | `cinemawatch-staging` (created again on 7 Nov 2026, the first one deleted - its ping address had shown in a screenshot): simple schedule, period 5 minutes, grace 10 minutes (an alert after about 15 minutes without a ping; the nightly reboot at 03:30 UTC takes 1-2 minutes). The e-mail integration must be switched on **per check** (the "@" in the Integrations column dark, not grey). Alarm tested on 7 Nov 2026: `web` stopped → "DOWN" e-mail, started → "UP" e-mail |
+| Ping address | `https://hc-ping.com/…` - a secret (whoever has it can pretend the server is alive); only in the server's `.env` (`SAAS_HEARTBEAT_URL`); the app never logs it, and it never goes into a screenshot |
 
 ---
 
@@ -430,6 +429,35 @@ Browser --HTTPS--> Cloudflare (WAW)
 7. **Checks** (§4.13 step 9): all as expected; `qemu-guest-agent` already active in OVHcloud's image; `ufw` routed now
    `deny` because Docker switched on forwarding.
 8. **The probe is gone** with the old system; its data of 2-5 Nov is on the PC.
+
+### Stage 4 - the first deployment (4.4; 6-7 Nov 2026)
+
+1. **Branch `feature/saas-deploy`** with `infra/compose/deploy.sh`, CI green (with `shellcheck`); the server's clone
+   switched to the branch.
+2. **`.env`** (§4.23): a Resend key `staging-server` (sending only, `mail.` only), the tunnel token (the dashboard shows
+   the install command cut off; copied whole with its copy button, cut down to the token with `sed` on the server),
+   the ping address, a database password from `openssl rand -hex 32` (also in the password manager); `600 root:root`,
+   every value set.
+3. **Deployment of 0.5.1** at 22:38 UTC: three images pulled, containers started, `/healthz ok`; the tunnel connected
+   at once (4 QUIC connections, Warsaw, all pre-checks pass); the heartbeat check went up; the owner's invitation
+   arrived in the Gmail inbox from `cinemawatch@mail.damiankowalski.pl`.
+4. **Error 1033** behind Access although the tunnel was Healthy: the `staging-cinemawatch` CNAME still pointed at the
+   tunnel deleted on 6 Nov (wrong route name), not at `staging-cinemawatch`'s own id. Fixed by editing the record's
+   target; check added to §4.21. Lesson: a deleted tunnel leaves its DNS record behind.
+5. **Log entries checked:** two `Failed executing DbCommand` on `__EFMigrationsHistory` = EF Core asking an empty
+   database for its migration history before creating it (first start only); `Error: libgssapi_krb5.so.2 …` = Npgsql
+   probing Kerberos (GSS) encryption, absent from the chiseled image - silenced in 0.5.2 (`GSS Encryption Mode=Disable`
+   in the compose file, checked by the container test).
+6. **Tests:** password set through the invitation; test e-mail from the server in the inbox with SPF, DKIM
+   (`mail.damiankowalski.pl`) and DMARC pass; all app cookies Secure (`X-Forwarded-Proto` from the tunnel works);
+   `/admin` behind its own Access application, panel as expected; profile import and "Check now" from the server's IP
+   (HTTP 200, notification e-mail); `docker stats`: about 280 MiB for the three containers.
+7. **Heartbeat alarm:** `web` stopped, no e-mail - the check's e-mail integration was off (grey "@"). A screenshot of
+   the check also showed its ping address, so a new check was created with e-mail on, its address put into `.env`,
+   the same version deployed again (the first pre-deployment `pg_dump`), the old check deleted. Second test: "DOWN"
+   e-mail after stopping `web`, "UP" after starting it.
+8. **`cloudflared`**: the dashboard notes a newer release (2026.10.7); 2026.10.3 stays until 2026.10.7 is two weeks old
+   (13 Nov 2026), then a compose update (§4.24).
 
 ---
 
@@ -906,6 +934,10 @@ foreach ($p in '/', '/admin') {
 }
 ```
 
+After any change to the tunnel or its route, compare in Cloudflare the **Tunnel ID** (*Networking → Tunnels → the
+tunnel → Tunnel details*) with the target of the `staging-cinemawatch` record (*DNS → Records*:
+`<tunnel id>.cfargotunnel.com`). Different ids give error 1033 although the tunnel is Healthy (6 Nov 2026).
+
 Expected: `HTTP/1.1 302` with `Location: https://damiankowalski.cloudflareaccess.com/cdn-cgi/access/login/…`; two
 different application ids for `/` and `/admin` (the same id means the admin application lost its path). Anything
 other than 302 without a sign-in means Access does not protect the host: stop and check *Access controls →
@@ -924,15 +956,91 @@ Order matters: Access first, then the app.
 
 ---
 
+### 4.23 Create the `.env` (first deployment)
+
+The server keeps every secret of the app in one file, `/opt/cinemawatch/.env` (root only, mode 600). Secrets are
+copied from the panels straight into the editor on the server - never into the chat, a file on the PC or the
+repository. Each one can be shown again or replaced in its panel, except the database password (keep it in the
+password manager).
+
+1. Resend → **API Keys → Create API key**: name `staging-server`, permission **Sending access**, domain
+   `mail.damiankowalski.pl`. The key is shown once; copy it in step 5.
+2. Cloudflare → Zero Trust → **Networking → Tunnels** → `staging-cinemawatch`: the install command (tab *Docker*) is cut
+   off on the screen, but its copy button copies all of it, token included. In step 5 paste the whole command after
+   `TUNNEL_TOKEN=`, then cut it down to the token on the server (step 6). Run none of the commands; afterwards copy
+   something harmless and remove the entry from the Windows clipboard history (Win+V) if it is on.
+3. Healthchecks.io → check `cinemawatch-staging` → its ping URL (`https://hc-ping.com/…`), copied in step 5. Make sure
+   the check's e-mail integration is on (the "@" in the Integrations column dark), or a down server stays silent.
+4. Server (bash, over SSH) - the template and a database password:
+
+```bash
+sudo install -m 600 -o root -g root ~/CinemaWatch/infra/compose/env.example /opt/cinemawatch/.env
+openssl rand -hex 32
+```
+
+   Save the printed 64 characters in the password manager ("CinemaWatch staging database").
+5. Server - fill in the file: `sudo nano /opt/cinemawatch/.env`. Paste (right click in the Windows terminal) after the
+   `=` of: `POSTGRES_PASSWORD` (step 4), `SAAS_OWNER_EMAIL` (the owner's Gmail, the same as in Access),
+   `SAAS_HEARTBEAT_URL` (step 3), `MAIL_PASSWORD` (step 1), `TUNNEL_TOKEN` (step 2). No spaces, no quotes.
+   `CINEMAWATCH_VERSION` is set by `deploy.sh`. Save: `Ctrl+O`, `Enter`; exit: `Ctrl+X`.
+6. Server - cut the pasted install command down to the tunnel token, then check without showing a secret:
+
+```bash
+sudo sed -i 's/^TUNNEL_TOKEN=.*--token[[:space:]]*/TUNNEL_TOKEN=/' /opt/cinemawatch/.env
+sudo grep -c '^TUNNEL_TOKEN=eyJ[A-Za-z0-9+/=_-]*$' /opt/cinemawatch/.env
+sudo stat -c '%a %U:%G' /opt/cinemawatch/.env
+sudo awk -F= '/^[A-Z_]+=/ { print $1, ($2 == "" ? "EMPTY" : "set") }' /opt/cinemawatch/.env
+```
+
+   Expected: `1` (one well-formed token line); `600 root:root`; every line `set` (none `EMPTY`).
+
+Changing a value later: edit the file the same way, then `sudo bash ~/CinemaWatch/infra/compose/deploy.sh <running
+version>` (the containers read `.env` only when they are created). A leaked secret is replaced in its panel first.
+
+### 4.24 Deploy, roll back, look around
+
+Server (bash, over SSH). Deploy a version that has its tag `web-vX.Y.Z` on GitHub (and its image in GHCR):
+
+```bash
+cd ~/CinemaWatch && git pull
+sudo bash ~/CinemaWatch/infra/compose/deploy.sh 0.5.1
+```
+
+What it does (`infra/compose/deploy.sh`): checks `.env`, the version and the tag; `pg_dump` of the running database
+to `/opt/cinemawatch/backups` (the newest 10 stay); copies `infra/compose/compose.yaml` **of the tag** to
+`/opt/cinemawatch/compose.yaml`; writes the version into `.env`; `docker compose pull`, `up -d`; waits up to 2 minutes
+for `/healthz` = `ok` and checks that `postgres`, `web` and `cloudflared` run. Expected end: `== Done: 0.5.1` and the
+three containers. On an error it prints the log of the failing container and stops; nothing is rolled back by
+itself. Git runs as the clone's owner (`runuser`), so the clone never gets root-owned files.
+
+Roll back: the same command with the previous version (the script prints it). If the new version's database
+migration is the problem, restore the dump taken before it first:
+
+```bash
+cw() { sudo docker compose -f /opt/cinemawatch/compose.yaml "$@"; }
+sudo ls -lt /opt/cinemawatch/backups
+cw stop web
+sudo cat /opt/cinemawatch/backups/<file>.dump | cw exec -T postgres pg_restore -U cinemawatch -d cinemawatch --clean --if-exists
+sudo bash ~/CinemaWatch/infra/compose/deploy.sh <previous version>
+```
+
+Look around (the `cw` helper above saves typing; `/opt/cinemawatch` itself is root only):
+
+```bash
+cw ps
+cw logs --tail 100 web
+cw logs -f cloudflared
+sudo docker stats --no-stream
+```
+
 ## 5. Next infrastructure steps
 
 Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- 4.4: the first deployment from `infra/compose/compose.yaml` into `/opt/cinemawatch` with `.env` (root only;
-  template `infra/compose/env.example`): the Resend key, the tunnel token and the ping address go straight into
-  `.env`; image `web-v0.5.1`; tests per [`SAAS.md`](SAAS.md) §7 (invitation by real e-mail, test e-mail, "Check now"
-  from the server, heartbeat alert by stopping the container, `docker stats`); the deployment script.
-- 4.5 backups (`pg_dump` off the server, a restore test); 4.6 optional deployment from GitHub Actions.
+- Deploy `0.5.2` (§4.24): the compose file without the Kerberos probe; the first routine update.
+- After 13 Nov 2026: `cloudflared` 2026.10.7 in `infra/compose/compose.yaml`, a new version, deployed the same way.
+- 4.5 backups: a daily `pg_dump` copied off the server (destination to choose) and one restore test; 4.6 optional
+  deployment from GitHub Actions. Then stage 5: the first SaaS test with invited people.
 
 Each step will be added to §1 and §3 of this file.
 

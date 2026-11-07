@@ -45,7 +45,9 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      ConnectionStrings__CinemaWatch: "Host=postgres;Database=cinemawatch;Username=cinemawatch;Password=${POSTGRES_PASSWORD}"
+      # GSS Encryption Mode=Disable: the chiseled image has no Kerberos library; without it Npgsql's default probe
+      # prints "Error: libgssapi_krb5.so.2: cannot open shared object file" (harmless, but noise in the log).
+      ConnectionStrings__CinemaWatch: "Host=postgres;Database=cinemawatch;Username=cinemawatch;Password=${POSTGRES_PASSWORD};GSS Encryption Mode=Disable"
       Saas__BaseUrl: ${SAAS_BASE_URL:?set SAAS_BASE_URL in .env}
       Saas__OwnerEmail: ${SAAS_OWNER_EMAIL:?set SAAS_OWNER_EMAIL in .env}
       # Behind the tunnel: trust its X-Forwarded-Proto; apply database migrations at start-up (one instance).

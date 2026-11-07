@@ -6,7 +6,8 @@
 #
 # Checks: the container runs as the non-root user; it migrates an empty database and creates the owner's account;
 # /healthz answers "ok"; the sign-in page renders in Polish (ICU and tzdata present, or the app would refuse to start);
-# the sign-in wall redirects; behind the trusted tunnel the form cookie is Secure.
+# the sign-in wall redirects; behind the trusted tunnel the form cookie is Secure; no unhandled exception and no
+# Kerberos probe in the log.
 set -euo pipefail
 
 image="${1:?usage: smoke-test.sh <image> <tag>}"
@@ -45,7 +46,9 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "PASS: $*"; }
 
 user="$(docker image inspect -f '{{.Config.User}}' "$image:$tag")"
-[ -n "$user" ] && [ "$user" != "root" ] && [ "$user" != "0" ] || fail "the image runs as root (User='$user')"
+if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "0" ]; then
+  fail "the image runs as root (User='$user')"
+fi
 pass "image runs as user $user"
 
 compose up -d postgres web
@@ -95,4 +98,8 @@ if grep -qi "unhandled exception" "$work/web.log"; then
   fail "unhandled exception in the log"
 fi
 pass "no unhandled exceptions"
+if grep -q "libgssapi" "$work/web.log"; then
+  fail "the database driver probes Kerberos (libgssapi) - GSS Encryption Mode=Disable missing in compose.yaml?"
+fi
+pass "no Kerberos probe in the log"
 echo "Container test passed: $image:$tag"

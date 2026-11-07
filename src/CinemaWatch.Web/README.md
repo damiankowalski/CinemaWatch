@@ -282,6 +282,7 @@ The server runs the app as a container ([`docs/SAAS.md`](../../docs/SAAS.md) §4
 | `infra/compose/compose.yaml` | `postgres` (18), `web` (the image, read-only file system), `cloudflared` (the tunnel); no published ports; log size limits |
 | `infra/compose/env.example` | Template of the server's `.env` (secrets and settings; never in git) |
 | `infra/compose/smoke-test.sh` | Container test: starts `postgres` and `web` from `compose.yaml` with throwaway settings and checks the running app |
+| `infra/compose/deploy.sh` | Deployment on the server: `pg_dump`, the compose file of the tag `web-vX.Y.Z`, the version into `.env`, pull, start, wait for `/healthz` ([`docs/SAAS_INFRA.md`](../../docs/SAAS_INFRA.md) §4.24) |
 
 CI (`.github/workflows/ci.yml`, job `container`) builds the image and runs the container test on every push - no
 Docker is needed on the PC. A tag `web-vX.Y.Z` (or `web-vX.Y.Z-beta.N`) runs `.github/workflows/web-image.yml`: the
