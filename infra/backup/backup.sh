@@ -67,10 +67,10 @@ mv "$part" "$local_dir/$name"
 size="$(du -h "$local_dir/$name" | cut -f1)"
 echo "saved $name ($size)"
 
-# rclone's remote is defined by environment variables: no rclone.conf with the key on disk.
-# --no-check-dest: upload without listing the bucket (the key may only write).
+# rclone's remote is defined by environment variables: no rclone.conf with the key on disk (--config "": config in
+# memory only, no notice about the missing file). --no-check-dest: upload without listing the bucket (write-only key).
 if ! RCLONE_CONFIG_B2_TYPE=b2 RCLONE_CONFIG_B2_ACCOUNT="${cfg[B2_KEY_ID]}" RCLONE_CONFIG_B2_KEY="${cfg[B2_KEY]}" \
-     rclone copyto --no-check-dest --retries 3 --low-level-retries 5 \
+     rclone copyto --config "" --no-check-dest --retries 3 --low-level-retries 5 \
        "$local_dir/$name" "b2:${cfg[B2_BUCKET]}/daily/$name"; then
   fail "upload of $name to B2 failed (kept locally)"
 fi

@@ -43,9 +43,9 @@ if [ "${1:-}" = "--b2" ]; then
   read -rsp "  applicationKey (not shown): " b2_key
   echo
   export RCLONE_CONFIG_B2R_TYPE=b2 RCLONE_CONFIG_B2R_ACCOUNT="$b2_id" RCLONE_CONFIG_B2R_KEY="$b2_key"
-  newest="$(rclone lsf "b2r:$bucket/daily/" --include 'cinemawatch-*.dump.age' | sort | tail -1)"
+  newest="$(rclone lsf "b2r:$bucket/daily/" --include 'cinemawatch-*.dump.age' --config "" | sort | tail -1)"
   [ -n "$newest" ] || die "no backup found in b2:$bucket/daily/"
-  rclone copyto "b2r:$bucket/daily/$newest" "$work/$newest"
+  rclone copyto --config "" "b2r:$bucket/daily/$newest" "$work/$newest"
   unset RCLONE_CONFIG_B2R_KEY b2_key
   file="$work/$newest"
   echo "downloaded $newest from B2"

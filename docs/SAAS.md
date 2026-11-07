@@ -9,11 +9,10 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 7 November 2026. Status: **stage 4 in progress** (deploy to the VPS, staging). Risk test R1 closed
-> **green** on 5 Nov 2026. 4.1-4.3 done (container image, accounts, the VPS rebuilt by Ansible). 4.4 done: CinemaWatch
-> runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 (0.5.1), behind Cloudflare Access; the
-> whole flow tested from the server (invitation, e-mail, "Check now", heartbeat alarm). Next: deploy 0.5.2, 4.5
-> (backups off the server).
+> Last updated: 7 November 2026. Status: **stage 4 done** apart from the optional 4.6. CinemaWatch runs on the VPS at
+> `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 (now 0.5.2), behind Cloudflare Access; e-mail through
+> Resend; heartbeat and backup monitored by Healthchecks.io; daily encrypted backups to Backblaze B2, restore tested.
+> Next: stage 5 (first SaaS test with invited people); `cloudflared` 2026.10.7 after 13 Nov 2026.
 
 ---
 
@@ -476,13 +475,14 @@ Order: 4.0 → 4.1 and 4.2 side by side → 4.3 → 4.4 → 4.5 → 4.6.
       (error 1033); the heartbeat check had no e-mail switched on. SaaS 0.5.2: no Kerberos probe in the log
       (`GSS Encryption Mode=Disable` in the compose file, checked by the container test) - to deploy.
 - [ ] `cloudflared` 2026.10.7 once it is two weeks old (13 Nov 2026): compose update, new version, deployment.
-- [ ] 4.5 `saas-backup`: `infra/backup/backup.sh` (`pg_dump` → `age` for a public key → Backblaze B2 EU Central with a
+- [x] 4.5 `saas-backup` (7 Nov 2026): `infra/backup/backup.sh` (`pg_dump` → `age` for a public key → Backblaze B2 EU Central with a
       write-only key → the newest 7 copies kept locally → Healthchecks `/start`, success or `/fail` with the reason);
       `infra/backup/restore-test.sh` (the newest local or B2 copy into a scratch database, every table compared with
       the live one); the playbook installs `age`, `rclone`, the script and a systemd timer (02:30 UTC); CI runs
       `shellcheck` on `infra/backup`. On the accounts and the server (`SAAS_INFRA.md` §4.25, §4.26): B2 account and
       bucket with a 30-day lifecycle rule, write-only key, age key pair (private key only in the password manager),
-      `/etc/cinemawatch/backup.env`, check `cinemawatch-backup`, the first backup, a restore test from B2.
+      `/etc/cinemawatch/backup.env`, check `cinemawatch-backup`, the first backup, a restore test from B2. Done: first
+      backup 56 KB uploaded with the write-only key; restore from B2 `PASS` (16 tables).
 - [ ] 4.6 (optional) Deployment from GitHub Actions: a `deploy` user whose key may only run the deployment script
       (`command=` in `authorized_keys`), not membership of the `docker` group (that equals root).
 
@@ -687,6 +687,8 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | `.env` is not backed up | Secrets only; recreated with `SAAS_INFRA.md` §4.23 in about 10 minutes; the database password is in the password manager |
 | Nov 2026 | `pg_dump` + `age` + `rclone` (Ubuntu packages) rather than `restic` | `restic` on B2 needs the right to delete (locks), against the write-only key; deduplication buys nothing for a few megabytes |
 | Nov 2026 | A restore test (`restore-test.sh`): after the setup, every 3 months and after a schema change, with a temporary read-only B2 key deleted afterwards; it restores into a scratch database and compares every table | A backup that was never restored is only a hope; the live database is only read |
+| Nov 2026 | `.gitignore` keeps the Visual Studio template but excludes `infra/backup/` from its `Backup*/` rule | On Windows Git ignores case, so the rule hid the backup scripts from `git add` (found by CI) |
+| Nov 2026 | rclone runs with `--config ""` (configuration in memory, from environment variables) | No `rclone.conf` with a key on disk, and no notice about the missing file in every log |
 
 ---
 
