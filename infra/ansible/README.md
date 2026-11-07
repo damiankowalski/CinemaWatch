@@ -12,6 +12,7 @@
 | `firewall` | `ufw`: incoming denied except 22/tcp, outgoing allowed, logging low |
 | `swap` | `/swapfile` (2 GB), in `/etc/fstab`, `vm.swappiness=10` |
 | `docker` | Docker's release key (fingerprint checked), Docker's repository, Docker Engine and the Compose plugin; `/etc/docker/daemon.json` (log limits, `live-restore`) |
+| `backup` | `age` and `rclone`; `/usr/local/sbin/cinemawatch-backup` (from `infra/backup/backup.sh`); `cinemawatch-backup.service` and `.timer` (daily 02:30 UTC); `/etc/cinemawatch` (root only) for `backup.env`, which is created by hand ([`docs/SAAS_INFRA.md`](../../docs/SAAS_INFRA.md) §4.25) |
 | `app` | `/opt/cinemawatch` (root only, `0750`) for the compose file and `.env` (deployment, stage 4.4) |
 
 ## Run it

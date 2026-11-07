@@ -10,9 +10,9 @@
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 7 November 2026 - stage 4: 4.1-4.3 done; 4.4 done: the first deployment - CinemaWatch 0.5.1 runs on
-> the VPS behind Cloudflare Tunnel and Access at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 (§1.3, §1.6,
-> §3); e-mail through Resend, heartbeat alarm tested. Next: 4.5 (backups off the server).
+> Last updated: 7 November 2026 - stage 4: 4.1-4.4 done (CinemaWatch runs on the VPS behind Cloudflare Tunnel and
+> Access since 6 Nov 2026, now 0.5.2); 4.5 done: an encrypted daily database backup to Backblaze B2 (EU Central),
+> restore from B2 tested (§1.8, §3). Next: stage 5, the first test with invited people (4.6 optional).
 
 ---
 
@@ -34,8 +34,9 @@
 | Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026; reinstalled on 6 Nov 2026 and configured by `infra/ansible` (§1.3); runs the app's containers since 6 Nov 2026 |
 | Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch 0.5.1 since 6 Nov 2026, behind Cloudflare Access (§1.6) and the app's own sign-in |
 | E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
-| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1` (deployed), with `sha-<commit>` tags |
-| Heartbeat monitor | Healthchecks.io, check `cinemawatch-staging` (§1.7); the alarm by e-mail tested on 7 Nov 2026 |
+| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1`, `0.5.2` (deployed), with `sha-<commit>` tags |
+| Heartbeat monitor | Healthchecks.io, checks `cinemawatch-staging` (§1.7; the alarm by e-mail tested on 7 Nov 2026) and `cinemawatch-backup` (§1.8) |
+| Backups | Daily at 02:30 UTC: `pg_dump`, encrypted with `age`, to Backblaze B2 bucket `cinemawatch-backup` (EU Central), the newest 7 also on the server; restore from B2 tested on 7 Nov 2026 (§1.8) |
 | Costs | Domain 16.69 PLN net (20.53 PLN gross) for the first year, then 58.99 PLN net (72.56 PLN gross) per year; Cloudflare Free 0; VPS about 19.20 PLN net (23.62 PLN gross) per month (cart price on 1 Nov 2026 - confirm on the first invoice); Cloudflare Zero Trust Free 0 (a payment card on file is required); Resend Free 0; Healthchecks.io Hobbyist 0 |
 
 ### 1.1 Accounts
@@ -49,6 +50,7 @@
 | Server user `ubuntu` | Administering the VPS | SSH key only (§1.3); its password works only on the KVM console | The key file plus its passphrase |
 | Resend | E-mail provider (SMTP) since 6 Nov 2026 | Password | Yes (TOTP; recovery code in the password manager) |
 | Healthchecks.io | Heartbeat monitor ("dead man's switch") since 6 Nov 2026 | Password | Yes |
+| Backblaze | B2 storage for the backups (region EU Central) since 7 Nov 2026 | Password | Yes (authenticator app; backup codes in the password manager) |
 
 Passwords and recovery codes are in the owner's password manager. The accounts use the owner's existing e-mail
 address, not an address on the new domain: losing the domain must not lock the owner out of the accounts that manage it.
@@ -71,6 +73,8 @@ address, not an address on the new domain: losing the domain must not lock the o
 - **Resend keeps account data in the US.** The EU region (Ireland) only decides where e-mails leave from; recipients'
   addresses, logs and metadata are stored in the US. The privacy notice names Resend and the transfer
   ([`SAAS.md`](SAAS.md) §9). Moving to an EU provider is configuration only (SMTP).
+- **The backup key lives only in the password manager.** The `age` private key (`AGE-SECRET-KEY-1…`) is nowhere
+  else - on purpose, so the server and Backblaze hold only ciphertext. Losing it makes every backup unreadable.
 - **A payment card on file at Cloudflare.** Zero Trust Free requires one; nothing is charged unless a paid plan or
   add-on is switched on deliberately. Check *Billing* if an invoice e-mail ever arrives.
 
@@ -96,9 +100,10 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Updates | `unattended-upgrades` installs security updates daily, Docker's packages included; `/etc/apt/apt.conf.d/52unattended-upgrades-local` reboots at 03:30 UTC when needed (§4.12) |
 | Swap | `/swapfile`, 2 GB, in `/etc/fstab`; `vm.swappiness=10` (`/etc/sysctl.d/60-cinemawatch.conf`) |
 | Docker | Docker Engine 29.9.3 and Compose v5.7.0 from Docker's repository (`/etc/apt/sources.list.d/docker.sources`, key `/etc/apt/keyrings/docker.asc`, fingerprint checked by the playbook); `/etc/docker/daemon.json`: logs 3 × 10 MB, `live-restore`; `ubuntu` is not in the `docker` group (that equals root) - use `sudo docker` |
-| App folder | `/opt/cinemawatch` (root, `0750`): `compose.yaml` (copied from the deployed tag), `.env` (root, `600`; §4.23), `backups/` (root, `0700`; a `pg_dump` before every deployment, the newest 10) |
+| App folder | `/opt/cinemawatch` (root, `0750`): `compose.yaml` (copied from the deployed tag), `.env` (root, `600`; §4.23), `backups/` (root, `0700`; a `pg_dump` before every deployment, the newest 10; `daily/` the newest 7 encrypted daily backups) |
+| Backup job | `/usr/local/sbin/cinemawatch-backup` (from `infra/backup/backup.sh`), `cinemawatch-backup.service` + `.timer` (02:30 UTC, up to 5 min random delay, `Persistent`); config `/etc/cinemawatch/backup.env` (root, `600`); log: `journalctl -u cinemawatch-backup.service` (§1.8, §4.25) |
 | Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9); after the reinstall with the new password - test it once |
-| Our services | Since 6 Nov 2026 the containers of `infra/compose/compose.yaml`, project `cinemawatch`: `postgres` (18), `web` (0.5.1), `cloudflared` (2026.10.3); deployed with `deploy.sh` (§4.24). Memory on 7 Nov: web 222 MiB, postgres 38 MiB, cloudflared 16 MiB. `CinemaWatch.Probe` ran 2-6 Nov 2026 and went with the reinstall (§1.4) |
+| Our services | Since 6 Nov 2026 the containers of `infra/compose/compose.yaml`, project `cinemawatch`: `postgres` (18), `web` (0.5.2 since 7 Nov), `cloudflared` (2026.10.3); deployed with `deploy.sh` (§4.24). Memory on 7 Nov: web 222 MiB, postgres 38 MiB, cloudflared 16 MiB. `CinemaWatch.Probe` ran 2-6 Nov 2026 and went with the reinstall (§1.4) |
 
 ### 1.4 CinemaWatch.Probe (stage 2, risk test R1)
 
@@ -149,6 +154,19 @@ address, not an address on the new domain: losing the domain must not lock the o
 | Plan | Hobbyist, $0 (20 checks) |
 | Check | `cinemawatch-staging` (created again on 7 Nov 2026, the first one deleted - its ping address had shown in a screenshot): simple schedule, period 5 minutes, grace 10 minutes (an alert after about 15 minutes without a ping; the nightly reboot at 03:30 UTC takes 1-2 minutes). The e-mail integration must be switched on **per check** (the "@" in the Integrations column dark, not grey). Alarm tested on 7 Nov 2026: `web` stopped → "DOWN" e-mail, started → "UP" e-mail |
 | Ping address | `https://hc-ping.com/…` - a secret (whoever has it can pretend the server is alive); only in the server's `.env` (`SAAS_HEARTBEAT_URL`); the app never logs it, and it never goes into a screenshot |
+
+### 1.8 Backups (Backblaze B2)
+
+| Item | Value |
+| --- | --- |
+| Account | Backblaze, region **EU Central** (fixed at sign-up), free up to 10 GB (we use kilobytes) |
+| Bucket | `cinemawatch-backup`, private, server-side encryption on, endpoint `s3.eu-central-003.backblazeb2.com`; lifecycle rule: files under `daily/` hidden after 30 days, deleted 1 day later |
+| Server's key | `staging-server-backup`: bucket `cinemawatch-backup` only, **Write Only** - the server can add backups but never read or delete them; only in `/etc/cinemawatch/backup.env` |
+| Encryption | `age`; the public key (`age1…`) in `backup.env`, the private key (`AGE-SECRET-KEY-1…`) only in the password manager ("CinemaWatch backup age key") |
+| Schedule | Daily 02:30 UTC (+ up to 5 min), the newest 7 copies also in `/opt/cinemawatch/backups/daily`; files `daily/cinemawatch-<UTC time>.dump.age` |
+| Monitoring | Healthchecks check `cinemawatch-backup`: cron `30 2 * * *` UTC, grace 2 hours, e-mail on; the script pings start, success (file and size) or failure (the reason) |
+| First backup | 7 Nov 2026 12:51 UTC, 56 KB, uploaded in 3 seconds |
+| Restore test | 7 Nov 2026 from B2 with a temporary read-only key (deleted afterwards): every one of the 16 tables restored, counts equal to the live database (except rows added since), same last migration. Next: every 3 months and after a schema change (§4.26) |
 
 ---
 
@@ -458,6 +476,24 @@ Browser --HTTPS--> Cloudflare (WAW)
    e-mail after stopping `web`, "UP" after starting it.
 8. **`cloudflared`**: the dashboard notes a newer release (2026.10.7); 2026.10.3 stays until 2026.10.7 is two weeks old
    (13 Nov 2026), then a compose update (§4.24).
+
+### Stage 4 - backups off the server (4.5; 7 Nov 2026)
+
+1. **Branch `feature/saas-backup`.** CI failed in `shellcheck`: `infra/backup/*.sh` did not exist in the commit.
+   The Visual Studio part of `.gitignore` has `Backup*/`, and Git on Windows ignores case (`core.ignorecase`), so
+   `git add -A` silently skipped `infra/backup/`. Fixed with `!infra/backup/` after that rule. Lesson:
+   `git check-ignore -v <file>` tells which rule hides a file.
+2. **Backblaze**: account in EU Central with two-step verification; bucket `cinemawatch-backup` (private, encrypted,
+   lifecycle 30 + 1 days on `daily/`).
+3. **Server**: the clone on the branch, `ansible-playbook site.yml --tags backup` (age, rclone, script, timer);
+   `age-keygen` printed the key pair once - saved in the password manager, nothing on disk; a write-only B2 key;
+   Healthchecks check `cinemawatch-backup` (cron, e-mail on); `/etc/cinemawatch/backup.env`, five values set.
+4. **First backup** by hand: `saved … (56K)`, `uploaded …`, `done`; the timer's next run 02:33 UTC. The write-only key
+   was enough for the upload (`--no-check-dest`). rclone's notice about a missing `rclone.conf` is gone since
+   `--config ""` (config in memory only).
+5. **Restore test from B2** with a temporary read-only key: downloaded, decrypted with the private key typed in,
+   restored into `cinemawatch_restore_test`, 16 tables compared (only `check_log` higher live: 6 requests after the
+   backup), same last migration, `PASS`; the scratch database dropped, the temporary key deleted.
 
 ---
 
@@ -1033,14 +1069,109 @@ cw logs -f cloudflared
 sudo docker stats --no-stream
 ```
 
+### 4.25 Backups off the server (setup)
+
+Once; afterwards the timer runs it every day. Design ([`SAAS.md`](SAAS.md) §9): `pg_dump` → encrypted with `age` for a
+public key (the server can encrypt, not decrypt) → Backblaze B2 in EU Central with a **write-only** key (the server can
+add backups, never delete them; the bucket's lifecycle rule removes them after 30 days) → the newest 7 encrypted
+copies also stay in `/opt/cinemawatch/backups/daily` → Healthchecks.io check `cinemawatch-backup`. `.env` is not backed
+up (secrets; recreate it with §4.23).
+
+1. Backblaze (browser) - an account with the region **EU Central** (chosen at sign-up, cannot be changed later), the
+   owner's existing e-mail, a password from the password manager, two-step verification (authenticator app).
+2. Backblaze - **Buckets → Create a Bucket**: a globally unique name such as `cinemawatch-backup-<6 random letters>`,
+   files **Private**, default encryption on, Object Lock off. The bucket's endpoint must read
+   `s3.eu-central-003.backblazeb2.com` (or another `eu-central` one).
+3. Backblaze - the bucket → **Lifecycle Settings → custom rules**: file path `daily/`, hide after **30** days, delete
+   after **1** day.
+4. Server (bash, over SSH) - the playbook installs `age`, `rclone`, the script and the timer:
+
+```bash
+cd ~/CinemaWatch && git pull
+cd infra/ansible && ansible-playbook site.yml --tags backup
+```
+
+5. Server - the age key pair. `age-keygen` without `-o` only prints it; nothing is written to disk:
+
+```bash
+age-keygen
+```
+
+   Save all three lines (`# created`, `# public key: age1…`, `AGE-SECRET-KEY-1…`) in the password manager as
+   "CinemaWatch backup age key", then `clear`. Without the private key no backup can ever be read.
+6. Backblaze - **Application Keys → Add a New Application Key**: name `staging-server-backup`, bucket = the backup
+   bucket, type of access **Write Only**. keyID and applicationKey are shown once: paste them in step 8.
+7. Healthchecks.io - a check `cinemawatch-backup`: schedule **Cron** `30 2 * * *`, time zone UTC, grace **2 hours**;
+   the e-mail integration on (dark "@"). Its ping address goes into step 8, never into a screenshot.
+8. Server - the config:
+
+```bash
+sudo install -m 600 -o root -g root ~/CinemaWatch/infra/backup/backup.env.example /etc/cinemawatch/backup.env
+sudo nano /etc/cinemawatch/backup.env
+sudo awk -F= '/^[A-Z0-9_]+=/ { print $1, ($2 == "" ? "EMPTY" : "set") }' /etc/cinemawatch/backup.env
+```
+
+   Fill in `B2_KEY_ID`, `B2_KEY` (step 6), `B2_BUCKET` (step 2), `AGE_RECIPIENT` (the `age1…` public key of step 5),
+   `HEARTBEAT_URL` (step 7). Expected: five lines `set`.
+9. Server - the first backup by hand, then the timer:
+
+```bash
+sudo systemctl start cinemawatch-backup.service
+sudo journalctl -u cinemawatch-backup.service -n 20 --no-pager
+systemctl list-timers cinemawatch-backup.timer --no-pager
+```
+
+   Expected: `saved cinemawatch-….dump.age`, `uploaded to b2:…/daily/…`, `done`; the timer's NEXT at 02:30 UTC (plus up
+   to 5 minutes). Also: the file in the bucket (Backblaze → the bucket → Browse files → `daily/`); the Healthchecks
+   check up. An `ERROR` line names the reason; the check gets it as a failure message too.
+
+Daily check: nothing to do - a missing or failed backup e-mails the owner through Healthchecks.
+
+### 4.26 Restore test, and restoring for real
+
+**Restore test** - after the setup, then every 3 months and after a change of the database schema:
+
+1. Backblaze - a temporary key `restore-test`: the backup bucket, access **Read Only**.
+2. Server (bash, over SSH):
+
+```bash
+sudo bash ~/CinemaWatch/infra/backup/restore-test.sh --b2
+```
+
+   It asks for the temporary keyID and applicationKey and for the age private key (password manager; nothing is
+   shown or stored), downloads the newest backup from B2, restores it into the scratch database
+   `cinemawatch_restore_test`, prints the rows of every table next to the live database and drops the scratch
+   database. Expected: the table list and `PASS`. Without `--b2` it uses the newest local copy.
+3. Backblaze - delete the key `restore-test`.
+
+**Restoring for real** (the database is lost or broken; everything written after the backup is lost):
+
+1. Server gone: rebuild it (§4.13), recreate `.env` (§4.23; the database password from the password manager) and
+   deploy the version that matches the backup (`deploy.sh`, §4.24) - it starts with an empty database.
+2. Bring the backup to the server: the newest local copy in `/opt/cinemawatch/backups/daily`, or download it from
+   B2 (web UI, then `scp` to `/tmp`).
+3. Server - stop the app, load the backup over the database, start the app:
+
+```bash
+cw() { sudo docker compose -f /opt/cinemawatch/compose.yaml "$@"; }
+cw stop web
+read -rsp "age private key: " k; echo
+sudo cat <backup file> | age --decrypt --identity <(printf '%s\n' "$k") \
+  | cw exec -T postgres pg_restore -U cinemawatch -d cinemawatch --clean --if-exists --no-owner
+unset k
+cw start web
+```
+
+   Then sign in and check the profiles; the heartbeat check goes up again.
+
 ## 5. Next infrastructure steps
 
 Stage 4 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- Deploy `0.5.2` (§4.24): the compose file without the Kerberos probe; the first routine update.
-- After 13 Nov 2026: `cloudflared` 2026.10.7 in `infra/compose/compose.yaml`, a new version, deployed the same way.
-- 4.5 backups: a daily `pg_dump` copied off the server (destination to choose) and one restore test; 4.6 optional
-  deployment from GitHub Actions. Then stage 5: the first SaaS test with invited people.
+- After 13 Nov 2026: `cloudflared` 2026.10.7 in `infra/compose/compose.yaml`, a new version, deployed with §4.24.
+- 4.6 (optional): deployment from GitHub Actions with a key restricted to the deployment script.
+- Stage 5: invited testers (Access policy first, then the app's invitation, §4.22); restore test again in February
+  2027 (§4.26).
 
 Each step will be added to §1 and §3 of this file.
 
@@ -1211,6 +1342,19 @@ Each step will be added to §1 and §3 of this file.
 | `sshd` | The SSH server; settings in `/etc/ssh/sshd_config` and drop-ins in `sshd_config.d/` (first value wins) |
 | `ssh-agent` | Optional service that keeps an unlocked key in memory so the passphrase is typed less often; not used |
 | `ssh-copy-id` | Linux / macOS helper that adds a public key to a server; Windows has none (§4.8 does the same) |
+
+### Backups
+
+| Term | Meaning |
+| --- | --- |
+| `pg_dump` / `pg_restore` | PostgreSQL's tools to write a database into one file and to load it back (here the "custom" format) |
+| `age` | A small encryption tool: whatever is encrypted for a public key (`age1…`) only opens with its private key (`AGE-SECRET-KEY-1…`) |
+| `rclone` | A command-line tool that copies files to and from cloud storage (here Backblaze B2) |
+| Object storage, bucket | Storage for files reached over an API; a bucket is one named container of files |
+| Application key (B2) | A key for one bucket with chosen rights; "Write Only" can add files but not read or delete them |
+| Lifecycle rule | A bucket rule that hides and then deletes files after a number of days |
+| Restore test | Loading a backup into a scratch database to prove it can be used |
+| systemd timer, `Persistent` | Starts a service on a schedule; `Persistent=true` makes up a run missed while the server was off |
 
 ### Configuration as code
 
