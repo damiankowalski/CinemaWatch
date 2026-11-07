@@ -14,13 +14,31 @@ request statistics, events, a pause switch, poller settings) and a heartbeat for
 | `tests/CinemaWatch.Saas.Tests` | Logic tests, database tests and the whole web flow (real app in memory, e-mails recorded) |
 
 How it works:
-- Every page needs a signed-in user, except sign-in, password help, set-password, privacy, errors and `/healthz`.
+- Every page needs a signed-in user, except sign-in, password help, set-password, privacy, errors, `/robots.txt` and
+  `/healthz`. A visitor without an account can cause no cost and no damage (docs/SAAS.md §9): those pages create no
+  database rows (a wrong password only raises an existing account's failed-sign-in counter), send no request to
+  Cinema City and only a limited number of e-mails, and nothing they answer tells whether an address has an account.
 - Accounts exist only by invitation. At start-up the owner's account (`Saas:OwnerEmail`) is created and invited once;
   only the owner sees **Operator** and **Users** and can invite. The invited person sets a password through the e-mail link, which also
   confirms the address. Links work 24 hours and once. "Forgot your password?" sends a reset link to an active account
-  and a new invitation to an account still waiting for activation - the page never reveals which addresses exist.
+  and a new invitation to an account still waiting for activation. The page only queues the address
+  (`PasswordHelpQueue`, bounded, 100) and answers at once, the same for every address; the e-mail follows in the
+  background, at most one per account per 15 minutes and 20 a day for all accounts (`PasswordHelpLimits`, in memory;
+  reaching the daily limit records an event).
+- The owner deletes an account in **Users** (`/admin/users`): a question first (`?delete=<id>` in the address), then the
+  account with all its data (profiles, notification state, history); an active account's person gets a short e-mail,
+  a waiting account is an invitation withdrawn without one; never the owner's own account (refused on the server).
+  The event in the panel names no address. A person can delete their own account on the account page.
+- A signed-in session is checked against the database every minute: a deleted account or a changed password ends it
+  within a minute.
 - Links in e-mails are built from `Saas:BaseUrl`, never from the request.
-- Passwords: at least 12 characters, no character rules; 5 wrong passwords lock the account for 15 minutes.
+- Passwords: at least 12 characters, no character rules; 5 wrong passwords lock the account for 15 minutes. The
+  sign-in form answers no faster than `Saas:SignInAnswerMilliseconds` and, unless it succeeds, says the same for an
+  unknown address, a waiting, a locked or an existing account (the old lockout page is gone).
+- Every answer carries `X-Robots-Tag: noindex, nofollow`; `/robots.txt` disallows everything.
+- `/admin` is answered only exactly as written: `/ADMIN`, `/%61dmin`, `//admin` and the like get 404, so nothing reaches
+  the owner's pages past a path rule at the edge (the Cloudflare Access application for `/admin`).
+- A form posted without a valid antiforgery token gets a short plain-text 400 (the form has expired).
 - Language: the PL / EN switch (cookie, saved to the account when signed in), otherwise the browser's preference
   (Polish if preferred, English for any other language). E-mails use the account's language.
 - The database also stores the keys that protect sign-in cookies and links (`data_protection_keys`).
@@ -137,13 +155,15 @@ the PC: every stop of the app would otherwise raise an alarm). The service and i
 | `Mail:Host`, `Mail:Port`, `Mail:Security`, `Mail:UserName`, `Mail:Password`, `Mail:FromAddress`, `Mail:FromName` | `appsettings.json`: `localhost`, `2525`, `None` (smtp4dev) | the provider is chosen in stage 4; its password only in secrets |
 | `Saas:TrustForwardedHeaders` | `false` | server: `true` - trust `X-Forwarded-Proto` / `X-Forwarded-For` from the tunnel (only where nothing else can reach the app) |
 | `Saas:MigrateDatabaseOnStart` | `false` (start refused with missing migrations) | server: `true` - missing migrations are applied at start-up |
+| `Saas:SignInAnswerMilliseconds` | `1000` | 0-5000; the sign-in form never answers faster (the tests use 40) |
 
 An https `Saas:BaseUrl` also makes the sign-in cookies Secure. The form (antiforgery) cookie follows the request: it is
 Secure behind the trusted tunnel, and a page never fails because a header is missing.
 
 At start-up the app checks that the system has the time-zone data (Europe/Warsaw) and ICU (Polish dates) and refuses
 to start without them. `GET /healthz` answers `ok` (200) when the database answers, `503` otherwise; it needs no
-sign-in and reveals nothing else.
+sign-in and reveals nothing else. It answers only inside the server (the deployment script, the container test): a
+request that came through Cloudflare (`CF-Connecting-IP` or `CF-Ray` header) gets 404.
 
 The minimum interval and the `Saas:Poller` values for the budget, the pauses, `ManualFreshMinutes`, `JitterPercent`
 and `ReuseScreeningDetails` are defaults: the operator's panel can change them within fixed ranges.

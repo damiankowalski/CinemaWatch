@@ -30,6 +30,32 @@
 </section>
 
 <h2>@T("Konta", "Accounts")</h2>
+
+@* The question lives in the address (?delete=<id>): a reload keeps it, "Keep" removes it. Never for the owner. *@
+@if (confirming is { } doomed)
+{
+    <div class="confirm" id="confirm-delete" role="group" aria-label="@T("Potwierdzenie usunięcia", "Confirm deletion")">
+        @if (doomed.IsPending)
+        {
+            <p>@T($"Wycofać zaproszenie dla {doomed.Email}? Link z zaproszenia przestanie działać.",
+                  $"Withdraw the invitation for {doomed.Email}? The invitation link stops working.")</p>
+        }
+        else
+        {
+            <p>@T($"Usunąć konto {doomed.Email}? Znikną też jego profile ({profileCounts.GetValueOrDefault(doomed.Id)}) i historia powiadomień. Ta osoba dostanie e-mail. Tego nie da się cofnąć.",
+                  $"Delete the account {doomed.Email}? Its profiles ({profileCounts.GetValueOrDefault(doomed.Id)}) and notification history go too. The person gets an e-mail. This cannot be undone.")</p>
+        }
+        <div class="actions">
+            <form action="admin/users/delete" method="post">
+                <AntiforgeryToken />
+                <input type="hidden" name="userId" value="@doomed.Id" />
+                <button type="submit" class="button danger">@(doomed.IsPending ? T("Tak, wycofaj zaproszenie", "Yes, withdraw the invitation") : T("Tak, usuń konto", "Yes, delete the account"))</button>
+            </form>
+            <a class="button" href="admin/users">@T("Nie usuwaj", "Keep it")</a>
+        </div>
+    </div>
+}
+
 @if (accounts.Count == 0)
 {
     <p>@T("Nie ma jeszcze kont.", "There are no accounts yet.")</p>
@@ -86,6 +112,14 @@ else
                                     <button type="submit" class="link">@T("Wyślij ponownie", "Send again")</button>
                                 </form>
                             }
+                            @if (account.IsOwner)
+                            {
+                                <span class="hint">@T("Twoje konto", "Your account")</span>
+                            }
+                            else if (confirming?.Id != account.Id)
+                            {
+                                <a class="link danger" href="admin/users?delete=@Uri.EscapeDataString(account.Id)#confirm-delete">@(account.IsPending ? T("Wycofaj zaproszenie", "Withdraw invitation") : T("Usuń konto", "Delete account"))</a>
+                            }
                         </td>
                     </tr>
                 }
@@ -99,7 +133,12 @@ else
 @code {
     private IReadOnlyList<AccountSummary> accounts = [];
     private IReadOnlyDictionary<string, int> profileCounts = new Dictionary<string, int>();
+    private AccountSummary? confirming;
     private string? error;
+
+    /// <summary>?delete=&lt;account id&gt; shows the deletion question for that account (never the owner's).</summary>
+    [SupplyParameterFromQuery(Name = "delete")]
+    private string? Delete { get; set; }
 
     [CascadingParameter]
     private HttpContext HttpContext { get; set; } = default!;
@@ -112,6 +151,7 @@ else
         Input ??= new();
         accounts = await Accounts.ListAccountsAsync();
         profileCounts = await Profiles.CountByAccountAsync();
+        confirming = accounts.FirstOrDefault(a => a.Id == Delete && !a.IsOwner);
     }
 
     private async Task InviteAsync()

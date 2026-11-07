@@ -3,6 +3,7 @@ using System.Text;
 using CinemaWatch.Core;
 using CinemaWatch.Server.Data;
 using CinemaWatch.Server.Mail;
+using CinemaWatch.Server.Polling;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -30,8 +31,44 @@ public enum InvitationOutcome
 
 public sealed record InvitationResult(InvitationOutcome Outcome, IReadOnlyList<string> Errors);
 
-/// <summary>One row of the owner's account list. <see cref="MaxProfiles"/>: own profile limit, null = the default.</summary>
-public sealed record AccountSummary(string Id, string Email, bool IsPending, string Language, DateTimeOffset CreatedAt, DateTimeOffset? InvitedAt, int? MaxProfiles);
+/// <summary>
+/// One row of the owner's account list. <see cref="MaxProfiles"/>: own profile limit, null = the default.
+/// <see cref="IsOwner"/>: the owner's own account (cannot be deleted from the list).
+/// </summary>
+public sealed record AccountSummary(string Id, string Email, bool IsPending, string Language, DateTimeOffset CreatedAt, DateTimeOffset? InvitedAt, int? MaxProfiles, bool IsOwner);
+
+public enum PasswordHelpOutcome
+{
+    /// <summary>No account has this address; nothing was sent.</summary>
+    NoAccount,
+
+    /// <summary>A reset link (active account) or a new invitation (waiting account) was sent.</summary>
+    Sent,
+
+    /// <summary>A limit stopped it (<see cref="PasswordHelpLimits"/>); nothing was sent.</summary>
+    Limited,
+}
+
+public enum AccountDeletionOutcome
+{
+    /// <summary>Deleted with all its data; an active account's person got an e-mail.</summary>
+    Deleted,
+
+    /// <summary>Deleted with all its data, but the e-mail to the person failed (see the errors).</summary>
+    DeletedMailFailed,
+
+    /// <summary>No account has this id.</summary>
+    NotFound,
+
+    /// <summary>The owner's own account: refused.</summary>
+    OwnerAccount,
+
+    /// <summary>Identity refused the deletion (see the errors); nothing was deleted.</summary>
+    Failed,
+}
+
+/// <summary>Outcome of the owner deleting an account; <see cref="WasPending"/>: an invitation was withdrawn.</summary>
+public sealed record AccountDeletionResult(AccountDeletionOutcome Outcome, string Email, bool WasPending, int Profiles, IReadOnlyList<string> Errors);
 
 /// <summary>
 /// Accounts by invitation only (docs/SAAS.md §5.1): the owner invites an e-mail address, the invited person sets a
@@ -40,9 +77,12 @@ public sealed record AccountSummary(string Id, string Email, bool IsPending, str
 /// </summary>
 public sealed class AccountService(
     UserManager<AppUser> users,
+    AppDbContext db,
     IMailSender mail,
     IOptions<SaasOptions> options,
     TimeProvider time,
+    ServiceEvents events,
+    PasswordHelpLimits helpLimits,
     ILogger<AccountService> logger)
 {
     /// <summary>How long an invitation or password-reset link works (Identity token lifetime).</summary>
@@ -93,28 +133,104 @@ public sealed class AccountService(
     public async Task<IReadOnlyList<AccountSummary>> ListAccountsAsync(CancellationToken cancellationToken = default) =>
         (await users.Users.ToListAsync(cancellationToken))
             .OrderBy(u => u.CreatedAt)
-            .Select(u => new AccountSummary(u.Id, u.Email ?? "", u.IsPending, u.Language, u.CreatedAt, u.InvitedAt, u.MaxProfiles))
+            .Select(u => new AccountSummary(u.Id, u.Email ?? "", u.IsPending, u.Language, u.CreatedAt, u.InvitedAt, u.MaxProfiles, IsOwnerEmail(u.Email, options.Value)))
             .ToList();
 
     /// <summary>
     /// "Forgot your password?": an active account gets a reset link, an account still waiting for its first password
-    /// gets a new invitation (e.g. after the first link expired), an unknown address gets nothing. The caller shows
-    /// the same answer in every case, so the page does not reveal which addresses have an account.
+    /// gets a new invitation (e.g. after the first link expired), an unknown address gets nothing. Limited per account
+    /// and per day (<see cref="PasswordHelpLimits"/>). The web page does not call this directly but queues the address
+    /// (<see cref="PasswordHelpQueue"/>), so its answer is the same, and as fast, for every address.
     /// </summary>
-    public async Task RequestPasswordHelpAsync(string email, CancellationToken cancellationToken = default)
+    public async Task<PasswordHelpOutcome> RequestPasswordHelpAsync(string email, CancellationToken cancellationToken = default)
     {
         var user = await users.FindByEmailAsync(email.Trim());
         if (user is null)
-            return;
+            return PasswordHelpOutcome.NoAccount;
+
+        switch (helpLimits.TryReserve(user.Id))
+        {
+            case PasswordHelpDecision.TooSoonForAccount:
+                logger.LogInformation("Password help for user {UserId} skipped: one was sent less than {Minutes} minutes ago",
+                    user.Id, PasswordHelpLimits.PerAccountInterval.TotalMinutes);
+                return PasswordHelpOutcome.Limited;
+            case PasswordHelpDecision.DailyLimit:
+                logger.LogWarning("Password help for user {UserId} skipped: {PerDay} password help e-mails in the last 24 hours",
+                    user.Id, PasswordHelpLimits.PerDay);
+                events.Add(db, ServiceEventKind.AccountMailLimited,
+                    $"Password help e-mails stopped for now: {PasswordHelpLimits.PerDay} in the last 24 hours (someone may be flooding \"Forgot your password?\")",
+                    throttled: true);
+                await db.SaveChangesAsync(cancellationToken);
+                return PasswordHelpOutcome.Limited;
+        }
+
         if (user.IsPending)
         {
             await SendInvitationAsync(user, cancellationToken);
-            return;
+            return PasswordHelpOutcome.Sent;
         }
 
         var link = await BuildSetPasswordLinkAsync(user);
         using (Localizer.Use(LanguageOf(user)))
             await mail.SendAsync(AccountMails.PasswordReset(user.Email!, link, LinkLifetime), cancellationToken);
+        return PasswordHelpOutcome.Sent;
+    }
+
+    /// <summary>
+    /// The owner deletes an account (docs/SAAS.md §9): the account and all its data go (profiles, notification state and
+    /// history, through the database's cascades); a waiting account is an invitation withdrawn. Never the owner's own
+    /// account. An active account's person gets a short e-mail afterwards; the event in the panel names no address.
+    /// </summary>
+    public async Task<AccountDeletionResult> DeleteByOwnerAsync(string userId, CancellationToken cancellationToken = default)
+    {
+        var user = string.IsNullOrEmpty(userId) ? null : await users.FindByIdAsync(userId);
+        if (user is null)
+            return new AccountDeletionResult(AccountDeletionOutcome.NotFound, "", false, 0, []);
+        var email = user.Email ?? "";
+        if (IsOwnerEmail(email, options.Value))
+            return new AccountDeletionResult(AccountDeletionOutcome.OwnerAccount, email, false, 0, []);
+
+        var wasPending = user.IsPending;
+        var language = LanguageOf(user);
+        var (result, profiles) = await DeleteAsync(user, "the owner", cancellationToken);
+        if (!result.Succeeded)
+            return new AccountDeletionResult(AccountDeletionOutcome.Failed, email, wasPending, profiles, result.Errors.Select(e => e.Description).ToList());
+        if (wasPending)
+            return new AccountDeletionResult(AccountDeletionOutcome.Deleted, email, true, profiles, []);
+
+        try
+        {
+            using (Localizer.Use(language))
+                await mail.SendAsync(AccountMails.AccountDeleted(email), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "The e-mail about the deleted account could not be sent");
+            return new AccountDeletionResult(AccountDeletionOutcome.DeletedMailFailed, email, false, profiles, [ex.Message]);
+        }
+        return new AccountDeletionResult(AccountDeletionOutcome.Deleted, email, false, profiles, []);
+    }
+
+    /// <summary>A person deletes their own account (the page has checked the password); all its data goes with it.</summary>
+    public async Task<IdentityResult> DeleteOwnAsync(AppUser user, CancellationToken cancellationToken = default) =>
+        (await DeleteAsync(user, "its user", cancellationToken)).Result;
+
+    private async Task<(IdentityResult Result, int Profiles)> DeleteAsync(AppUser user, string by, CancellationToken cancellationToken)
+    {
+        var wasPending = user.IsPending;
+        var profiles = await db.Profiles.CountAsync(p => p.UserId == user.Id, cancellationToken);
+        var result = await users.DeleteAsync(user);
+        if (!result.Succeeded)
+            return (result, profiles);
+
+        helpLimits.Forget(user.Id);
+        // No address and no id in the event: events are kept for 90 days without personal data.
+        events.Add(db, ServiceEventKind.AccountDeleted, wasPending
+            ? $"Invitation withdrawn by {by}"
+            : $"Account deleted by {by} (profiles: {profiles})");
+        await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Account {UserId} deleted by {By} (profiles: {Profiles})", user.Id, by, profiles);
+        return (result, profiles);
     }
 
     /// <summary>The account behind a set-password link, or null for an unknown id.</summary>

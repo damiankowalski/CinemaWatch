@@ -5,8 +5,9 @@
 
 @*
     Reviewed against what the code stores (stage 3, increment 4) and against the services the deployment uses
-    (stage 4: OVHcloud, Cloudflare with Access, Resend, Healthchecks.io; docs/SAAS_INFRA.md §1.5-1.7). Update it
-    whenever a service or a stored field changes.
+    (stage 4: OVHcloud, Cloudflare with Access, Resend, Healthchecks.io, Backblaze B2; docs/SAAS_INFRA.md §1.5-1.8;
+    SaaS 0.6.0: deletion by the owner, Access in front of the owner's pages). Update it whenever a service or a stored
+    field changes.
 *@
 <article class="prose">
     <h1>@T("Prywatność", "Privacy")</h1>
@@ -22,12 +23,12 @@
           "The site's owner sees the list of accounts (e-mail address, account state, number and limit of profiles) and, as the administrator, has technical access to the database.")</p>
     <p>@T("Serwer zapisuje też dziennik swoich zapytań do Cinema City (czas, adres zapytania, odpowiedź) i zdarzenia serwisu (np. blokady, wstrzymania, błędy wysyłki e-maili). Nie ma w nich danych osobowych: adresy e-mail są wycinane z komunikatów o błędach. Techniczny dziennik aplikacji zawiera najwyżej wewnętrzny identyfikator konta, nie adres e-mail.",
           "The server also keeps a log of its requests to Cinema City (time, request address, response) and service events (e.g. blocks, pauses, failed e-mails). They contain no personal data: e-mail addresses are cut out of error messages. The application's technical log contains at most an account's internal id, not its e-mail address.")</p>
-    <p>@T("Przed stroną stoi bramka logowania Cloudflare Access: podajesz adres e-mail i dostajesz na niego jednorazowy kod. Cloudflare zapisuje te logowania (adres e-mail, czas, adres IP).",
-          "In front of the site there is a Cloudflare Access sign-in gate: you enter your e-mail address and receive a one-time code. Cloudflare records these sign-ins (e-mail address, time, IP address).")</p>
+    <p>@T("Strony właściciela serwisu chroni dodatkowo bramka logowania Cloudflare Access. W czasie testów bramka może stać także przed całym serwisem: wtedy podajesz adres e-mail i dostajesz na niego jednorazowy kod. Cloudflare zapisuje te logowania (adres e-mail, czas, adres IP).",
+          "The owner's pages are also protected by a Cloudflare Access sign-in gate. While the service is being tested, the gate may stand in front of the whole site: you then enter your e-mail address and receive a one-time code. Cloudflare records these sign-ins (e-mail address, time, IP address).")</p>
     <p>@T("Co kilka minut serwer melduje się w zewnętrznej usłudze monitorującej (Healthchecks.io), żeby jego awaria nie przeszła niezauważona. Meldunek nie zawiera żadnych danych o użytkownikach.",
           "Every few minutes the server reports to an external monitoring service (Healthchecks.io), so that an outage does not go unnoticed. The report contains no data about users.")</p>
-    <p>@T("Serwis używa tylko niezbędnych ciasteczek: logowania (także bramki Cloudflare Access), języka i ochrony formularzy. Nie ma reklam ani analityki.",
-          "The service uses only essential cookies: sign-in (including the Cloudflare Access gate), language and form protection. There are no ads and no analytics.")</p>
+    <p>@T("Serwis używa tylko niezbędnych ciasteczek: logowania (także bramki Cloudflare Access, gdzie stoi), języka i ochrony formularzy. Nie ma reklam ani analityki.",
+          "The service uses only essential cookies: sign-in (including the Cloudflare Access gate where it stands), language and form protection. There are no ads and no analytics.")</p>
 
     <h2>@T("Po co", "Why")</h2>
     <p>@T("Żeby można było się zalogować i dostawać e-maile o zwolnionych miejscach.", "So you can sign in and receive e-mails about freed seats.")</p>
@@ -39,8 +40,11 @@
           "Traffic to the service goes through Cloudflare (USA): encrypted connection, protection and the sign-in gate. Cloudflare processes the IP address and, at the gate, the e-mail address.")</p>
     <p>@T("E-maile wysyła Resend (USA). Dostaje adres odbiorcy i treść e-maila (np. seanse i miejsca z powiadomienia albo link z zaproszenia). Wysyła je z serwerów w Irlandii, ale dane konta i dziennik wysyłki przechowuje w USA.",
           "E-mails are sent by Resend (USA). It receives the recipient's address and the e-mail's content (e.g. the screenings and seats of a notification or an invitation link). It sends them from servers in Ireland but keeps the account data and the sending log in the USA.")</p>
+    <p>@T("Raz dziennie serwer robi zaszyfrowaną kopię zapasową bazy i wysyła ją do Backblaze B2 (USA; plik leży w centrum danych w UE). Backblaze dostaje tylko zaszyfrowany plik, bez klucza. Kopie są usuwane po 31 dniach, więc dane usuniętego konta znikają z nich najpóźniej po tym czasie.",
+          "Once a day the server makes an encrypted backup of the database and sends it to Backblaze B2 (USA; the file is kept in a data centre in the EU). Backblaze receives only the encrypted file, without the key. Backups are deleted after 31 days, so a deleted account's data is gone from them after that time at the latest.")</p>
     <p>@T("Poza tymi dostawcami dane nie trafiają do nikogo.", "Apart from these providers, the data goes to nobody.")</p>
 
     <h2>@T("Twoje prawa", "Your rights")</h2>
     <p>@T("Na stronie konta możesz pobrać swoje dane i usunąć konto razem ze wszystkimi danymi.", "On your account page you can download your data and delete the account with all its data.")</p>
+    <p>@T("Właściciel serwisu też może usunąć konto razem ze wszystkimi danymi; wtedy dostaniesz o tym e-mail.", "The site's owner can also delete an account with all its data; you then get an e-mail about it.")</p>
 </article>

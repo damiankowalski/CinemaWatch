@@ -13,7 +13,9 @@
 > skipped on purpose (§11). CinemaWatch runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026
 > (now 0.5.2), behind Cloudflare Access; e-mail through Resend; heartbeat and backup monitored by Healthchecks.io; daily
 > encrypted backups to Backblaze B2, restore tested; testers invited, the two-week test runs since 7 Nov 2026. Decided
-> (§9): access model A, no public account request form, the owner deletes accounts; next: SaaS 0.6.0 (§7, 5.2-5.5).
+> (§9): access model A, no public account request form, the owner deletes accounts. SaaS 0.6.0 built (7 Nov 2026):
+> hardened public pages and account deletion; beta on staging, stable on or after 13 Nov with `cloudflared` 2026.10.7,
+> then the switch to model A (`SAAS_INFRA.md` §4.28).
 
 ---
 
@@ -502,11 +504,14 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
       `robots.txt` and `noindex`, a test that anonymous requests write nothing to the database; (2) deploy and test;
       (3) one Cloudflare rate limiting rule on the account forms, `curl` checks (`SAAS_INFRA.md` §4.21); (4) only then
       remove the Access application of the whole host; `/admin` keeps its own. Runbooks §2.4, §4.21, §4.22 updated.
+      Step 1 **built in SaaS 0.6.0** (7 Nov 2026; also: the sign-in answer is the same for unknown, waiting and locked
+      accounts and the lockout page is gone; refused forms get a plain 400). Steps 3-4: `SAAS_INFRA.md` §4.28.
 - [ ] 5.3 The owner deletes an account in `/admin/users` (SaaS 0.6.0; decided 7 Nov 2026, §9): with all its data
       (profiles, notification state, history), after a confirmation, enforced on the server (owner policy,
       antiforgery, never the owner's own account); a pending invitation is withdrawn the same way. The person gets a
       short e-mail (active accounts only); the event names no e-mail address; sessions are re-checked every minute,
-      so a deleted account is signed out at once. Runbook §4.22 ("remove a tester") then uses it.
+      so a deleted account is signed out at once. Runbook §4.22 ("remove a tester") then uses it. **Built in SaaS
+      0.6.0** (7 Nov 2026); done once deployed and checked on staging.
 - [x] 5.4 "Request an account": **dropped** (7 Nov 2026, §9). New accounts come only from the owner's invitation by
       e-mail; there is no public form.
 - [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). Part of SaaS
@@ -731,6 +736,10 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | `/healthz` answers only inside the server (requests through the tunnel get 404); `/admin` answers only in lower case | `deploy.sh` and the container test call it directly; outside it only costs a database query. ASP.NET ignores case in paths; other Cloudflare products match paths case-sensitively and Access is not documented either way: `/ADMIN` must not slip past the admin application |
 | Nov 2026 | No exception for `cloudflared` 2026.10.7: it comes with SaaS 0.6.0, tagged on or after 13 Nov 2026 | Its fixes touch nothing we use (metrics server, libraries, HTTP/2 fallback); `cloudflared` sees every request decrypted and holds the tunnel token, the worst place for a bad release; waiting six days also brings the .NET patch of 10 Nov 2026 into the same image |
 | Nov 2026 | The stage 5 test starts at once (7 Nov 2026), alongside 0.6.0 | 0.6.0 changes accounts and public pages, not the poller, so the measurements are not disturbed |
+| Nov 2026 | Sign-in: unless it succeeds, the same message for an unknown address, a waiting, a locked or an existing account (it mentions the 15-minute pause); the lockout page removed; the answer padded to `Saas:SignInAnswerMilliseconds` (1 s) | The lockout page and the time Identity needs (no hash for an unknown address, none for a locked or waiting one) told who has an account |
+| Nov 2026 | Password help through a bounded in-memory queue (100, new requests dropped when full) and limits in memory (1 per account per 15 min, 20 a day); no table | The page does no lookup, so its answer is the same and as fast for every address; one server, so memory is enough and a restart only resets the counters; no migration, so no restore test for 0.6.0 |
+| Nov 2026 | A form posted without a valid antiforgery token gets a short plain-text 400 before anything reads it | Reading such a form threw, and the error page, run again for the same post, threw too: an unhandled 500 (found by the 0.6.0 tests; affected every form) |
+| Nov 2026 | The privacy notice names Backblaze B2 (encrypted backups, 31 days) and deletion by the owner; the Access gate is described for the owner's pages, and for the whole site only while testing | The backups of stage 4.5 were missing from the notice; model A changes who meets the gate |
 
 ---
 

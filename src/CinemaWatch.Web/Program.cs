@@ -26,6 +26,7 @@ var connectionString = builder.Configuration.GetConnectionString(DatabaseSetup.C
 builder.Services.AddOptions<SaasOptions>()
     .Bind(builder.Configuration.GetSection(SaasOptions.Section))
     .Validate(o => Uri.TryCreate(o.BaseUrl, UriKind.Absolute, out _), "Saas:BaseUrl must be an absolute address, e.g. http://localhost:5180")
+    .Validate(o => o.SignInAnswerMilliseconds is >= 0 and <= 5000, "Saas:SignInAnswerMilliseconds must be 0-5000")
     .ValidateOnStart();
 builder.Services.AddOptions<MailOptions>().Bind(builder.Configuration.GetSection(MailOptions.Section));
 builder.Services.AddOptions<LimitOptions>()
@@ -87,6 +88,9 @@ builder.Services.AddIdentityCore<AppUser>(options =>
     .AddDefaultTokenProviders()
     .AddErrorDescriber<LocalizedIdentityErrors>();
 builder.Services.Configure<DataProtectionTokenProviderOptions>(options => options.TokenLifespan = AccountService.LinkLifetime);
+// A signed-in session is checked against the database every minute (default 30): a deleted account or a changed
+// password signs the session out within a minute.
+builder.Services.Configure<SecurityStampValidatorOptions>(options => options.ValidationInterval = TimeSpan.FromMinutes(1));
 
 // Everything needs a signed-in user unless a page or endpoint says [AllowAnonymous]; invitations need the owner.
 builder.Services.AddSingleton<IAuthorizationHandler, OwnerAuthorizationHandler>();
@@ -106,6 +110,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 // Every e-mail's outcome is recorded for the operator's panel (component_status).
 builder.Services.AddMailSender(provider => ActivatorUtilities.CreateInstance<SmtpMailSender>(provider));
 builder.Services.AddScoped<AccountService>();
+// "Forgot your password?" goes through a bounded queue and limits (docs/SAAS.md §9).
+builder.Services.AddSingleton<PasswordHelpLimits>();
+builder.Services.AddSingleton<PasswordHelpQueue>();
+builder.Services.AddHostedService<PasswordHelpSender>();
 builder.Services.AddScoped<ProfileService>();
 // Background checks of the watched screenings, the notification e-mails, the heartbeat and the operator's panel
 // (docs/SAAS.md §4.3).
@@ -118,14 +126,18 @@ app.UseForwardedHeaders();
 if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// Public pages: no search engine indexing; /admin only as written in the Access application (docs/SAAS.md §9).
+app.UsePublicSurface();
 
 app.UseWebLanguage();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+app.UseInvalidFormRefusal();
 
 app.MapStaticAssets().AllowAnonymous();
 app.MapHealthCheck();
+app.MapRobots();
 app.MapRazorComponents<App>();
 app.MapAccountEndpoints();
 app.MapProfileEndpoints();

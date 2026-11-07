@@ -14,8 +14,8 @@ using static CinemaWatch.Core.Localizer;
 namespace Microsoft.AspNetCore.Routing;
 
 /// <summary>
-/// Form endpoints that are not pages: sign-out, the personal-data download, the test e-mail, the owner's "send again"
-/// and profile limit.
+/// Form endpoints that are not pages: sign-out, the personal-data download, the test e-mail, the owner's "send again",
+/// account deletion and profile limit.
 /// </summary>
 internal static class AccountEndpoints
 {
@@ -106,6 +106,16 @@ internal static class AccountEndpoints
             return TypedResults.LocalRedirect("/admin/users");
         }).RequireAuthorization(CinemaWatch.Web.OwnerAuthorizationHandler.Policy);
 
+        endpoints.MapPost("/admin/users/delete", async ([FromForm] string userId, HttpContext context, AccountService accounts) =>
+        {
+            // Form-bound minimal endpoints check the antiforgery token automatically; the owner policy is enforced here,
+            // and the service refuses the owner's own account whatever the form says.
+            var result = await accounts.DeleteByOwnerAsync(userId);
+            var (kind, message) = AdminMessages.Describe(result);
+            IdentityRedirectManager.SetStatus(context, kind, message);
+            return TypedResults.LocalRedirect("/admin/users");
+        }).RequireAuthorization(CinemaWatch.Web.OwnerAuthorizationHandler.Policy);
+
         endpoints.MapPost("/admin/users/limit", async (
             [FromForm] string userId, [FromForm] string? maxProfiles, HttpContext context, UserManager<AppUser> users, ProfileService profiles) =>
         {
@@ -143,6 +153,22 @@ internal static class AdminMessages
         InvitationOutcome.Resent => (StatusMessageKind.Success, T($"Konto {email} czekało na aktywację: wysłano nowe zaproszenie.", $"The account {email} was waiting for activation: a new invitation was sent.")),
         InvitationOutcome.AlreadyActive => (StatusMessageKind.Error, T($"Konto {email} jest już aktywne.", $"The account {email} is already active.")),
         InvitationOutcome.MailFailed => (StatusMessageKind.Error, T($"Konto {email} czeka na aktywację, ale e-mail nie wyszedł: {string.Join(" ", result.Errors)}", $"The account {email} waits for activation, but the e-mail was not sent: {string.Join(" ", result.Errors)}")),
+        _ => (StatusMessageKind.Error, string.Join(" ", result.Errors)),
+    };
+
+    public static (StatusMessageKind Kind, string Message) Describe(AccountDeletionResult result) => result.Outcome switch
+    {
+        AccountDeletionOutcome.Deleted when result.WasPending => (StatusMessageKind.Success,
+            T($"Zaproszenie dla {result.Email} wycofane.", $"The invitation for {result.Email} was withdrawn.")),
+        AccountDeletionOutcome.Deleted => (StatusMessageKind.Success,
+            T($"Konto {result.Email} usunięte (profile: {result.Profiles}). Ta osoba dostała e-mail.",
+              $"The account {result.Email} was deleted (profiles: {result.Profiles}). The person got an e-mail.")),
+        AccountDeletionOutcome.DeletedMailFailed => (StatusMessageKind.Error,
+            T($"Konto {result.Email} usunięte (profile: {result.Profiles}), ale e-mail do tej osoby nie wyszedł: {string.Join(" ", result.Errors)}",
+              $"The account {result.Email} was deleted (profiles: {result.Profiles}), but the e-mail to the person was not sent: {string.Join(" ", result.Errors)}")),
+        AccountDeletionOutcome.NotFound => (StatusMessageKind.Error, T("Nie ma takiego konta.", "There is no such account.")),
+        AccountDeletionOutcome.OwnerAccount => (StatusMessageKind.Error,
+            T("Konta właściciela nie można usunąć w tym miejscu.", "The owner's account cannot be deleted here.")),
         _ => (StatusMessageKind.Error, string.Join(" ", result.Errors)),
     };
 }

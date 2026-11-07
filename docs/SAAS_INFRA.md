@@ -14,7 +14,7 @@
 > Tunnel and Access since 6 Nov 2026, now 0.5.2; encrypted daily database backup to Backblaze B2 (EU Central), restore
 > tested (§1.8). Stage 5 started: testers added to the Access policy and invited in the app (§3, §4.22); the two-week
 > test runs since 7 Nov 2026 (§4.27). Access model A decided ([`SAAS.md`](SAAS.md) §9): Access for the whole host goes
-> after SaaS 0.6.0.
+> after SaaS 0.6.0 (built 7 Nov 2026; switch: §4.28).
 
 ---
 
@@ -519,6 +519,11 @@ Browser --HTTPS--> Cloudflare (WAW)
    public account request form, the owner deletes accounts in `/admin`, `cloudflared` 2026.10.7 with 0.6.0 (on or
    after 13 Nov). The two-week test started the same day with the testers already invited; daily and weekly checks in
    §4.27.
+5. **SaaS 0.6.0 built** (7 Nov 2026, branch `feature/saas-accounts`): the owner deletes accounts in `/admin/users`;
+   public pages hardened for model A (password help queued and limited, the sign-in answer the same and padded,
+   `/admin` only in lower case, `/healthz` only inside the server, `robots.txt` and `noindex`, refused forms a plain
+   400); the privacy notice names Backblaze B2. No database migration. Beta on staging first; the stable tag on or
+   after 13 Nov 2026 with `cloudflared` 2026.10.7; then §4.28.
 
 ---
 
@@ -1003,7 +1008,22 @@ Expected: `HTTP/1.1 302` with `Location: https://damiankowalski.cloudflareaccess
 different application ids for `/` and `/admin` (the same id means the admin application lost its path). Anything
 other than 302 without a sign-in means Access does not protect the host: stop and check *Access controls →
 Applications*. After signing in (browser): until 4.4 Cloudflare's error 1033 (HTTP 530: tunnel without a connector),
-afterwards the app's sign-in page.
+afterwards the app's sign-in page. With model A (after §4.28) `/` answers the app itself: see the checks there.
+
+From SaaS 0.6.0 on, also the paths that must never reach the owner's pages or the health check (same `--resolve`;
+a GET that prints only the headers, because the app answers `HEAD` for these paths differently):
+
+```powershell
+foreach ($p in '/Admin', '/ADMIN', '/%61dmin', '/healthz', '/robots.txt') {
+  $head = curl.exe -s -D - -o NUL "https://staging-cinemawatch.damiankowalski.pl$p" --resolve staging-cinemawatch.damiankowalski.pl:443:188.114.96.11
+  "$p -> $(($head | Select-Object -First 1).Trim())  $(($head | Select-String '^Location:') -replace '\?.*','')"
+}
+```
+
+Expected while the whole host is behind Access: every line `302` to the Access login. With model A: `/Admin`,
+`/ADMIN`, `/%61dmin` either `302` to the Access login (the admin application caught it) or `404` (the app refused it),
+`/healthz` `404`, `/robots.txt` `200`. A `200` for any spelling of `/admin` or for `/healthz`: stop, put the Access
+application of the whole host back (§4.28, way back) and report it.
 
 ### 4.22 Add a tester
 
@@ -1019,8 +1039,12 @@ in stage 5.2, [`SAAS.md`](SAAS.md) §10).
 4. The tester opens the link: Access asks for their e-mail and sends a PIN (from `noreply@notify.cloudflare.com`, valid
    10 minutes; check spam), then the app's set-password page opens. **No PIN** = the address is not in the policy
    (Access shows the same page either way): go back to step 1 and compare the spelling.
-5. Remove a tester in the reverse order: delete the account in the app, then the e-mail from the policy. Until the
-   owner can delete accounts in `/admin` (stage 5.3) the tester deletes their own account (*Account → Delete account*).
+5. Remove a tester in the reverse order: delete the account in the app (from SaaS 0.6.0: `/admin/users` → *Usuń
+   konto* → *Tak, usuń konto*; the person gets an e-mail; before 0.6.0 the tester deletes it on their account page),
+   then the e-mail from the policy.
+
+With model A (after §4.28) only steps 3-4 remain: invite in the app, the person sets a password; removing = deleting
+the account in `/admin/users`. Access then guards only `/admin`, for the owner.
 
 ---
 
@@ -1240,14 +1264,57 @@ df -h /
 Expected: few error lines (read them: `cw logs --since 168h web 2>&1 | grep -iE 'fail|error|exception' | tail -20`),
 about 300 MiB for the three containers, the disk far from full. Nothing here changes anything on the server.
 
+### 4.28 Switch to access model A (stage 5.2)
+
+Access stops guarding the whole host and keeps guarding `/admin` (owner only); the app's own sign-in guards the rest
+([`SAAS.md`](SAAS.md) §9). **Only after** SaaS 0.6.0 (stable) is deployed (§4.24) and its pages work on staging. Each
+step says how to check it; the way back is at the end. Nothing here touches the server.
+
+1. **Before - Windows (PowerShell):** run §4.21 and note the application id (`kid=…`) for `/admin`. Expected: two
+   different ids for `/` and `/admin`.
+2. **Rate limiting rule - Cloudflare dashboard:** the domain `damiankowalski.pl` → *Security → WAF → Rate limiting
+   rules* → *Create rule*. Name `CinemaWatch account forms`. *Edit expression*:
+
+   ```text
+   (http.host eq "staging-cinemawatch.damiankowalski.pl" and http.request.method eq "POST" and starts_with(lower(http.request.uri.path), "/account/"))
+   ```
+
+   Characteristics: IP (the only one on Free). When rate exceeds: **5** requests per **10 seconds**; action *Block*;
+   duration 10 seconds (fixed on Free). Deploy. If the Free editor refuses a field or `lower()`, build the simplest
+   rule it allows: *URI Path* *starts with* `/Account/`, **10** requests per 10 seconds (all methods, so a bit more
+   room for normal clicking); the app's own limits stay the real protection. Why: one IP cannot try passwords or
+   password help faster than this; the rule costs nothing and touches no other path.
+3. **Remove the host-wide Access application:** Zero Trust → *Access controls → Applications* → `CinemaWatch staging`
+   (the whole host, **not** `CinemaWatch staging admin`) → *Delete*. Keep the policy `Owner and testers` for a week
+   (the way back needs it), then delete it under *Access controls → Policies*: the testers' addresses then leave
+   Cloudflare.
+4. **Check - Windows (PowerShell):** run §4.21 again (both blocks). Expected: `/` → `302` with `Location:` to
+   `/Account/Login?ReturnUrl=%2F` (the app, not Access); `/admin` → `302` to the Access login with the id noted in step
+   1; the extra paths as described there. Then the rate limit (the posts carry no form token, so the app answers 400
+   and no account is touched):
+
+   ```powershell
+   1..12 | ForEach-Object { curl.exe -s -o NUL -w "%{http_code} " -d "x=1" "https://staging-cinemawatch.damiankowalski.pl/Account/Login" --resolve staging-cinemawatch.damiankowalski.pl:443:188.114.96.11 }
+   ```
+
+   Expected: a few `400`, then `429` (blocked for 10 seconds). Only `400`: the rule does not match - check its
+   expression. Finally sign in as the owner in a browser: the app's sign-in, then `/admin` asks for the Access PIN.
+5. **Testers:** tell them the PIN step is gone; they sign in with the app's password only. Optionally free their Access
+   seats: Zero Trust → *Users* → select them → *Remove users*.
+6. **Docs:** §1.6 (Access applications and policies), §2.4 (one gate for the site, two for `/admin`), §3 work log;
+   [`SAAS.md`](SAAS.md) §7 5.2 done.
+
+**Way back** (anything unexpected in step 4, e.g. a `200` for a spelling of `/admin`): Zero Trust → *Access controls →
+Applications* → *Add an application* → *Self-hosted* → name `CinemaWatch staging`, domain
+`staging-cinemawatch.damiankowalski.pl` with no path, session 1 week, policy: the existing `Owner and testers` → save;
+§4.21 shows `302` to Access for `/` again within a minute. The rate limiting rule can stay.
+
 ## 5. Next infrastructure steps
 
 Stage 5 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- Stage 5 ([`SAAS.md`](SAAS.md) §7): SaaS 0.6.0 (account deletion, hardened public pages, `cloudflared` 2026.10.7,
-  stable tag on or after 13 Nov 2026) deployed with §4.24; then one Cloudflare rate limiting rule on the account
-  forms, the `curl` checks of §4.21 (also `/Admin`, `/ADMIN`, `/healthz` from outside) and the Access application of
-  the whole host removed (model A); §2.4, §4.21 and §4.22 rewritten for it.
+- Stage 5 ([`SAAS.md`](SAAS.md) §7): SaaS 0.6.0 (built 7 Nov 2026) as a beta on staging (§4.24); the stable tag on or
+  after 13 Nov 2026 with `cloudflared` 2026.10.7; then the switch to model A (§4.28) and §1.6, §2.4 rewritten for it.
 - Stage 5.8: an inventory of everything that needs updates and a runbook for it.
 - Restore test again in February 2027 (§4.26).
 - 4.6 (deployment from GitHub Actions) was skipped; it stays in the backlog ([`SAAS.md`](SAAS.md) §11).
