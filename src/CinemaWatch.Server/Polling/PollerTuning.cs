@@ -17,6 +17,10 @@ public enum TuningKey
     JitterPercent,
     FirstBlockPauseMinutes,
     MaxBlockPauseMinutes,
+    WizardRequestsPerHour,
+    WizardBurst,
+    WizardAccountRequestsPerHour,
+    WizardGapSeconds,
 }
 
 /// <summary>
@@ -136,6 +140,18 @@ public static class PollerTuning
         new(TuningKey.MaxBlockPauseMinutes, 15, 7 * 24 * 60, true,
             r => r.MaxBlockPauseMinutes, (r, v) => r.MaxBlockPauseMinutes = Whole(v),
             (p, _) => p.MaxBlockPauseMinutes, (p, _, v) => p.MaxBlockPauseMinutes = (int)Math.Round(v)),
+        new(TuningKey.WizardRequestsPerHour, 10, 300, true,
+            r => r.WizardRequestsPerHour, (r, v) => r.WizardRequestsPerHour = Whole(v),
+            (p, _) => p.Wizard.RequestsPerHour, (p, _, v) => p.Wizard.RequestsPerHour = (int)Math.Round(v)),
+        new(TuningKey.WizardBurst, 10, 300, true,
+            r => r.WizardBurst, (r, v) => r.WizardBurst = Whole(v),
+            (p, _) => p.Wizard.Burst, (p, _, v) => p.Wizard.Burst = (int)Math.Round(v)),
+        new(TuningKey.WizardAccountRequestsPerHour, 10, 300, true,
+            r => r.WizardAccountRequestsPerHour, (r, v) => r.WizardAccountRequestsPerHour = Whole(v),
+            (p, _) => p.Wizard.AccountRequestsPerHour, (p, _, v) => p.Wizard.AccountRequestsPerHour = (int)Math.Round(v)),
+        new(TuningKey.WizardGapSeconds, 1, 10, false,
+            r => r.WizardGapSeconds, (r, v) => r.WizardGapSeconds = v,
+            (p, _) => p.Wizard.GapSeconds, (p, _, v) => p.Wizard.GapSeconds = v),
     ];
 
     /// <summary>Pairs whose upper value must not be below the lower one: (lower, upper).</summary>

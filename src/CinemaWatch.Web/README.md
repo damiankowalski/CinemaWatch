@@ -9,7 +9,7 @@ request statistics, events, a pause switch, poller settings) and a heartbeat for
 
 | Project | Contents |
 | --- | --- |
-| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `CheckService`, `PollerSettings`, the development fake), the operator's panel and the heartbeat (`Operations/`) |
+| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `UpstreamBlocks`, `CheckService`, `PollerSettings`, the development fake), the wizard's Cinema City data on demand (`Wizard/`: `WizardJobs`, `CinemaCityCache`, `LoadingTokens`; no pages yet), the operator's panel and the heartbeat (`Operations/`) |
 | `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms, no JavaScript); hosts the background services in MVP 0 |
 | `tests/CinemaWatch.Saas.Tests` | Logic tests, database tests and the whole web flow (real app in memory, e-mails recorded) |
 
@@ -150,6 +150,8 @@ the PC: every stop of the app would otherwise raise an alarm). The service and i
 | `Saas:Poller:ManualFreshMinutes` | `appsettings.json`: `1`; Development: `0` | how old a result "Check now" may reuse instead of asking |
 | `Saas:Poller:FirstBlockPauseMinutes`, `MaxBlockPauseMinutes` | `appsettings.json`: `60`, `1440`; Development: `2`, `10` | pause after a block, doubling |
 | `Saas:Poller:Enabled`, `TickSeconds`, `JitterPercent`, `ReuseScreeningDetails`, `CheckLogDays`, `HistoryDays` | `appsettings.json`: `true`, `30`, `20`, `false`, `30`, `90` | `ReuseScreeningDetails = true`: one request per check instead of two (not measured yet) |
+| `Saas:Poller:Wizard:RequestsPerHour`, `Burst`, `AccountRequestsPerHour`, `GapSeconds` | `appsettings.json`: `120`, `90`, `90`, `1` | the wizard's own budget (next to the poller's), how much of it can be saved up, the limit of one account (cache misses only) and the pause between its requests |
+| `Saas:Poller:Wizard:RepertoireNearMinutes`, `RepertoireLaterMinutes`, `DetailsMinutes`, `FreeSeatsMinutes`, `KeepResultMinutes` | `appsettings.json`: `30`, `180`, `1440`, `10`, `30` | how long the shared cache keeps the repertoire (today and tomorrow / later days), screening details and free seats; how long a finished loading's result is kept |
 | `Saas:Heartbeat:Url` | empty (off); user secrets for a test | a secret; empty or https; start-up fails otherwise |
 | `Saas:Heartbeat:IntervalMinutes` | `appsettings.json`: `5` | 1-60; the external check's period should be at least this |
 | `Mail:Host`, `Mail:Port`, `Mail:Security`, `Mail:UserName`, `Mail:Password`, `Mail:FromAddress`, `Mail:FromName` | `appsettings.json`: `localhost`, `2525`, `None` (smtp4dev) | the provider is chosen in stage 4; its password only in secrets |
@@ -166,7 +168,8 @@ sign-in and reveals nothing else. It answers only inside the server (the deploym
 request that came through Cloudflare (`CF-Connecting-IP` or `CF-Ray` header) gets 404.
 
 The minimum interval and the `Saas:Poller` values for the budget, the pauses, `ManualFreshMinutes`, `JitterPercent`
-and `ReuseScreeningDetails` are defaults: the operator's panel can change them within fixed ranges.
+and `ReuseScreeningDetails`, and the wizard's budget, burst, account limit and pause are defaults: the operator's panel
+can change them within fixed ranges. The cache times are configuration only.
 
 User secrets are a .NET development feature: a JSON file outside the repository,
 `%APPDATA%\Microsoft\UserSecrets\cinemawatch-web\secrets.json`, read only in the Development environment.
@@ -234,7 +237,10 @@ moment, the log says so; start it and use "Nie pamiętasz hasła?" on the sign-i
 In Development the poller never talks to Cinema City: it uses captured responses (the Sadyba IMAX hall) steered by
 files in `C:\DEV\CINEMAWATCH\saas-fake` (the app creates the folder and a `README.txt` in it). The log says
 `Poller uses the development FAKE of Cinema City`. Screening ids are those of your profiles (shown in the page
-address of the booking link, e.g. `.../order/1765592`).
+address of the booking link, e.g. `.../order/1765592`). The wizard (from SaaS 0.7.0) gets every cinema's repertoire on
+any day from the fake too: the captured Sadyba day of 16 Dec 2026 moved to that cinema and day, with screening ids
+`<cinema><yyMMdd><position>` - e.g. `106026121613` is the 16:00 IMAX screening in Sadyba on 16 Dec 2026. A fake folder
+from an older version keeps its old `README.txt`; delete the file and it is written again at the next start.
 
 ```powershell
 # A seat frees up (keys as in the profile, e.g. row 4 seat 19 in Sadyba = 1_18_4)

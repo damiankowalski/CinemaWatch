@@ -169,6 +169,9 @@ public static partial class ProfileImport
 
     private static string Shorten(string value) => value.Length <= 20 ? value : value[..20] + "…";
 
+    /// <summary>A screening, film or cinema id as the import accepts it: letters and digits, 1-32 characters.</summary>
+    public static bool IsValidId(string? value) => value is not null && IdPattern().IsMatch(value);
+
     /// <summary>
     /// Identifiers go into request URLs (presentations/{id}); letters and digits keep anything else out. The patterns
     /// end with \z, not $: $ would also accept a trailing line break.

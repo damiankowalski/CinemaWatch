@@ -82,6 +82,9 @@ public sealed class PollerOptions
     /// <summary>Days the notification history and the service events are kept.</summary>
     public int HistoryDays { get; set; } = 90;
 
+    /// <summary>Cinema City data on demand for the wizard: its own budget, the limit per account, the cache times.</summary>
+    public WizardOptions Wizard { get; set; } = new();
+
     public TimeSpan Tick => TimeSpan.FromSeconds(TickSeconds);
 
     public TimeSpan ManualFresh => TimeSpan.FromMinutes(ManualFreshMinutes);
@@ -101,9 +104,16 @@ public sealed class PollerOptions
         && MaxBlockPauseMinutes >= FirstBlockPauseMinutes
         && CheckLogDays >= 1
         && HistoryDays >= 1
+        && Wizard is not null && Wizard.IsValid()
         && (Source != CinemaCitySource.Fake || !string.IsNullOrWhiteSpace(FakeDirectory));
 
-    public PollerOptions Copy() => (PollerOptions)MemberwiseClone();
+    /// <summary>A copy that shares nothing with this one (the wizard's settings included).</summary>
+    public PollerOptions Copy()
+    {
+        var copy = (PollerOptions)MemberwiseClone();
+        copy.Wizard = Wizard.Copy();
+        return copy;
+    }
 
     /// <summary>Pause after the n-th block in a row: first, then doubled, at most the maximum.</summary>
     public TimeSpan BlockPause(int blocksInARow)

@@ -5,9 +5,12 @@ using System.Text.Json.Nodes;
 namespace CinemaWatch.Server.Polling;
 
 /// <summary>
-/// Development fake of Cinema City (docs/SAAS.md §9: the real API only on demand). The poller's whole pipeline runs -
-/// the client, the parser, block detection, the request log - only the network is replaced. Every screening id gets
-/// the captured Sadyba IMAX screening (hall 13/1). Files in the folder steer the answers:
+/// Development fake of Cinema City (docs/SAAS.md §9: the real API only on demand). The poller's and the wizard's whole
+/// pipeline runs - the client, the parser, block detection, the request log - only the network is replaced. Every
+/// screening id gets the captured Sadyba IMAX screening (hall 13/1). The repertoire of any cinema and day is the
+/// captured Sadyba day (16 Dec 2026: 2 films, 25 screenings, 4 of them IMAX without dubbing) moved to that cinema and
+/// day, with screening ids made from the cinema, the day and the position (<see cref="FakeScreeningId"/>), so the same
+/// request always gives the same ids. Files in the folder steer the answers:
 /// <list type="bullet">
 /// <item><c>free-&lt;screening id&gt;.txt</c>: seat keys (e.g. <c>1_18_4</c>) separated by spaces, commas or lines are free;
 /// without the file the screening is sold out.</item>
@@ -22,6 +25,7 @@ public sealed class FakeCinemaCityHandler(string directory) : HttpMessageHandler
 
     private static readonly Lazy<string> PresentationTemplate = new(() => Resource("presentation.json"));
     private static readonly Lazy<string> SeatPlan = new(() => Resource("seatplan.json"));
+    private static readonly Lazy<string> RepertoireTemplate = new(() => Resource("repertoire.json"));
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
         Task.FromResult(Answer(request.RequestUri!));
@@ -54,6 +58,8 @@ public sealed class FakeCinemaCityHandler(string directory) : HttpMessageHandler
         if (ReadFile("error500.txt") is not null || (screeningId is not null && ReadFile($"error500-{screeningId}.txt") is not null))
             return new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("Internal server error (fake)") };
 
+        if (path.Contains("/film-events/in-cinema/", StringComparison.Ordinal) && Repertoire(path) is { } repertoire)
+            return Json(repertoire);
         if (path.Contains("/presentations/", StringComparison.Ordinal) && screeningId is not null)
             return Json(Presentation(screeningId));
         if (path.EndsWith("/seatplanV2", StringComparison.Ordinal))
@@ -72,7 +78,9 @@ public sealed class FakeCinemaCityHandler(string directory) : HttpMessageHandler
             return;
         File.WriteAllText(readme, """
             CinemaWatch development fake of Cinema City (used when Saas:Poller:Source = Fake).
-            Every screening gets the captured Sadyba IMAX hall (13/1). Files in this folder steer the answers:
+            Every screening gets the captured Sadyba IMAX hall (13/1). Every cinema's repertoire on any day is the
+            captured Sadyba day of 16 Dec 2026 moved to that cinema and day (4 IMAX screenings without dubbing); the
+            screening ids are <cinema><yyMMdd><position>, e.g. 106026121613. Files in this folder steer the answers:
 
               free-<screening id>.txt   seat keys that are free, e.g. "1_18_4 1_19_4" (spaces, commas or lines);
                                         without the file the screening is sold out
@@ -100,6 +108,37 @@ public sealed class FakeCinemaCityHandler(string directory) : HttpMessageHandler
         {
             return null;
         }
+    }
+
+    /// <summary>"106026121607": cinema 1060, 16 Dec 2026, the 8th screening of the captured day (from 0).</summary>
+    public static string FakeScreeningId(string cinemaId, DateOnly date, int index) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{cinemaId}{date:yyMMdd}{index:00}");
+
+    /// <summary>.../film-events/in-cinema/{cinema}/at-date/{yyyy-MM-dd}: the captured day moved there; null for another path.</summary>
+    private static string? Repertoire(string path)
+    {
+        var parts = path.Split('/');
+        var at = Array.IndexOf(parts, "in-cinema");
+        if (at < 0 || at + 3 >= parts.Length || parts[at + 2] != "at-date"
+            || !DateOnly.TryParseExact(parts[at + 3], "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date))
+        {
+            return null;
+        }
+        var cinemaId = Uri.UnescapeDataString(parts[at + 1]);
+        var day = date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var json = JsonNode.Parse(RepertoireTemplate.Value)!;
+        var events = json["body"]!["events"]!.AsArray();
+        for (var i = 0; i < events.Count; i++)
+        {
+            var original = events[i]!;
+            var oldId = original["id"]!.GetValue<string>();
+            var moved = JsonNode.Parse(original.ToJsonString().Replace(oldId, FakeScreeningId(cinemaId, date, i), StringComparison.Ordinal))!;
+            moved["cinemaId"] = cinemaId;
+            moved["businessDay"] = day;
+            moved["eventDateTime"] = day + moved["eventDateTime"]!.GetValue<string>()[10..];
+            events[i] = moved;
+        }
+        return json.ToJsonString();
     }
 
     private static string Presentation(string screeningId)

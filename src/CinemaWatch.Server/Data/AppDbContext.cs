@@ -91,6 +91,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             entry.ToTable("check_log");
             entry.Property(e => e.Cycle).HasMaxLength(32);
+            entry.Property(e => e.Source).HasConversion<string>().HasMaxLength(16);
             entry.Property(e => e.ScreeningId).HasMaxLength(ProfileImport.MaxIdLength);
             entry.Property(e => e.Method).HasMaxLength(8);
             entry.Property(e => e.Host).HasMaxLength(100);

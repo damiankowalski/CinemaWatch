@@ -9,6 +9,7 @@ using CinemaWatch.Server.Data;
 using CinemaWatch.Server.Operations;
 using CinemaWatch.Server.Polling;
 using CinemaWatch.Server.Profiles;
+using CinemaWatch.Server.Wizard;
 using CinemaWatch.Tests;
 using CinemaWatch.Web;
 using CinemaWatch.Web.Components.Account;
@@ -443,6 +444,218 @@ TestRunner.Add("E-mail about a deleted account: both languages, no link, the bac
     }
     using (Localizer.Use(AppLanguage.English))
         Assert.Equal("Your CinemaWatch account has been deleted", AccountMails.AccountDeleted("a@example.test").Subject);
+});
+
+// ---------------------------------------------------------------------------------------------------------------
+// Wizard data on demand (docs/SAAS.md §5.2, stage 6.4.2) - without a database
+// ---------------------------------------------------------------------------------------------------------------
+
+TestRunner.Add("Wizard settings: the decided defaults are valid; a copy shares nothing; the panel's ranges; the configuration is never changed", () =>
+{
+    var config = new PollerOptions();
+    Assert.True(config.IsValid());
+    var wizard = config.Wizard;
+    Assert.Equal((120, 90, 90, 1.0), (wizard.RequestsPerHour, wizard.Burst, wizard.AccountRequestsPerHour, wizard.GapSeconds));
+    Assert.Equal((30, 180, 1440, 10, 30), (wizard.RepertoireNearMinutes, wizard.RepertoireLaterMinutes, wizard.DetailsMinutes, wizard.FreeSeatsMinutes, wizard.KeepResultMinutes));
+    Assert.True(!new PollerOptions { Wizard = new() { Burst = 5 } }.IsValid());
+    Assert.True(!new PollerOptions { Wizard = new() { RepertoireNearMinutes = 60, RepertoireLaterMinutes = 30 } }.IsValid());
+
+    var copy = config.Copy();
+    copy.Wizard.RequestsPerHour = 10;
+    Assert.Equal(120, config.Wizard.RequestsPerHour);
+
+    var limits = new LimitOptions();
+    var form = new Dictionary<TuningKey, string?> { [TuningKey.WizardRequestsPerHour] = "60", [TuningKey.WizardGapSeconds] = "2,5", [TuningKey.WizardBurst] = "90" };
+    var parse = PollerTuning.Parse(config, limits, form, false);
+    Assert.True(parse.IsValid);
+    Assert.Equal((60, null, null, 2.5), (parse.Row.WizardRequestsPerHour, parse.Row.WizardBurst, parse.Row.WizardAccountRequestsPerHour, parse.Row.WizardGapSeconds));
+    var (poller, _) = PollerTuning.Apply(config, limits, parse.Row);
+    Assert.Equal((60, 2.5, 120), (poller.Wizard.RequestsPerHour, poller.Wizard.GapSeconds, config.Wizard.RequestsPerHour));
+    Assert.Equal("WizardRequestsPerHour 120 → 60; WizardGapSeconds 1 → 2.5", PollerTuning.Describe(PollerTuning.Changes((config, limits), (poller, limits))));
+
+    var bad = PollerTuning.Parse(config, limits, new Dictionary<TuningKey, string?>
+    {
+        [TuningKey.WizardRequestsPerHour] = "5", [TuningKey.WizardAccountRequestsPerHour] = "1000", [TuningKey.WizardGapSeconds] = "0,5",
+    }, false);
+    Assert.SequenceEqual([TuningKey.WizardRequestsPerHour, TuningKey.WizardAccountRequestsPerHour, TuningKey.WizardGapSeconds], bad.Problems.Select(p => p.Key));
+});
+
+TestRunner.Add("Wizard budgets: its own bucket (90 saved up, 120 an hour); a loading reserves from the wizard and the account together and gives back what it did not use", () =>
+{
+    var time = new ManualTime(new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero));
+    var settings = Effective();
+    var wizard = new WizardBudget(settings, time).Bucket;
+    var accounts = new AccountBudgets(settings, time);
+    Assert.Equal((90, 120, 90), (wizard.Available, wizard.PerHour, accounts.For("a").Capacity));
+    Assert.True(ReferenceEquals(accounts.For("a"), accounts.For("a")));
+
+    var tokens = new LoadingTokens(wizard, accounts.For("a"));
+    Assert.True(tokens.TryReserve(84)); // the largest desktop search
+    Assert.Equal((6, 6, 1), (wizard.Available, accounts.For("a").Available, accounts.ActiveAccounts));
+    for (var i = 0; i < 80; i++)
+        Assert.True(tokens.TryTake());
+    tokens.Release(); // 4 answers came from the cache after all
+    Assert.Equal((10, 10), (wizard.Available, accounts.For("a").Available));
+
+    // Another account fits in what is left of the wizard's budget, not more; the wait is the refill time.
+    var other = new LoadingTokens(wizard, accounts.For("b"));
+    Assert.True(!other.TryReserve(11));
+    Assert.Equal((10, 90), (wizard.Available, accounts.For("b").Available)); // a refused reservation takes nothing
+    Assert.Equal(TimeSpan.FromSeconds(30), wizard.WaitFor(11)); // 120 an hour = one every 30 s
+    Assert.Equal(null, wizard.WaitFor(91)); // never: more than the bucket holds
+    Assert.True(other.TryReserve(10));
+
+    // Beyond the reservation a request takes from both buckets directly, and says which one ran dry.
+    Assert.True(other.TryTake());
+    for (var i = 0; i < 9; i++)
+        Assert.True(other.TryTake());
+    Assert.True(!other.TryTake());
+    Assert.Equal(WizardStopReason.BudgetUsedUp, other.Shortage);
+    time.Advance(TimeSpan.FromMinutes(5)); // 10 tokens back in the wizard's bucket
+    var account = accounts.For("c");
+    Assert.True(account.TryTake(90));
+    var third = new LoadingTokens(wizard, account);
+    Assert.True(!third.TryTake());
+    Assert.Equal(WizardStopReason.AccountLimit, third.Shortage);
+    Assert.Equal(10, wizard.Available); // the account's refusal took nothing from the wizard's budget
+});
+
+TestRunner.Add("Wizard cache: identical loads at the same time go out once; a failure is not kept; the loader's own budget problem lets a waiter load; kept for its time", async () =>
+{
+    var time = new ManualTime(new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero));
+    var cache = new CinemaCityCache(time);
+    var loads = 0;
+    var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    async Task<string> Slow()
+    {
+        Interlocked.Increment(ref loads);
+        await gate.Task;
+        return "answer";
+    }
+    var first = cache.GetAsync("k", _ => TimeSpan.FromMinutes(30), Slow, CancellationToken.None);
+    var second = cache.GetAsync("k", _ => TimeSpan.FromMinutes(30), Slow, CancellationToken.None);
+    Assert.True(!cache.TryPeek<string>("k", out _)); // still loading
+    gate.SetResult();
+    Assert.Equal(("answer", "answer", 1), (await first, await second, loads));
+    Assert.True(cache.TryPeek<string>("k", out var peeked) && peeked == "answer");
+    Assert.Equal("answer", await cache.GetAsync("k", _ => TimeSpan.FromMinutes(30), Slow, CancellationToken.None));
+    Assert.Equal((1, 1L, 1L, 1L), (cache.Stats.Entries, cache.Stats.Hits, cache.Stats.Shared, cache.Stats.Loads));
+    time.Advance(TimeSpan.FromMinutes(31));
+    Assert.True(!cache.TryPeek<string>("k", out _));
+    gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    gate.SetResult();
+    Assert.Equal("answer", await cache.GetAsync("k", _ => TimeSpan.FromMinutes(30), Slow, CancellationToken.None));
+    Assert.Equal(2, loads);
+
+    // A failure goes to whoever waited and is not kept.
+    var failing = 0;
+    Task<string> Fail()
+    {
+        failing++;
+        throw new CinemaCityException(HttpStatusCode.InternalServerError, "/x");
+    }
+    for (var i = 0; i < 2; i++)
+    {
+        var threw = false;
+        try
+        {
+            await cache.GetAsync("f", _ => TimeSpan.FromMinutes(30), Fail, CancellationToken.None);
+        }
+        catch (CinemaCityException)
+        {
+            threw = true;
+        }
+        Assert.True(threw);
+    }
+    Assert.Equal(2, failing);
+
+    // The loader ran out of its own budget: the waiter loads itself instead of failing.
+    var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var owner = cache.GetAsync<string>("b", _ => TimeSpan.FromMinutes(1), async () =>
+    {
+        await hold.Task;
+        throw new BudgetExhaustedException();
+    }, CancellationToken.None);
+    var waiter = cache.GetAsync("b", _ => TimeSpan.FromMinutes(1), () => Task.FromResult("mine"), CancellationToken.None);
+    hold.SetResult();
+    var ownerFailed = false;
+    try
+    {
+        await owner;
+    }
+    catch (BudgetExhaustedException)
+    {
+        ownerFailed = true;
+    }
+    Assert.True(ownerFailed);
+    Assert.Equal("mine", await waiter);
+
+    // Zero keeping time: shared only while it runs.
+    Assert.Equal("x", await cache.GetAsync("z", _ => TimeSpan.Zero, () => Task.FromResult("x"), CancellationToken.None));
+    Assert.True(!cache.TryPeek<string>("z", out _));
+});
+
+TestRunner.Add("Wizard cache: the repertoire of today and tomorrow is kept 30 minutes, later days 3 hours - never past the moment they become tomorrow", () =>
+{
+    var options = new WizardOptions();
+    // 9 Nov 2026 12:00 UTC = 13:00 in Warsaw (winter time).
+    var now = new DateTimeOffset(2026, 11, 9, 12, 0, 0, TimeSpan.Zero);
+    Assert.Equal(new DateOnly(2026, 11, 9), CinemaCityCache.PolishToday(now));
+    Assert.Equal(new DateOnly(2026, 11, 10), CinemaCityCache.PolishToday(new DateTimeOffset(2026, 11, 9, 23, 30, 0, TimeSpan.Zero)));
+    Assert.Equal(TimeSpan.FromMinutes(30), CinemaCityCache.RepertoireKeep(new DateOnly(2026, 11, 9), now, options));
+    Assert.Equal(TimeSpan.FromMinutes(30), CinemaCityCache.RepertoireKeep(new DateOnly(2026, 11, 10), now, options));
+    Assert.Equal(TimeSpan.FromHours(3), CinemaCityCache.RepertoireKeep(new DateOnly(2026, 11, 20), now, options));
+    // The 11th becomes "tomorrow" at Polish midnight (23:00 UTC): at 21:30 UTC it is kept until 23:30 UTC, not 00:30.
+    Assert.Equal(TimeSpan.FromHours(2), CinemaCityCache.RepertoireKeep(new DateOnly(2026, 11, 11), new DateTimeOffset(2026, 11, 9, 21, 30, 0, TimeSpan.Zero), options));
+});
+
+TestRunner.Add("Wizard requests: cinemas from the IMAX list, from Polish today, 31 days for one cinema and 14 for several, a profile's number of screenings, ids as at import", () =>
+{
+    var today = new DateOnly(2026, 11, 9);
+    WizardRequestProblem? Check(WizardRequest request) => WizardRequests.Check(request, today, 20);
+    var all = Locations.ImaxCinemas.Select(c => c.Id).ToList();
+    Assert.Equal(null, Check(new RepertoireRequest(["1060"], today, today.AddDays(30))));
+    Assert.Equal(null, Check(new RepertoireRequest(all, today, today.AddDays(13))));
+    Assert.Equal(WizardRequestProblem.RangeTooLong, Check(new RepertoireRequest(["1060"], today, today.AddDays(31))));
+    Assert.Equal(WizardRequestProblem.RangeTooLong, Check(new RepertoireRequest(["1060", "1064"], today, today.AddDays(14))));
+    Assert.Equal(WizardRequestProblem.NoCinema, Check(new RepertoireRequest([], today, today)));
+    Assert.Equal(WizardRequestProblem.UnknownCinema, Check(new RepertoireRequest(["1001"], today, today)));
+    Assert.Equal(WizardRequestProblem.UnknownCinema, Check(new RepertoireRequest(["1060", "1060"], today, today)));
+    Assert.Equal(WizardRequestProblem.DateInPast, Check(new RepertoireRequest(["1060"], today.AddDays(-1), today)));
+    Assert.Equal(WizardRequestProblem.DatesReversed, Check(new RepertoireRequest(["1060"], today.AddDays(2), today)));
+    Assert.Equal(null, Check(new ScreeningsRequest(["1765592", "106026121613"])));
+    Assert.Equal(WizardRequestProblem.NoScreening, Check(new ScreeningsRequest([])));
+    Assert.Equal(WizardRequestProblem.TooManyScreenings, Check(new ScreeningsRequest(Enumerable.Range(1, 21).Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToList())));
+    Assert.Equal(WizardRequestProblem.BadScreeningId, Check(new ScreeningsRequest(["../1"])));
+    Assert.Equal(WizardRequestProblem.BadScreeningId, Check(new ScreeningsRequest(["1", "1"])));
+
+    // Days first, then the cinemas in city order (as the desktop lists them).
+    Assert.SequenceEqual(["repertoire:1064:2026-11-09", "repertoire:1060:2026-11-09", "repertoire:1064:2026-11-10", "repertoire:1060:2026-11-10"],
+        WizardJobs.Items(new RepertoireRequest(["1060", "1064"], today, today.AddDays(1))).Select(i => i.Key));
+});
+
+TestRunner.Add("Fake Cinema City: the repertoire of any cinema and day is the captured Sadyba day moved there, with ids made from the cinema, the day and the position", async () =>
+{
+    var folder = Path.Combine(Path.GetTempPath(), "cinemawatch-fake-" + Guid.NewGuid().ToString("N")[..8]);
+    try
+    {
+        using var client = new CinemaCityClient(new FakeCinemaCityHandler(folder));
+        var day = await client.GetRepertoireAsync("1064", new DateOnly(2027, 1, 5));
+        Assert.Equal((2, 25), (day.Films.Count, day.Screenings.Count));
+        Assert.True(day.Screenings.All(s => s.CinemaId == "1064" && DateOnly.FromDateTime(s.StartsAt) == new DateOnly(2027, 1, 5)));
+        Assert.Equal(25, day.Screenings.Select(s => s.Id).Distinct().Count());
+        var imax = day.Screenings.Where(s => ScreeningFilter.ImaxWithoutDubbing.Matches(s)).ToList();
+        Assert.SequenceEqual(["106427010506", "106427010513", "106427010519", "106427010524"], imax.Select(s => s.Id));
+        Assert.Equal((new TimeOnly(16, 0), "https://tickets.cinema-city.pl/api/order/106427010513?lang=pl"),
+            (TimeOnly.FromDateTime(imax[1].StartsAt), imax[1].BookingLink));
+        Assert.Equal("106427010513", FakeCinemaCityHandler.FakeScreeningId("1064", new DateOnly(2027, 1, 5), 13));
+        Assert.Equal(13, (await client.GetPresentationAsync("106427010513")).VenueId); // the fake's hall for every screening
+    }
+    finally
+    {
+        if (Directory.Exists(folder))
+            Directory.Delete(folder, recursive: true);
+    }
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1045,6 +1258,7 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
             return 0;
         });
         app.Services.GetRequiredService<PollerSettings>().Apply(null);
+        app.Services.GetRequiredService<CinemaCityCache>().Clear();
         app.HeartbeatClient.Status = 200;
         app.HeartbeatClient.Throw = null;
     }
@@ -1538,7 +1752,7 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         Assert.True(page.Contains("<a href=\"admin\">Operator</a>") && page.Contains("Panel operatora"));
         Assert.True(page.Contains("Jeszcze nie było cyklu.") && page.Contains("W dzienniku zapytań (30 dni) nie ma jeszcze żadnego zapytania."));
         Assert.True(page.Contains("Źródło: atrapa Cinema City") && page.Contains("Brak zdarzeń w ostatnich 90 dniach."));
-        Assert.True(page.Contains("PostgreSQL ") && page.Contains("_AddOperator.") && page.Contains("check_log"));
+        Assert.True(page.Contains("PostgreSQL ") && page.Contains("_AddWizard.") && page.Contains("check_log"));
         Assert.True(page.Contains("Jeszcze nie było pingu"));
 
         // Checks: a freed seat (an e-mail goes out), then Cinema City answers HTTP 500.
@@ -1944,5 +2158,267 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         app.Time.Advance(TimeSpan.FromMinutes(2));
         Assert.True(Location(await gone.GetAsync("/")).StartsWith("/Account/Login"));
         Assert.Equal(HttpStatusCode.OK, (await member.GetAsync("/")).StatusCode);
+    });
+
+    // -----------------------------------------------------------------------------------------------------------
+    // Wizard data on demand (docs/SAAS.md §5.2, stage 6.4.2): loadings run in the background against the fake.
+    // -----------------------------------------------------------------------------------------------------------
+
+    WizardJobs Wizard() => app.Services.GetRequiredService<WizardJobs>();
+
+    DateOnly Today() => CinemaCityCache.PolishToday(app.Time.GetUtcNow());
+
+    async Task<WizardJobView> LoadAsync(string userId, WizardRequest request)
+    {
+        var start = await Wizard().StartAsync(userId, request);
+        Assert.Equal(WizardStartOutcome.Started, start.Outcome);
+        await Wizard().WhenEndedAsync(start.Job!.Id);
+        return Wizard().Find(start.Job.Id, userId)!;
+    }
+
+    async Task<List<CheckLogEntry>> WizardLogAsync() => await WithService(async services =>
+        await services.GetRequiredService<AppDbContext>().CheckLog.AsNoTracking().Where(e => e.Source == RequestSource.Wizard).OrderBy(e => e.Id).ToListAsync());
+
+    static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        var watch = Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (watch.Elapsed > TimeSpan.FromSeconds(10))
+                throw new TimeoutException("The condition did not come true within 10 s.");
+            await Task.Delay(10);
+        }
+    }
+
+    TestRunner.Add("Wizard: a repertoire loading in the background - one request per cinema and day, one after the other, its own budget, logged as the wizard's; the cache answers the next one", async () =>
+    {
+        await ResetPollerAsync();
+        var today = Today();
+        var mark = app.Network.Requests.Count;
+        var pauses = app.WizardPacer.Pauses;
+        var job = await LoadAsync("wizard-first-a", new RepertoireRequest(["1060"], today.AddDays(1), today.AddDays(3)));
+        Assert.Equal((WizardJobState.Finished, (WizardStopReason?)null, 3, 3, 0, 0, 3), (job.State, job.StopReason, job.Total, job.Done, job.FromCache, job.Failed, job.Requests));
+        Assert.SequenceEqual([today.AddDays(1), today.AddDays(2), today.AddDays(3)], job.Repertoire.Select(r => r.Date));
+        Assert.True(job.Repertoire.All(r => r.Error is null && r.CinemaId == "1060" && r.Day!.Screenings.Count == 25));
+        Assert.SequenceEqual(["repertoire", "repertoire", "repertoire"], EndpointsSince(mark));
+        Assert.Equal(pauses + 2, app.WizardPacer.Pauses); // before the second and the third request
+        var requests = app.Network.Requests.Skip(mark).ToList();
+        Assert.Equal(1, requests.Select(r => r.Uuid).Distinct().Count()); // one session per loading
+        Assert.True(requests.All(r => r.UserAgent!.Contains($"CinemaWatch-Server/{PollerInfo.Version}")));
+
+        var log = await WizardLogAsync();
+        Assert.Equal(3, log.Count);
+        Assert.True(log.All(e => e.Status == 200 && e.Endpoint == "repertoire" && e.ScreeningId is null && !e.Manual && e.Cycle.StartsWith("wizard-") && e.Cycle.Length == 15));
+        var overview = await OverviewAsync();
+        Assert.Equal((0, 3, 87, 90, 0), (overview.Budget.LastHour, overview.Wizard.Budget.LastHour, overview.Wizard.Budget.Available, overview.Wizard.Budget.Capacity, overview.Wizard.Running));
+        Assert.Equal(20, overview.Budget.Available); // the poller's budget is untouched
+        Assert.Equal(3, overview.Wizard.Cache.Entries);
+
+        // Another account asks for the same days: everything from the cache, nothing sent.
+        var again = await LoadAsync("wizard-first-b", new RepertoireRequest(["1060"], today.AddDays(1), today.AddDays(3)));
+        Assert.Equal((3, 3, 0), (again.Done, again.FromCache, again.Requests));
+        Assert.Equal(mark + 3, app.Network.Requests.Count);
+        // An overlapping range: only the new day goes out.
+        var more = await LoadAsync("wizard-first-a", new RepertoireRequest(["1060"], today.AddDays(2), today.AddDays(4)));
+        Assert.Equal((3, 2, 1), (more.Done, more.FromCache, more.Requests));
+        // Half an hour later tomorrow is fetched again (it changes during the day); later days are still kept.
+        app.Time.Advance(TimeSpan.FromMinutes(31));
+        mark = app.Network.Requests.Count;
+        var later = await LoadAsync("wizard-first-a", new RepertoireRequest(["1060"], today.AddDays(1), today.AddDays(3)));
+        Assert.Equal((1, 2), (later.Requests, later.FromCache));
+        Assert.True(app.Network.Requests[mark].Uri.ToString().Contains($"/at-date/{today.AddDays(1):yyyy-MM-dd}"));
+
+        // A loading belongs to its account; a broken request is refused before anything is sent.
+        Assert.Equal(null, Wizard().Find(job.Id, "wizard-first-b"));
+        var refused = await Wizard().StartAsync("wizard-first-a", new RepertoireRequest(["1060"], today.AddDays(-1), today));
+        Assert.Equal((WizardStartOutcome.Invalid, WizardRequestProblem.DateInPast), (refused.Outcome, refused.Problem!.Value));
+        refused = await Wizard().StartAsync("wizard-first-a", new RepertoireRequest(["1060", "1064"], today, today.AddDays(14)));
+        Assert.Equal(WizardRequestProblem.RangeTooLong, refused.Problem!.Value);
+        Assert.Equal(mark + 1, app.Network.Requests.Count);
+    });
+
+    TestRunner.Add("Wizard: one loading per account at a time; two accounts asking for the same days at the same time send each request once", async () =>
+    {
+        await ResetPollerAsync();
+        var today = Today();
+        var request = new RepertoireRequest(["1060"], today.AddDays(5), today.AddDays(7));
+        var mark = app.Network.Requests.Count;
+        var pauses = app.WizardPacer.Pauses;
+        var release = app.WizardPacer.Hold();
+        try
+        {
+            var a = await Wizard().StartAsync("wizard-flight-a", request);
+            Assert.Equal(WizardStartOutcome.Started, a.Outcome);
+            // A sent its first request and waits before the second one (which it is already loading for everybody).
+            await WaitUntilAsync(() => app.WizardPacer.Pauses == pauses + 1);
+            Assert.Equal(mark + 1, app.Network.Requests.Count);
+
+            var second = await Wizard().StartAsync("wizard-flight-a", new RepertoireRequest(["1064"], today, today));
+            Assert.Equal((WizardStartOutcome.AlreadyRunning, a.Job!.Id), (second.Outcome, second.Job!.Id));
+            Assert.Equal((a.Job.Id, 1), (Wizard().Running("wizard-flight-a")!.Id, Wizard().RunningCount));
+            Assert.Equal(WizardJobState.Running, Wizard().Find(a.Job.Id, "wizard-flight-a")!.State);
+
+            var b = await Wizard().StartAsync("wizard-flight-b", request);
+            Assert.Equal(WizardStartOutcome.Started, b.Outcome);
+            release();
+            await Wizard().WhenEndedAsync(a.Job.Id);
+            await Wizard().WhenEndedAsync(b.Job!.Id);
+            var jobA = Wizard().Find(a.Job.Id, "wizard-flight-a")!;
+            var jobB = Wizard().Find(b.Job.Id, "wizard-flight-b")!;
+            Assert.Equal((WizardJobState.Finished, WizardJobState.Finished, 3, 3), (jobA.State, jobB.State, jobA.Repertoire.Count, jobB.Repertoire.Count));
+            Assert.Equal(mark + 3, app.Network.Requests.Count); // each day once, for both accounts
+            Assert.Equal(3, jobA.Requests + jobB.Requests);
+            Assert.Equal(0, Wizard().RunningCount);
+        }
+        finally
+        {
+            release();
+        }
+    });
+
+    TestRunner.Add("Wizard limits: the account's limit and the wizard's budget refuse a loading before anything is sent and say when to try again; too large for the limits; an event without an account", async () =>
+    {
+        await ResetPollerAsync();
+        var today = Today();
+        await WithService(async services => await services.GetRequiredService<OperatorService>()
+            .SaveSettingsAsync(new PollerSettingsRow { WizardAccountRequestsPerHour = 10, WizardBurst = 20 }));
+        var now = app.Time.GetUtcNow();
+
+        // Account limit 10: eight days fit, then two are left - eight more need 36 minutes (10 an hour).
+        Assert.Equal(8, (await LoadAsync("wizard-limit-a", new RepertoireRequest(["1060"], today.AddDays(10), today.AddDays(17)))).Requests);
+        var mark = app.Network.Requests.Count;
+        var refused = await Wizard().StartAsync("wizard-limit-a", new RepertoireRequest(["1060"], today.AddDays(20), today.AddDays(27)));
+        Assert.Equal((WizardStartOutcome.Refused, WizardStopReason.AccountLimit, now + TimeSpan.FromMinutes(36)),
+            (refused.Outcome, refused.Reason!.Value, refused.RetryAt!.Value));
+        // What the cache answers costs nothing: the eight days already loaded can be shown again at once.
+        Assert.Equal(8, (await LoadAsync("wizard-limit-a", new RepertoireRequest(["1060"], today.AddDays(10), today.AddDays(17)))).FromCache);
+
+        // More than an account's limit can ever hold at once: too large (the limits were lowered).
+        refused = await Wizard().StartAsync("wizard-limit-b", new RepertoireRequest(["1064"], today.AddDays(10), today.AddDays(20)));
+        Assert.Equal((WizardStartOutcome.Refused, WizardStopReason.TooLarge, (DateTimeOffset?)null), (refused.Outcome, refused.Reason!.Value, refused.RetryAt));
+
+        // The wizard's budget (20 saved up, 12 left): another account's ten days fit, a third account's three do not.
+        Assert.Equal(10, (await LoadAsync("wizard-limit-b", new RepertoireRequest(["1064"], today.AddDays(10), today.AddDays(19)))).Requests);
+        refused = await Wizard().StartAsync("wizard-limit-c", new RepertoireRequest(["1078"], today.AddDays(10), today.AddDays(12)));
+        Assert.Equal((WizardStartOutcome.Refused, WizardStopReason.BudgetUsedUp, now + TimeSpan.FromSeconds(30)),
+            (refused.Outcome, refused.Reason!.Value, refused.RetryAt!.Value)); // one token short, 120 an hour
+        Assert.Equal(mark + 10, app.Network.Requests.Count);
+        var exhausted = (await EventsAsync(ServiceEventKind.WizardBudgetExhausted)).Single();
+        Assert.True(exhausted.Message.StartsWith("Wizard budget used up (120/h, 20 saved up)") && !exhausted.Message.Contains("wizard-limit"));
+    });
+
+    TestRunner.Add("Wizard and blocks: the owner's pause refuses a loading; a block stops it, pauses the poller too and alerts the owner; after the pause the wizard's first request ends the block", async () =>
+    {
+        await ResetPollerAsync();
+        var today = Today();
+        var request = new RepertoireRequest(["1060"], today.AddDays(1), today.AddDays(3));
+        var mark = app.Network.Requests.Count;
+
+        await WithService(async services => await services.GetRequiredService<OperatorService>().PauseAsync());
+        var refused = await Wizard().StartAsync("wizard-block", request);
+        Assert.Equal((WizardStartOutcome.Refused, WizardStopReason.PausedByOperator), (refused.Outcome, refused.Reason!.Value));
+        await WithService(async services => await services.GetRequiredService<OperatorService>().ResumeAsync());
+        Assert.Equal(mark, app.Network.Requests.Count);
+
+        // Cinema City refuses the first request: nothing more is sent, the loading says until when.
+        app.Fake("block.txt", "");
+        var ownerMails = MailsTo(TestApp.OwnerEmail).Count;
+        var job = await LoadAsync("wizard-block", request);
+        var now = app.Time.GetUtcNow();
+        Assert.Equal((WizardJobState.Stopped, WizardStopReason.Blocked, now + TimeSpan.FromMinutes(60), 0, 1),
+            (job.State, job.StopReason!.Value, job.RetryAt!.Value, job.Done, job.Requests));
+        Assert.Equal(mark + 1, app.Network.Requests.Count);
+        var state = await PollerStateAsync();
+        Assert.Equal((now + TimeSpan.FromMinutes(60), 1), (state.BlockedUntil!.Value, state.BlockCount));
+        var blocked = (await EventsAsync(ServiceEventKind.Blocked)).Single();
+        Assert.True(blocked.Message.StartsWith("Wizard: HTTP 403 (cf-mitigated: challenge)") && blocked.Data!.Contains("Fake Cloudflare challenge"));
+        Assert.Equal((ownerMails + 1, "CinemaWatch: sprawdzanie wstrzymane"), (MailsTo(TestApp.OwnerEmail).Count, MailsTo(TestApp.OwnerEmail)[^1].Subject));
+        Assert.Equal(403, (await WizardLogAsync()).Single().Status);
+
+        // One address, one block: the poller waits too, and the next loading is refused until the pause ends.
+        Assert.Equal(CycleResult.Paused, (await CycleAsync()).Result);
+        refused = await Wizard().StartAsync("wizard-block", request);
+        Assert.Equal((WizardStartOutcome.Refused, WizardStopReason.Blocked, now + TimeSpan.FromMinutes(60)), (refused.Outcome, refused.Reason!.Value, refused.RetryAt!.Value));
+        Assert.Equal(mark + 1, app.Network.Requests.Count);
+
+        // After the pause the wizard's first request gets through and ends the block - once, with the owner's e-mail.
+        app.Fake("block.txt", null);
+        app.Time.Advance(TimeSpan.FromMinutes(61));
+        job = await LoadAsync("wizard-block", request);
+        Assert.Equal((WizardJobState.Finished, 3), (job.State, job.Requests));
+        state = await PollerStateAsync();
+        Assert.Equal(((DateTimeOffset?)null, 0, (string?)null), (state.BlockedUntil, state.BlockCount, state.BlockReason));
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.Resumed)).Count);
+        Assert.Equal("CinemaWatch: sprawdzanie wznowione", MailsTo(TestApp.OwnerEmail)[^1].Subject);
+        Assert.Equal(CycleResult.Idle, (await CycleAsync()).Result);
+        Assert.Equal(1, (await EventsAsync(ServiceEventKind.Resumed)).Count);
+    });
+
+    TestRunner.Add("Wizard: the hall map's data - the poller's fresh result costs nothing; otherwise details, the layout from seat_plans and the free seats; after 10 minutes only the free seats again", async () =>
+    {
+        await ResetPollerAsync();
+        await SignedInAsync("wizard-map@example.test", AppLanguage.Polish);
+        var userId = await UserIdAsync("wizard-map@example.test");
+        await ImportAsync(userId, PollProfile("Mapa", ["2000201"]));
+        app.Fake("free-2000201.txt", "1_18_4");
+        app.Fake("free-2000202.txt", "1_19_4 1_20_4");
+        await FirstChecksAsync(); // the poller reads 2000201: details, layout, free seats
+        var checkedAt = (await RowAsync("2000201")).LastSucceededAt!.Value;
+
+        var mark = app.Network.Requests.Count;
+        var job = await LoadAsync(userId, new ScreeningsRequest(["2000201", "2000202"]));
+        Assert.SequenceEqual(["presentation", "seats-status"], EndpointsSince(mark)); // only for 2000202; the layout is stored
+        Assert.Equal((WizardJobState.Finished, 2, 1, 2), (job.State, job.Done, job.FromCache, job.Requests));
+        var watched = job.Screenings[0];
+        Assert.Equal(("2000201", 13, 385, checkedAt), (watched.ScreeningId, watched.Details!.VenueId, watched.Plan!.Seats.Count, watched.FreeSeatsAt!.Value));
+        Assert.SequenceEqual(["1_18_4"], watched.FreeSeatKeys!.Order());
+        var other = job.Screenings[1];
+        Assert.Equal((13, 1, app.Time.GetUtcNow()), (other.Details!.VenueId, other.Details.SeatplanId, other.FreeSeatsAt!.Value));
+        Assert.SequenceEqual(["1_19_4", "1_20_4"], other.FreeSeatKeys!.Order());
+        Assert.SequenceEqual(["2000202", "2000202"], (await WizardLogAsync()).Select(e => e.ScreeningId));
+
+        // Eleven minutes later both free-seat answers are too old for the map; the details are kept for a day.
+        app.Time.Advance(TimeSpan.FromMinutes(11));
+        mark = app.Network.Requests.Count;
+        job = await LoadAsync(userId, new ScreeningsRequest(["2000201", "2000202"]));
+        Assert.SequenceEqual(["seats-status", "seats-status"], EndpointsSince(mark));
+        Assert.True(job.Screenings.All(s => s.FreeSeatsAt == app.Time.GetUtcNow()));
+
+        // A screening Cinema City answers with HTTP 500 is reported, the rest goes on.
+        app.Fake("error500-2000203.txt", "");
+        job = await LoadAsync(userId, new ScreeningsRequest(["2000203", "2000202"]));
+        Assert.Equal((WizardJobState.Finished, 2, 1), (job.State, job.Done, job.Failed));
+        Assert.True(job.Screenings[0].Error!.StartsWith("HTTP 500") && job.Screenings[1].Error is null);
+    });
+
+    TestRunner.Add("Operator's panel: the wizard's requests apart from the poller's, its budget, the cache and its settings", async () =>
+    {
+        await ResetPollerAsync();
+        var owner = await SignInAsync(TestApp.OwnerEmail);
+        var today = Today();
+        await LoadAsync("wizard-panel", new RepertoireRequest(["1060"], today.AddDays(1), today.AddDays(2)));
+
+        var page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Ostatnia godzina: 0 z budżetu 120 na godzinę"));
+        Assert.True(page.Contains("Kreator (dane na żądanie, osobny budżet): ostatnia godzina 2 z budżetu 120 na godzinę; w puli teraz 88 z 90."));
+        Assert.True(page.Contains("Limit konta: 90 zapytań spoza pamięci na godzinę") && page.Contains("Ładowania w toku: 0."));
+        Assert.True(page.Contains("Pamięć podręczna od startu procesu: wpisy 2,"));
+        Assert.True(page.Contains(" (kreator)</td>") && page.Contains("name=\"Input.WizardRequestsPerHour\""));
+        var stats = await WithService(async services => await services.GetRequiredService<OperatorService>().GetRequestStatsAsync());
+        Assert.Equal((2, 2), (stats.Hours.Sum(h => h.Requests), stats.Hours.Sum(h => h.Wizard)));
+
+        var settings = app.Services.GetRequiredService<PollerSettings>();
+        var fields = PollerTuning.Numbers.ToDictionary(n => $"Input.{n.Key}", n => n.Format(settings.ValueOf(n)));
+        fields[$"Input.{TuningKey.WizardRequestsPerHour}"] = "60";
+        fields[$"Input.{TuningKey.WizardGapSeconds}"] = "0.5";
+        var rejected = WebUtility.HtmlDecode(await (await owner.PostFormAsync("/admin", page, "settings", fields)).Content.ReadAsStringAsync());
+        Assert.True(rejected.Contains("Nie zapisano: popraw zaznaczone pola.") && rejected.Contains("Dozwolone od 1 do 10.")); // the pause is checked, nothing saved
+        Assert.Equal(120, settings.Poller.Wizard.RequestsPerHour);
+        fields[$"Input.{TuningKey.WizardGapSeconds}"] = "2";
+        Assert.Equal("/admin", Location(await owner.PostFormAsync("/admin", page, "settings", fields)));
+        page = await owner.PageAsync("/admin");
+        Assert.True(page.Contains("Zapisano: budżet kreatora (na godzinę) 120 → 60, odstęp kreatora (s) 1 → 2."));
+        Assert.Equal((60, 2.0), (settings.Poller.Wizard.RequestsPerHour, settings.Poller.Wizard.GapSeconds));
+        Assert.True((await EventsAsync(ServiceEventKind.SettingsChanged)).Single().Message.EndsWith("WizardRequestsPerHour 120 → 60; WizardGapSeconds 1 → 2"));
     });
 }

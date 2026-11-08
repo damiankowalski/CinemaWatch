@@ -50,7 +50,8 @@ public sealed record CycleReport(
 /// Error rules: a failed check (HTTP 5xx, another 4xx, timeout, network, unreadable answer) changes no notification
 /// state, is not retried and is tried again at the normal next time. A block (HTTP 403 / 429, a Cloudflare challenge,
 /// HTML instead of JSON) ends the cycle at once, drops the pending "Check now" requests and pauses all requests
-/// (<see cref="PollerOptions.BlockPause"/>); after the pause the blocked screening is tried first, alone. Each
+/// (<see cref="PollerOptions.BlockPause"/>, <see cref="UpstreamBlocks"/>); after the pause the blocked screening is
+/// tried first, alone. A block the wizard ran into pauses the poller the same way (one address, one block). Each
 /// screening's result is saved as soon as it is known, so the page can show a "Check now" filling in row by row.
 /// One cycle runs at a time.
 /// </summary>
@@ -64,6 +65,7 @@ public sealed class PollerCycle(
     IOptions<SaasOptions> saas,
     IMailSender mail,
     ServiceEvents events,
+    UpstreamBlocks blocks,
     ILogger<PollerCycle> logger)
 {
     /// <summary>Hall layouts are fetched again after this age.</summary>
@@ -74,9 +76,6 @@ public sealed class PollerCycle(
 
     /// <summary>Stored layouts nobody used for this long are deleted.</summary>
     public static readonly TimeSpan SeatPlanRetention = TimeSpan.FromDays(30);
-
-    /// <summary>A Retry-After longer than this is not believed.</summary>
-    public static readonly TimeSpan MaxRetryAfter = TimeSpan.FromDays(7);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
 
@@ -235,10 +234,10 @@ public sealed class PollerCycle(
             // Pending "Check now" requests are dropped: the users see the pause instead of a check that cannot run.
             foreach (var row in due)
                 row.ManualRequestedAt = null;
-            await OnBlockedAsync(db, state, guard, blockedBy, now, settings, cancellationToken).ConfigureAwait(false);
+            await blocks.RecordBlockAsync(db, state, guard, blockedBy, now, settings, cancellationToken).ConfigureAwait(false);
         }
         else if (recovering && checkedCount + failed > 0)
-            await OnResumedAsync(db, state, now, cancellationToken).ConfigureAwait(false);
+            await blocks.TryResumeAsync(db, state, cancellationToken).ConfigureAwait(false); // the wizard may have ended the block already
         if (budgetStop)
         {
             events.Add(db, ServiceEventKind.BudgetExhausted,
@@ -259,60 +258,6 @@ public sealed class PollerCycle(
     /// <summary>Interval plus a random addition of up to <see cref="PollerOptions.JitterPercent"/>.</summary>
     public static DateTimeOffset NextCheck(DateTimeOffset now, int intervalMinutes, PollerOptions settings) =>
         now + TimeSpan.FromMinutes(intervalMinutes * (1 + Random.Shared.NextDouble() * settings.JitterPercent / 100.0));
-
-    private async Task OnBlockedAsync(
-        AppDbContext db, PollerStateRow state, RequestGuard guard, RequestRecord blocked, DateTimeOffset now, PollerOptions settings, CancellationToken cancellationToken)
-    {
-        state.BlockCount++;
-        var pause = settings.BlockPause(state.BlockCount);
-        if (guard.RetryAfter is { } retryAfter && retryAfter > pause)
-            pause = retryAfter < MaxRetryAfter ? retryAfter : MaxRetryAfter;
-        var until = now + pause;
-        var reason = blocked.Describe();
-        state.BlockedUntil = until;
-        state.BlockedAt ??= now;
-        state.BlockReason = Shorten(reason);
-
-        events.Add(db, ServiceEventKind.Blocked,
-            $"{reason}; no requests until {until:O} (block {state.BlockCount} in a row)", guard.BlockedBody);
-        logger.LogWarning("BLOCKED: {Reason}; no requests until {Until:O} (block {Count} in a row)", reason, until, state.BlockCount);
-        await AlertOwnerAsync(db, () => PollerMails.Blocked("", reason, until, state.BlockCount, SiteLinks.Home(saas.Value.BaseUrl)), cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    private async Task OnResumedAsync(AppDbContext db, PollerStateRow state, DateTimeOffset now, CancellationToken cancellationToken)
-    {
-        var since = state.BlockedAt;
-        state.BlockCount = 0;
-        state.BlockedUntil = null;
-        state.BlockedAt = null;
-        state.BlockReason = null;
-        events.Add(db, ServiceEventKind.Resumed, since is null ? "Requests get through again" : $"Requests get through again; the block started at {since:O}");
-        logger.LogInformation("Resumed: requests get through again");
-        await AlertOwnerAsync(db, () => PollerMails.Resumed("", since, SiteLinks.Home(saas.Value.BaseUrl)), cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>An alert to the owner (Saas:OwnerEmail) in the owner's language; a mail failure is logged, never thrown.</summary>
-    private async Task AlertOwnerAsync(AppDbContext db, Func<OutgoingMail> build, CancellationToken cancellationToken)
-    {
-        var ownerEmail = saas.Value.OwnerEmail.Trim();
-        if (ownerEmail.Length == 0)
-            return;
-        var normalized = ownerEmail.ToUpperInvariant();
-        var owner = await db.Users.AsNoTracking().SingleOrDefaultAsync(u => u.NormalizedEmail == normalized, cancellationToken).ConfigureAwait(false);
-        OutgoingMail message;
-        using (Localizer.Use(owner is null ? AppLanguage.Polish : AccountService.LanguageOf(owner)))
-            message = build() with { To = ownerEmail };
-        try
-        {
-            await mail.SendAsync(message, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogError(ex, "Alert to the owner could not be sent: {Subject}", message.Subject);
-            events.Add(db, ServiceEventKind.MailFailed, $"Alert \"{message.Subject}\" not sent: {MailErrors.WithoutAddresses(ex.Message)}", throttled: true);
-        }
-    }
 
     /// <summary>
     /// Gives every result to the profiles that watch the screening; e-mails each profile's newly available seats in one
@@ -440,6 +385,7 @@ public sealed class PollerCycle(
         CfRay = r.CfRay,
         RetryAfter = r.RetryAfter,
         Error = r.Error,
+        Source = r.Source,
     };
 
     /// <summary>Technical description of a failed check (English, for the logs and the operator).</summary>

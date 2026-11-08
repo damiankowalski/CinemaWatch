@@ -3,7 +3,17 @@ using System.Text;
 
 namespace CinemaWatch.Server.Polling;
 
-/// <summary>One request to Cinema City as the poller saw it (one row of check_log).</summary>
+/// <summary>Who sent a request to Cinema City (column check_log.source).</summary>
+public enum RequestSource
+{
+    /// <summary>The background checks and "Check now".</summary>
+    Poller,
+
+    /// <summary>The wizard's data on demand (repertoire, screening details, the hall map).</summary>
+    Wizard,
+}
+
+/// <summary>One request to Cinema City as the poller or the wizard saw it (one row of check_log).</summary>
 public sealed record RequestRecord(
     DateTimeOffset At,
     string? ScreeningId,
@@ -18,7 +28,8 @@ public sealed record RequestRecord(
     string? CfMitigated,
     string? CfRay,
     string? RetryAfter,
-    string? Error)
+    string? Error,
+    RequestSource Source = RequestSource.Poller)
 {
     /// <summary>"HTTP 403 (cf-mitigated: challenge) on GET tickets.cinema-city.pl/api/presentations/1765592"</summary>
     public string Describe() =>
@@ -46,11 +57,12 @@ public sealed class PollerBlockedException(RequestRecord blockedBy)
 public sealed class BudgetExhaustedException() : Exception("Not sent: the request budget is used up for now.");
 
 /// <summary>
-/// Sits between the Cinema City client and the network for one poller cycle. Before the first request of every
-/// screening after the first it waits (<see cref="IRequestPacer"/>; the requests of one screening follow each other
-/// directly), and before every request it takes a token from the <see cref="RequestBudget"/>; it records every
-/// request; and it recognises a block - HTTP 403 or 429, a response Cloudflare marked as mitigated (a challenge), or an
-/// HTML page where the API answers JSON - after which nothing more is sent in the cycle (KB §3.6: no retry storms).
+/// Sits between the Cinema City client and the network for one poller cycle or one wizard loading. Before the first
+/// request of every screening (or wizard item) after the first it waits (<see cref="IRequestPacer"/>; the requests of
+/// one screening follow each other directly), and before every request it takes a token (<see cref="IRequestTokens"/>:
+/// the poller's budget, or a wizard loading's reservation); it records every request; and it recognises a block -
+/// HTTP 403 or 429, a response Cloudflare marked as mitigated (a challenge), or an HTML page where the API answers
+/// JSON - after which nothing more is sent through it (KB §3.6: no retry storms).
 /// </summary>
 public sealed class RequestGuard : HttpMessageHandler
 {
@@ -59,21 +71,29 @@ public sealed class RequestGuard : HttpMessageHandler
 
     private readonly HttpMessageInvoker _network;
     private readonly IRequestPacer _pacer;
-    private readonly RequestBudget _budget;
+    private readonly IRequestTokens _tokens;
     private readonly TimeProvider _time;
+    private readonly RequestSource _source;
     private readonly List<RequestRecord> _records = [];
-    private string? _lastScreeningId;
+    private string? _lastPaceKey;
 
-    public RequestGuard(HttpMessageHandler network, IRequestPacer pacer, RequestBudget budget, TimeProvider time)
+    public RequestGuard(HttpMessageHandler network, IRequestPacer pacer, IRequestTokens tokens, TimeProvider time, RequestSource source = RequestSource.Poller)
     {
         _network = new HttpMessageInvoker(network, disposeHandler: true);
         _pacer = pacer;
-        _budget = budget;
+        _tokens = tokens;
         _time = time;
+        _source = source;
     }
 
     /// <summary>The screening the next requests belong to (for the log).</summary>
     public string? CurrentScreeningId { get; set; }
+
+    /// <summary>
+    /// What the pause between requests goes by when it is not the screening (a wizard item such as one cinema's day):
+    /// a request for another key than the previous one waits first.
+    /// </summary>
+    public string? PaceKey { get; set; }
 
     /// <summary>Whether the current screening is checked because of "Check now" (for the log).</summary>
     public bool CurrentManual { get; set; }
@@ -99,10 +119,11 @@ public sealed class RequestGuard : HttpMessageHandler
     {
         if (BlockedBy is not null)
             throw new PollerBlockedException(BlockedBy);
-        if (_records.Count > 0 && CurrentScreeningId != _lastScreeningId)
+        var paceKey = PaceKey ?? CurrentScreeningId;
+        if (_records.Count > 0 && paceKey != _lastPaceKey)
             await _pacer.PauseAsync(CurrentManual, cancellationToken).ConfigureAwait(false);
-        _lastScreeningId = CurrentScreeningId;
-        if (!_budget.TryTake())
+        _lastPaceKey = paceKey;
+        if (!_tokens.TryTake())
             throw new BudgetExhaustedException();
 
         var uri = request.RequestUri!;
@@ -119,7 +140,7 @@ public sealed class RequestGuard : HttpMessageHandler
         {
             var error = ex is OperationCanceledException ? "timeout" : $"{ex.GetType().Name}: {ex.Message}";
             _records.Add(new RequestRecord(at, CurrentScreeningId, CurrentManual, request.Method.Method, uri.Host, RequestRecord.EndpointOf(uri),
-                Shorten(uri.PathAndQuery, 500), null, watch.ElapsedMilliseconds, null, null, null, null, Shorten(error, 500)));
+                Shorten(uri.PathAndQuery, 500), null, watch.ElapsedMilliseconds, null, null, null, null, Shorten(error, 500), _source));
             throw;
         }
 
@@ -128,7 +149,7 @@ public sealed class RequestGuard : HttpMessageHandler
         var cfMitigated = Header(response, "cf-mitigated");
         var record = new RequestRecord(at, CurrentScreeningId, CurrentManual, request.Method.Method, uri.Host, RequestRecord.EndpointOf(uri),
             Shorten(uri.PathAndQuery, 500), status, watch.ElapsedMilliseconds, contentType, cfMitigated, Header(response, "cf-ray"),
-            response.Headers.RetryAfter?.ToString(), null);
+            response.Headers.RetryAfter?.ToString(), null, _source);
         _records.Add(record);
 
         if (IsBlock(status, cfMitigated, contentType))

@@ -3,6 +3,7 @@ using System.Data.Common;
 using System.Diagnostics;
 using CinemaWatch.Server.Data;
 using CinemaWatch.Server.Polling;
+using CinemaWatch.Server.Wizard;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -50,6 +51,12 @@ public sealed record DatabaseHealth(HealthLevel Level, string? Version, long? Si
 /// <summary>Requests to Cinema City in the last hour against the hourly budget; tokens in the bucket now.</summary>
 public sealed record BudgetUse(int LastHour, int PerHour, int Available, int Capacity);
 
+/// <summary>
+/// The wizard's data on demand: its requests in the last hour against its own budget, the limit per account, how many
+/// accounts used part of it recently, loadings running now and what the shared cache did since the start.
+/// </summary>
+public sealed record WizardUse(BudgetUse Budget, int AccountPerHour, int AccountsUsingLimit, int Running, CacheStats Cache);
+
 public sealed record OperatorOverview(
     DateTimeOffset Now,
     DateTimeOffset StartedAt,
@@ -59,10 +66,14 @@ public sealed record OperatorOverview(
     ComponentHealth Heartbeat,
     HeartbeatOptions HeartbeatSettings,
     DatabaseHealth Database,
-    BudgetUse Budget);
+    BudgetUse Budget,
+    WizardUse Wizard);
 
-/// <summary>One hour of requests (UTC hour; Polish time differs by whole hours, so the buckets fit both).</summary>
-public sealed record HourStats(DateTimeOffset Hour, int Requests, int Ok, int Failed, int Blocked, int Manual);
+/// <summary>
+/// One hour of requests (UTC hour; Polish time differs by whole hours, so the buckets fit both); <see cref="Wizard"/>
+/// of them came from the wizard, the rest from the poller.
+/// </summary>
+public sealed record HourStats(DateTimeOffset Hour, int Requests, int Ok, int Failed, int Blocked, int Manual, int Wizard);
 
 /// <summary>Requests per HTTP status; null = no response (timeout, network error).</summary>
 public sealed record StatusCount(int? Status, int Last24Hours, int Last7Days);
@@ -81,13 +92,18 @@ public sealed record SettingsSaveResult(IReadOnlyList<SettingChange> Changes);
 
 /// <summary>
 /// The operator's panel (owner only; docs/SAAS.md §5.1): what the checklist, the statistics and the event list show,
-/// and the three things the owner can do there - pause / resume all checks and change the poller settings within
-/// their fixed ranges. Every action is recorded in service_events. Makes no Cinema City requests.
+/// and the three things the owner can do there - pause / resume all requests (the poller's and the wizard's) and change
+/// the poller and wizard settings within their fixed ranges. Every action is recorded in service_events. Makes no
+/// Cinema City requests.
 /// </summary>
 public sealed class OperatorService(
     AppDbContext db,
     PollerSettings settings,
     RequestBudget budget,
+    WizardBudget wizardBudget,
+    AccountBudgets accountBudgets,
+    CinemaCityCache cache,
+    WizardJobs wizardJobs,
     PollerSignal signal,
     ServiceEvents events,
     IOptions<PollerOptions> pollerOptions,
@@ -139,11 +155,16 @@ public sealed class OperatorService(
         // A configured heartbeat that has not pinged yet needs a look: the external service is waiting for it.
         var heartbeat = Health(statuses.GetValueOrDefault(ComponentStatusRow.Heartbeat), heartbeatSettings.IsEnabled, unused: HealthLevel.Warning);
 
-        var lastHour = await db.CheckLog.CountAsync(e => e.At > now - TimeSpan.FromHours(1), cancellationToken);
+        var hourAgo = now - TimeSpan.FromHours(1);
+        var lastHour = await db.CheckLog.CountAsync(e => e.At > hourAgo && e.Source == RequestSource.Poller, cancellationToken);
         var use = new BudgetUse(lastHour, settings.Poller.RequestsPerHour, budget.Available, budget.Capacity);
+        var wizardLastHour = await db.CheckLog.CountAsync(e => e.At > hourAgo && e.Source == RequestSource.Wizard, cancellationToken);
+        var wizardBucket = wizardBudget.Bucket;
+        var wizard = new WizardUse(new BudgetUse(wizardLastHour, wizardBucket.PerHour, wizardBucket.Available, wizardBucket.Capacity),
+            settings.Poller.Wizard.AccountRequestsPerHour, accountBudgets.ActiveAccounts, wizardJobs.RunningCount, cache.Stats);
 
         return new OperatorOverview(now, ProcessStart(), poller, new CinemaCityHealth(cinemaCityLevel, lastRequest, lastOk, lastBlock),
-            mail, heartbeat, heartbeatSettings, await DatabaseAsync(cancellationToken), use);
+            mail, heartbeat, heartbeatSettings, await DatabaseAsync(cancellationToken), use, wizard);
     }
 
     /// <summary>
@@ -157,7 +178,7 @@ public sealed class OperatorService(
         var dayAgo = now - TimeSpan.FromHours(24);
         var rows = await db.CheckLog.AsNoTracking()
             .Where(e => e.At > weekAgo)
-            .Select(e => new { e.At, e.Status, e.Manual, e.CfMitigated, e.ContentType, e.DurationMs })
+            .Select(e => new { e.At, e.Status, e.Manual, e.CfMitigated, e.ContentType, e.DurationMs, e.Source })
             .ToListAsync(cancellationToken);
 
         var currentHour = new DateTimeOffset(now.Year, now.Month, now.Day, now.Hour, 0, 0, TimeSpan.Zero);
@@ -169,7 +190,8 @@ public sealed class OperatorService(
             var bucket = rows.Where(r => r.At >= start && r.At < end).ToList();
             var blocked = bucket.Count(r => r.Status is { } status && RequestGuard.IsBlock(status, r.CfMitigated, r.ContentType));
             var ok = bucket.Count(r => r.Status is >= 200 and < 300 && !RequestGuard.IsBlock(r.Status.Value, r.CfMitigated, r.ContentType));
-            hours.Add(new HourStats(start, bucket.Count, ok, bucket.Count - ok - blocked, blocked, bucket.Count(r => r.Manual)));
+            hours.Add(new HourStats(start, bucket.Count, ok, bucket.Count - ok - blocked, blocked, bucket.Count(r => r.Manual),
+                bucket.Count(r => r.Source == RequestSource.Wizard)));
         }
 
         var day = rows.Where(r => r.At > dayAgo).ToList();
@@ -211,7 +233,7 @@ public sealed class OperatorService(
             db.PollerState.Add(state);
         }
         state.PausedByOperatorAt = time.GetUtcNow();
-        events.Add(db, ServiceEventKind.PausedByOperator, "Checks paused by the operator: no requests to Cinema City until they are resumed");
+        events.Add(db, ServiceEventKind.PausedByOperator, "Checks paused by the operator: no requests to Cinema City (poller and wizard) until they are resumed");
         await db.SaveChangesAsync(cancellationToken);
         logger.LogWarning("Checks paused by the operator");
         return true;
