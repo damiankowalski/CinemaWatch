@@ -1,0 +1,447 @@
+{
+  "description": "Hall map selection rules shared by the desktop app (CinemaWatch.Core SeatSelection) and the site (seatmap.js). Coordinates are plan units: seat centres, radius seatRadius. A case is either a gesture ('path': pointer positions from the press to the release; 'cancel': true = Esc or lost mouse capture before the release) or a click on a row number ('row'). 'before' and 'after' are the selected seat keys, sorted. Layout: rows 1-3 have five seats 70 units apart (gap 10 between circles); seat 5 of row 3 and the only seat of row 4 are wheelchair spaces.",
+  "version": 1,
+  "seatRadius": 30,
+  "seats": [
+    { "key": "1_1_1", "section": "1", "rowKey": "1", "x": 100, "y": 100 },
+    { "key": "1_2_1", "section": "1", "rowKey": "1", "x": 170, "y": 100 },
+    { "key": "1_3_1", "section": "1", "rowKey": "1", "x": 240, "y": 100 },
+    { "key": "1_4_1", "section": "1", "rowKey": "1", "x": 310, "y": 100 },
+    { "key": "1_5_1", "section": "1", "rowKey": "1", "x": 380, "y": 100 },
+    { "key": "1_1_2", "section": "1", "rowKey": "2", "x": 100, "y": 170 },
+    { "key": "1_2_2", "section": "1", "rowKey": "2", "x": 170, "y": 170 },
+    { "key": "1_3_2", "section": "1", "rowKey": "2", "x": 240, "y": 170 },
+    { "key": "1_4_2", "section": "1", "rowKey": "2", "x": 310, "y": 170 },
+    { "key": "1_5_2", "section": "1", "rowKey": "2", "x": 380, "y": 170 },
+    { "key": "1_1_3", "section": "1", "rowKey": "3", "x": 100, "y": 240 },
+    { "key": "1_2_3", "section": "1", "rowKey": "3", "x": 170, "y": 240 },
+    { "key": "1_3_3", "section": "1", "rowKey": "3", "x": 240, "y": 240 },
+    { "key": "1_4_3", "section": "1", "rowKey": "3", "x": 310, "y": 240 },
+    { "key": "1_5_3", "section": "1", "rowKey": "3", "x": 380, "y": 240, "wheelchair": true },
+    { "key": "1_1_4", "section": "1", "rowKey": "4", "x": 240, "y": 310, "wheelchair": true }
+  ],
+  "cases": [
+    {
+      "name": "Click on a free seat selects it",
+      "before": [],
+      "path": [
+        [100, 100]
+      ],
+      "after": [
+        "1_1_1"
+      ]
+    },
+    {
+      "name": "Click anywhere inside a selected seat deselects it",
+      "before": [
+        "1_1_1"
+      ],
+      "path": [
+        [115, 85]
+      ],
+      "after": []
+    },
+    {
+      "name": "Click on a wheelchair space selects it",
+      "before": [],
+      "path": [
+        [380, 240]
+      ],
+      "after": [
+        "1_5_3"
+      ]
+    },
+    {
+      "name": "Press on a wheelchair space and drag: only that space toggles",
+      "before": [],
+      "path": [
+        [380, 240],
+        [310, 240],
+        [100, 240],
+        [100, 100]
+      ],
+      "after": [
+        "1_5_3"
+      ]
+    },
+    {
+      "name": "Press on a selected wheelchair space and drag: only that space is deselected",
+      "before": [
+        "1_1_3",
+        "1_5_3"
+      ],
+      "path": [
+        [380, 240],
+        [100, 240]
+      ],
+      "after": [
+        "1_1_3"
+      ]
+    },
+    {
+      "name": "A point in the gap between two seats is background: a press there changes nothing",
+      "before": [
+        "1_1_1"
+      ],
+      "path": [
+        [135, 100]
+      ],
+      "after": [
+        "1_1_1"
+      ]
+    },
+    {
+      "name": "Painting along a row selects every seat passed over, even with one long move",
+      "before": [],
+      "path": [
+        [100, 100],
+        [380, 100]
+      ],
+      "after": [
+        "1_1_1",
+        "1_2_1",
+        "1_3_1",
+        "1_4_1",
+        "1_5_1"
+      ]
+    },
+    {
+      "name": "Painting: the first seat decides; starting on a selected seat deselects the seats passed over",
+      "before": [
+        "1_1_1",
+        "1_2_1",
+        "1_4_1",
+        "1_5_1"
+      ],
+      "path": [
+        [100, 100],
+        [310, 100]
+      ],
+      "after": [
+        "1_5_1"
+      ]
+    },
+    {
+      "name": "Painting from an unselected seat selects the seats passed over, selected or not",
+      "before": [
+        "1_2_1"
+      ],
+      "path": [
+        [100, 100],
+        [240, 100]
+      ],
+      "after": [
+        "1_1_1",
+        "1_2_1",
+        "1_3_1"
+      ]
+    },
+    {
+      "name": "Painting skips wheelchair spaces",
+      "before": [],
+      "path": [
+        [100, 240],
+        [380, 240]
+      ],
+      "after": [
+        "1_1_3",
+        "1_2_3",
+        "1_3_3",
+        "1_4_3"
+      ]
+    },
+    {
+      "name": "Painting back over seats does not flip them again",
+      "before": [],
+      "path": [
+        [100, 100],
+        [240, 100],
+        [100, 100]
+      ],
+      "after": [
+        "1_1_1",
+        "1_2_1",
+        "1_3_1"
+      ]
+    },
+    {
+      "name": "Painting diagonally changes only the seats the pointer passes over",
+      "before": [],
+      "path": [
+        [100, 100],
+        [170, 170]
+      ],
+      "after": [
+        "1_1_1",
+        "1_2_2"
+      ]
+    },
+    {
+      "name": "Painting through the gap between rows changes nothing there",
+      "before": [],
+      "path": [
+        [100, 100],
+        [100, 135],
+        [380, 135]
+      ],
+      "after": [
+        "1_1_1"
+      ]
+    },
+    {
+      "name": "Painting over two rows",
+      "before": [],
+      "path": [
+        [100, 100],
+        [100, 170],
+        [240, 170]
+      ],
+      "after": [
+        "1_1_1",
+        "1_1_2",
+        "1_2_2",
+        "1_3_2"
+      ]
+    },
+    {
+      "name": "Rectangle selects the seats whose centre lies inside",
+      "before": [],
+      "path": [
+        [60, 60],
+        [250, 180]
+      ],
+      "after": [
+        "1_1_1",
+        "1_1_2",
+        "1_2_1",
+        "1_2_2",
+        "1_3_1",
+        "1_3_2"
+      ]
+    },
+    {
+      "name": "Rectangle: a seat only partly inside (centre outside) stays as it was",
+      "before": [],
+      "path": [
+        [60, 60],
+        [230, 180]
+      ],
+      "after": [
+        "1_1_1",
+        "1_1_2",
+        "1_2_1",
+        "1_2_2"
+      ]
+    },
+    {
+      "name": "Rectangle drawn from the bottom right to the top left gives the same result",
+      "before": [],
+      "path": [
+        [270, 205],
+        [60, 60]
+      ],
+      "after": [
+        "1_1_1",
+        "1_1_2",
+        "1_2_1",
+        "1_2_2",
+        "1_3_1",
+        "1_3_2"
+      ]
+    },
+    {
+      "name": "Rectangle over partly selected seats selects them all",
+      "before": [
+        "1_1_1"
+      ],
+      "path": [
+        [60, 60],
+        [230, 180]
+      ],
+      "after": [
+        "1_1_1",
+        "1_1_2",
+        "1_2_1",
+        "1_2_2"
+      ]
+    },
+    {
+      "name": "Rectangle over seats that are all selected deselects them; others stay",
+      "before": [
+        "1_1_1",
+        "1_1_2",
+        "1_2_1",
+        "1_2_2",
+        "1_5_1"
+      ],
+      "path": [
+        [60, 60],
+        [230, 180]
+      ],
+      "after": [
+        "1_5_1"
+      ]
+    },
+    {
+      "name": "Rectangle skips wheelchair spaces",
+      "before": [],
+      "path": [
+        [60, 205],
+        [420, 275]
+      ],
+      "after": [
+        "1_1_3",
+        "1_2_3",
+        "1_3_3",
+        "1_4_3"
+      ]
+    },
+    {
+      "name": "Rectangle: selected wheelchair spaces do not count for 'every one already was'",
+      "before": [
+        "1_1_3",
+        "1_2_3",
+        "1_3_3",
+        "1_4_3",
+        "1_5_3"
+      ],
+      "path": [
+        [60, 205],
+        [420, 275]
+      ],
+      "after": [
+        "1_5_3"
+      ]
+    },
+    {
+      "name": "Rectangle with only a wheelchair space inside changes nothing",
+      "before": [],
+      "path": [
+        [200, 280],
+        [280, 345]
+      ],
+      "after": []
+    },
+    {
+      "name": "Rectangle the size of the final pointer position only: the last point counts, not the path",
+      "before": [],
+      "path": [
+        [60, 60],
+        [420, 345],
+        [130, 130]
+      ],
+      "after": [
+        "1_1_1"
+      ]
+    },
+    {
+      "name": "Press on the background without moving changes nothing",
+      "before": [
+        "1_1_1"
+      ],
+      "path": [
+        [60, 60]
+      ],
+      "after": [
+        "1_1_1"
+      ]
+    },
+    {
+      "name": "Empty rectangle changes nothing",
+      "before": [
+        "1_1_1"
+      ],
+      "path": [
+        [60, 60],
+        [80, 80]
+      ],
+      "after": [
+        "1_1_1"
+      ]
+    },
+    {
+      "name": "Esc (or lost mouse capture) during painting restores the selection from before the press",
+      "before": [
+        "1_5_1"
+      ],
+      "path": [
+        [100, 100],
+        [380, 170]
+      ],
+      "cancel": true,
+      "after": [
+        "1_5_1"
+      ]
+    },
+    {
+      "name": "Esc during a rectangle restores the selection from before the press",
+      "before": [
+        "1_1_2"
+      ],
+      "path": [
+        [60, 60],
+        [420, 345]
+      ],
+      "cancel": true,
+      "after": [
+        "1_1_2"
+      ]
+    },
+    {
+      "name": "Row number selects every regular seat of the row, not the wheelchair space",
+      "before": [],
+      "row": {
+        "section": "1",
+        "rowKey": "3"
+      },
+      "after": [
+        "1_1_3",
+        "1_2_3",
+        "1_3_3",
+        "1_4_3"
+      ]
+    },
+    {
+      "name": "Row number on a partly selected row selects the rest",
+      "before": [
+        "1_2_3"
+      ],
+      "row": {
+        "section": "1",
+        "rowKey": "3"
+      },
+      "after": [
+        "1_1_3",
+        "1_2_3",
+        "1_3_3",
+        "1_4_3"
+      ]
+    },
+    {
+      "name": "Row number on a fully selected row deselects the regular seats; the wheelchair space stays",
+      "before": [
+        "1_1_3",
+        "1_2_3",
+        "1_3_3",
+        "1_4_3",
+        "1_5_3"
+      ],
+      "row": {
+        "section": "1",
+        "rowKey": "3"
+      },
+      "after": [
+        "1_5_3"
+      ]
+    },
+    {
+      "name": "Row number of a row with only a wheelchair space changes nothing",
+      "before": [],
+      "row": {
+        "section": "1",
+        "rowKey": "4"
+      },
+      "after": []
+    }
+  ]
+}

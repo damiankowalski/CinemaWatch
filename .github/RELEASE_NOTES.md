@@ -1,17 +1,17 @@
-## CinemaWatch 1.4.0
+## CinemaWatch 1.5.0
 
-- **All Cinema City IMAX cinemas in Poland:** Katowice (Punkt 44), Kraków (Zakopianka), Łódź (Manufaktura),
-  Poznań (Plaza), Warszawa (Sadyba) and Wrocław (Wroclavia).
-  - Step 1 now has a city drop-down (each city has one IMAX hall) with *All cities* at the end.
-    The last choice is remembered for new profiles.
-  - Date range: up to 31 days for one city, up to 14 days for all cities (six repertoire requests per day).
-  - Step 2 groups screenings by day and, within a day, by city.
-  - The city is shown on the screening tabs, in the summary and in Windows notifications.
-- Hall maps: row numbers now stand in two straight columns at the edges of the hall, like on the Cinema City
-  website - neater in halls with rows of different widths (e.g. Kraków, Wrocław).
-- Wording: screenings are filtered as "IMAX without dubbing" (Polish films in IMAX have no subtitles).
-- Profiles saved by 1.4.0 can still be opened and checked by version 1.3.0.
-- Beta tags (e.g. `v1.5.0-beta.1`) now create draft releases, visible only to the maintainers until published.
+- **Multi-select on the hall map** - fewer clicks for blocks of seats, no modifier keys:
+  - **Painting:** press on a seat and drag. The first seat decides: if it was not watched, every seat you pass over
+    is selected; if it was, they are all cleared. Passing over a seat again changes nothing.
+  - **Rectangle:** press on an empty spot and drag. The seats whose centre lies inside are all selected - or all
+    cleared when every one of them already was (the same rule as a row number).
+  - The seats change while you drag; releasing the button keeps the result. **Esc** (or switching to another window
+    during the drag) restores the selection from before the press.
+  - Painting and the rectangle skip wheelchair spaces; those are selected by a single click only.
+  - A click on a seat and a click on a row number work as before.
+- The selection rules now live in `CinemaWatch.Core` with a shared case file (`tests/Fixtures/seat-selection-cases.json`),
+  so the planned web version of the map behaves exactly the same.
+- No change to the profile format: profiles saved by 1.5.0 open in 1.4.0 and older.
 
 ### Download
 

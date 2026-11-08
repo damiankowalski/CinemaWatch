@@ -468,12 +468,14 @@ TestRunner.Add("Polish time: UTC to Europe/Warsaw in winter and summer time, als
     Assert.Equal(DateTimeKind.Unspecified, now.Kind);
 });
 
+SeatSelectionTests.Register();
 ViewModelTests.Register();
 ViewModelTests.RegisterLanguageTests();
 ViewModelTests.RegisterNavigationTests();
 ViewModelTests.RegisterTabTests();
 ViewModelTests.RegisterTabSwitchTests();
 ViewModelTests.RegisterAllImaxTests();
+ViewModelTests.RegisterHallMapGestureTests();
 
 TestRunner.Add("Localization: a language scope belongs to one asynchronous flow (server requests and e-mails)", async () =>
 {

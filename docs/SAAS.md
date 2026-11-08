@@ -356,11 +356,13 @@ Goal: the result as close to the desktop app as possible (decided 8 Nov 2026, §
   **painting** - press on a seat and drag: the first seat decides whether the seats passed over are selected or
   deselected; **rectangle** - press on the background and drag: the seats whose centre lies inside are all selected,
   or all deselected when every one of them already was (the row-label rule). Painting and the rectangle skip
-  wheelchair spaces. Esc during a gesture restores the state from before it. No modifier keys (a click already adds
+  wheelchair spaces; a press on a wheelchair space toggles only that space, also when the pointer then moves. A
+  gesture runs from the press to the release; Esc during a gesture, or a lost pointer capture, restores the state
+  from before it. No modifier keys (a click already adds
   to the selection). On a touch screen a tap toggles one seat and dragging scrolls the page; painting and the
   rectangle work with a mouse or a pen. The rules live once in `CinemaWatch.Core` (reference implementation); the
-  script mirrors them; one file of cases (`tests/Fixtures/seat-selection-cases.json`) is run by the C# tests and by a
-  JavaScript test in CI (`node --test`, no packages).
+  script mirrors them; one file of cases (`tests/Fixtures/seat-selection-cases.json`, gestures as pointer paths in plan units, so
+  hit testing is shared too) is run by the C# tests and by a JavaScript test in CI (`node --test`, no packages).
 
 ---
 
@@ -572,7 +574,7 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
 
 ### Stage 6 - MVP 1 (§5.2)
 Planned in its own chat while the stage 5 test runs; decided 8 Nov 2026 (§9). Code on branches from `main` once
-0.6.0 is merged (13 Nov 2026). Profile import stays as it is. Two tracks run side by side: the desktop app gets
+0.6.0 is merged (8 Nov 2026; desktop 1.5.0 followed the same day, before the `web-v0.6.0` tag). Profile import stays as it is. Two tracks run side by side: the desktop app gets
 multi-select on the hall map (1.5.0) and the site's map is built with the same rules from its first version.
 - [x] 6.1 Cinema City data on demand (decided 8 Nov 2026): shared cache in memory, a wizard budget of its own next to
       the poller's, limits per account, loading in the background with progress, desktop date ranges (§5.2). Final
@@ -582,7 +584,7 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
 - [x] 6.3 The wizard (decided 8 Nov 2026): the four desktop steps, clickable; state in the form; saving through the
       import's validation; editing of every profile in MVP 1 (§5.2).
 - [ ] 6.4 Increments (each with tests; the desktop tests keep passing; a short plan before each):
-  - [ ] 6.4.1 **Desktop 1.5.0 - multi-select** (`feature/seat-multiselect`): the rules in `CinemaWatch.Core` with
+  - [x] 6.4.1 **Desktop 1.5.0 - multi-select** (done: `v1.5.0`) (`feature/seat-multiselect`): the rules in `CinemaWatch.Core` with
         tests and the shared case file; gestures in `HallMapViewModel` and the WPF map (mouse capture, the rectangle
         drawn on the map). XAML cannot be built in Claude's sandbox: the owner builds and tests the window. Beta
         (draft release) → owner's tests → `v1.5.0`; release notes, README, KB.
@@ -811,6 +813,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Static pages plus a small own script for the hall map (HTML checkboxes drawn as circles), not SVG and not interactive Blazor; `CinemaWatch.ViewModels` not reused on the site | Works without JavaScript and with a keyboard; no SignalR circuit that a deployment or the nightly reboot would cut; the view models are WPF-shaped, the logic lives in Core |
 | Nov 2026 | Wizard state in the form, not in the database | No migration and no restore test; the server validates everything when saving anyway |
 | Nov 2026 | Multi-select on the hall map for the desktop app (1.5.0) and the site together: painting (press on a seat and drag), a rectangle from the background with the row-label rule, no modifier keys, wheelchair spaces only by a single click; the rules once in Core, mirrored by the script, one shared case file tested in C# and in JavaScript | Fewer clicks for whole blocks of seats; the same behaviour in both clients, guarded by CI instead of by memory; cheaper to build into the new web map than to add later |
+| Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 
 ---
 

@@ -45,6 +45,8 @@ dubbing.
   indicator is clickable; data that has not changed is reused, so jumping between steps is instant.
 - **Interactive hall map** drawn from the cinema's own seat plan, with live occupancy.
   - Click a row number to watch the whole row, click seats to add or remove them - taken seats too.
+  - Select blocks of seats with the mouse: drag from a seat to *paint* (the first seat decides select or clear),
+    or drag from an empty spot to draw a *rectangle*. Esc cancels the drag.
   - Wheelchair spaces are shown separately and never counted as regular free seats.
   - Optional condition: notify only when *N* watched seats are free next to each other.
   - Copy a selection to every screening in the same hall with one click.
@@ -116,7 +118,9 @@ The exe is not code-signed, so Windows SmartScreen may show a warning on first s
    14 days for all cities).
 2. **Film and screenings** (*Film i seanse*) - pick the film and tick the screenings. Sold-out ones can be ticked
    too - those are the ones worth watching.
-3. **Seats** (*Miejsca*) - mark rows and seats on the hall map of each screening.
+3. **Seats** (*Miejsca*) - mark rows and seats on the hall map of each screening: click a row number or a seat,
+   drag from a seat to paint, drag from an empty spot for a rectangle (Esc cancels). Wheelchair spaces are selected
+   by a single click only.
 4. **Summary** (*Podsumowanie*) - *Check this profile* checks immediately (*Check all* checks every tab);
    save the profile and *Add to Task Scheduler* to keep watching in the background.
 
