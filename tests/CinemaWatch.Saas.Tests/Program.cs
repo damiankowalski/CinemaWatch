@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -392,6 +393,58 @@ TestRunner.Add("Time: Polish screening times become UTC (winter, summer, the hou
     Assert.Equal("16:00", PollerTime.ClockText(new DateTimeOffset(2027, 1, 15, 15, 0, 0, TimeSpan.Zero)));
 });
 
+TestRunner.Add("Public pages: /admin only exactly as written (case, encoding, double slash, dot segments); other paths untouched", () =>
+{
+    foreach (var (path, raw) in new (string, string?)[]
+             {
+                 ("/admin", "/admin"), ("/admin/users", "/admin/users?delete=x"), ("/admin/", "/admin/"), ("/admin", null),
+                 ("/admin/users", "http://host/admin/users"), ("/", "/"), ("/Account/Login", "/account/login"), ("/administrator", "/Administrator"),
+             })
+        Assert.True(PublicSurface.IsAdminPathAsWritten(new PathString(path), raw), $"{path} sent as {raw} should pass");
+    foreach (var (path, raw) in new (string, string?)[]
+             {
+                 ("/ADMIN", "/ADMIN"), ("/Admin/users", "/Admin/users"), ("/admin", "/%61dmin"), ("/admin", "/%41dmin"), ("//admin", "//admin"),
+                 ("/admin/users", "/x/../admin/users"), ("/admin", "http://host/%61dmin"), ("/aDmIn", null),
+             })
+        Assert.True(!PublicSurface.IsAdminPathAsWritten(new PathString(path), raw), $"{path} sent as {raw} should be refused");
+    Assert.Equal("User-agent: *\nDisallow: /\n", PublicSurface.RobotsText);
+});
+
+TestRunner.Add("Password help limits: one e-mail per account per 15 minutes, 20 a day for all accounts together, a rolling day", () =>
+{
+    var clock = new ManualTime(DateTimeOffset.Parse("2026-11-07T12:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+    var limits = new PasswordHelpLimits(clock);
+    Assert.Equal(PasswordHelpDecision.Allowed, limits.TryReserve("a"));
+    Assert.Equal(PasswordHelpDecision.TooSoonForAccount, limits.TryReserve("a"));
+    clock.Advance(TimeSpan.FromMinutes(14));
+    Assert.Equal(PasswordHelpDecision.TooSoonForAccount, limits.TryReserve("a"));
+    clock.Advance(TimeSpan.FromMinutes(1));
+    Assert.Equal(PasswordHelpDecision.Allowed, limits.TryReserve("a"));
+    for (var i = 0; i < PasswordHelpLimits.PerDay - 2; i++)
+        Assert.Equal(PasswordHelpDecision.Allowed, limits.TryReserve($"u{i}"));
+    Assert.Equal(PasswordHelpDecision.DailyLimit, limits.TryReserve("fresh"));
+    // Forgetting a (deleted) account does not give back the day's e-mails.
+    limits.Forget("a");
+    Assert.Equal(PasswordHelpDecision.DailyLimit, limits.TryReserve("a"));
+    // 24 hours after the first e-mail its slot is free again, and only that one.
+    clock.Advance(TimeSpan.FromHours(24) - TimeSpan.FromMinutes(15));
+    Assert.Equal(PasswordHelpDecision.Allowed, limits.TryReserve("fresh"));
+    Assert.Equal(PasswordHelpDecision.DailyLimit, limits.TryReserve("fresh2"));
+});
+
+TestRunner.Add("E-mail about a deleted account: both languages, no link, the backups' 31 days", () =>
+{
+    using (Localizer.Use(AppLanguage.Polish))
+    {
+        var mail = AccountMails.AccountDeleted("a@example.test");
+        Assert.Equal("Twoje konto CinemaWatch zostało usunięte", mail.Subject);
+        Assert.True(mail.Text.Contains("usunął Twoje konto") && mail.Text.Contains("31 dniach") && !mail.Text.Contains("http"));
+        Assert.True(mail.Html.Contains("usunął Twoje konto"));
+    }
+    using (Localizer.Use(AppLanguage.English))
+        Assert.Equal("Your CinemaWatch account has been deleted", AccountMails.AccountDeleted("a@example.test").Subject);
+});
+
 // ---------------------------------------------------------------------------------------------------------------
 // With a database: the real web app in memory (CINEMAWATCH_TEST_DB, see src/CinemaWatch.Web/README.md)
 // ---------------------------------------------------------------------------------------------------------------
@@ -424,6 +477,10 @@ finally
     if (database is not null)
         await database.DisposeAsync();
 }
+
+// The text of the page's status message (StatusMessage.razor), or "" without one.
+static string StatusText(string page) =>
+    Regex.Match(page, "<p class=\"status [^\"]*\" role=\"[^\"]*\">(.*?)</p>", RegexOptions.Singleline).Groups[1].Value;
 
 // A profile like the desktop app saves it, with screenings in the future (or from the given Polish start time).
 static WatchProfile SampleProfile(string name = "Diuna IMAX", int screenings = 1, DateTime? start = null)
@@ -658,7 +715,7 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         var privacy = await owner.PageAsync("/privacy");
         Assert.True(privacy.Contains("Prywatność"));
         // The notice names every service that receives personal data, and is no longer a draft.
-        foreach (var service in new[] { "OVHcloud", "Cloudflare Access", "Resend (USA)", "Healthchecks.io" })
+        foreach (var service in new[] { "OVHcloud", "Cloudflare Access", "Resend (USA)", "Healthchecks.io", "Backblaze B2" })
             Assert.True(privacy.Contains(service), $"privacy notice lacks {service}");
         Assert.True(!privacy.Contains("Wersja robocza"));
         Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync("/app.css")).StatusCode);
@@ -729,17 +786,29 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         Assert.Equal("pl", language);
     });
 
-    TestRunner.Add("Web: five wrong passwords lock the account (even the right password is refused then)", async () =>
+    TestRunner.Add("Web: five wrong passwords lock the account (even the right password is refused then); an unknown address, a waiting, a locked account all get the same answer, never faster than the set time", async () =>
     {
         await SignedInAsync("locked@example.test", AppLanguage.Polish);
+        await WithService(async services => (await services.GetRequiredService<AccountService>().InviteAsync("waiting@example.test", AppLanguage.Polish)).Outcome);
         var browser = app.CreateBrowser();
         var page = await browser.PageAsync("/Account/Login");
-        HttpResponseMessage response = null!;
+        async Task<string> AnswerAsync(string email, string typed)
+        {
+            var started = Stopwatch.GetTimestamp();
+            var response = await browser.PostFormAsync("/Account/Login", page, "login", new() { ["Input.Email"] = email, ["Input.Password"] = typed });
+            Assert.True(Stopwatch.GetElapsedTime(started).TotalMilliseconds >= TestApp.SignInAnswerMilliseconds, "the answer came too fast");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            return StatusText(WebUtility.HtmlDecode(await response.Content.ReadAsStringAsync()));
+        }
+
+        var unknown = await AnswerAsync("nobody-here@example.test", "wrong password");
+        Assert.True(unknown.StartsWith("Nieprawidłowy e-mail lub hasło.") && unknown.Contains("wstrzymane na 15 minut"), unknown);
         for (var i = 0; i < 5; i++)
-            response = await browser.PostFormAsync("/Account/Login", page, "login", new() { ["Input.Email"] = "locked@example.test", ["Input.Password"] = "wrong password" });
-        Assert.Equal("/Account/Lockout", Location(response));
-        response = await browser.PostFormAsync("/Account/Login", page, "login", new() { ["Input.Email"] = "locked@example.test", ["Input.Password"] = password });
-        Assert.Equal("/Account/Lockout", Location(response));
+            Assert.Equal(unknown, await AnswerAsync("locked@example.test", "wrong password"));
+        Assert.Equal(unknown, await AnswerAsync("locked@example.test", password));
+        Assert.Equal(unknown, await AnswerAsync("waiting@example.test", "some long password"));
+        // The old lockout page is gone (it told who has an account): like any unknown address, the sign-in page.
+        Assert.True(Location(await browser.GetAsync("/Account/Lockout")).StartsWith("/Account/Login"));
     });
 
     TestRunner.Add("Web: personal data download, password change, account deletion", async () =>
@@ -765,6 +834,7 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
             await services.GetRequiredService<UserManager<AppUser>>().FindByEmailAsync("leaving@example.test") is null);
         Assert.True(gone);
         Assert.True(Location(await browser.GetAsync("/")).StartsWith("/Account/Login"));
+        Assert.True((await EventsAsync(ServiceEventKind.AccountDeleted)).Any(e => e.Message == "Account deleted by its user (profiles: 0)"));
     });
 
     TestRunner.Add("Profiles: added up to the limit, same name replaces (id and state kept), owner's limit raises and lowers it", async () =>
@@ -1696,5 +1766,183 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         Assert.True(File.Exists(Path.Combine(app.FakeFolder, FakeCinemaCityHandler.ReadmeFile)));
         // The finished cycle sent one heartbeat; the second cycle came too soon for another.
         Assert.Equal(pings + 1, app.HeartbeatClient.Pings.Count);
+    });
+
+    // -----------------------------------------------------------------------------------------------------------
+    // Model A (docs/SAAS.md §9): a visitor without an account can cause no cost and no damage; the owner deletes
+    // accounts. Last, because they move the test clock.
+    // -----------------------------------------------------------------------------------------------------------
+
+    async Task<bool> UserExistsAsync(string userId) =>
+        await WithService(async services => await services.GetRequiredService<UserManager<AppUser>>().FindByIdAsync(userId) is not null);
+
+    async Task<int> WaitForMailsAsync(string email, int expected)
+    {
+        for (var i = 0; i < 50 && MailsTo(email).Count < expected; i++)
+            await Task.Delay(100);
+        return MailsTo(email).Count;
+    }
+
+    TestRunner.Add("Public pages: a visitor without an account writes nothing to the database; robots.txt and noindex; /healthz only from inside; /admin only in lower case", async () =>
+    {
+        await SignedInAsync("aimed-at@example.test", AppLanguage.Polish);
+        async Task<Dictionary<string, long>> RowCountsAsync() => await WithService(async services =>
+        {
+            var connection = services.GetRequiredService<AppDbContext>().Database.GetDbConnection();
+            await connection.OpenAsync();
+            var counts = new Dictionary<string, long>();
+            foreach (var table in await database.TablesAsync())
+            {
+                await using var command = connection.CreateCommand();
+                command.CommandText = "select count(*) from \"" + table.Replace("\"", "\"\"") + "\"";
+                counts[table] = Convert.ToInt64(await command.ExecuteScalarAsync(), System.Globalization.CultureInfo.InvariantCulture);
+            }
+            return counts;
+        });
+
+        var visitor = app.CreateBrowser();
+        await visitor.PageAsync("/Account/Login"); // the form cookie's keys exist from now on, as on a running server
+        var before = await RowCountsAsync();
+        foreach (var path in new[] { "/", "/Account/Login", "/Account/ForgotPassword", "/privacy", "/robots.txt", "/not-found", "/nothing-here",
+                                     "/Account/SetPassword?user=x&code=y", "/admin", "/admin/users", "/ADMIN", "/healthz", "/language/en?returnUrl=/" })
+            await visitor.GetAsync(path);
+        var page = await visitor.PageAsync("/Account/Login");
+        await visitor.PostFormAsync("/Account/Login", page, "login", new() { ["Input.Email"] = "nobody@example.test", ["Input.Password"] = "some long password" });
+        // A wrong password for an existing account only raises its failed-sign-in counter (no new row).
+        await visitor.PostFormAsync("/Account/Login", page, "login", new() { ["Input.Email"] = "aimed-at@example.test", ["Input.Password"] = "some long password" });
+        page = await visitor.PageAsync("/Account/ForgotPassword");
+        await visitor.PostFormAsync("/Account/ForgotPassword", page, "forgot-password", new() { ["Input.Email"] = "nobody@example.test" });
+        await Task.Delay(300); // the background queue
+        var after = await RowCountsAsync();
+        foreach (var (table, count) in before)
+            Assert.Equal((table, count), (table, after[table]));
+
+        var robots = await visitor.GetAsync("/robots.txt");
+        Assert.Equal(PublicSurface.RobotsText, await robots.Content.ReadAsStringAsync());
+        foreach (var path in new[] { "/Account/Login", "/robots.txt", "/nothing-here" })
+            Assert.Equal("noindex, nofollow", (await visitor.GetAsync(path)).Headers.GetValues("X-Robots-Tag").Single());
+
+        // Inside the server (deploy.sh, the container test) the health check answers; through Cloudflare it does not exist.
+        Assert.Equal("ok", await (await visitor.GetAsync("/healthz")).Content.ReadAsStringAsync());
+        foreach (var header in new[] { "CF-Connecting-IP", "CF-Ray" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/healthz");
+            request.Headers.Add(header, "203.0.113.7");
+            Assert.Equal(HttpStatusCode.NotFound, (await visitor.SendAsync(request)).StatusCode);
+        }
+
+        // Another spelling of /admin is 404 even for the owner: only "/admin" matches the Access application.
+        var owner = await SignInAsync(TestApp.OwnerEmail);
+        Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync("/admin/users")).StatusCode);
+        foreach (var path in new[] { "/ADMIN", "/Admin", "/Admin/users", "/aDmin/users" })
+            Assert.Equal((path, HttpStatusCode.NotFound), (path, (await owner.GetAsync(path)).StatusCode));
+    });
+
+    TestRunner.Add("Password help page: the same answer for every address, only queued; the e-mail follows in the background; one per account per 15 minutes; the daily limit records an event without an address", async () =>
+    {
+        await SignedInAsync("helpme@example.test", AppLanguage.English);
+        var visitor = app.CreateBrowser();
+        async Task<string> AskAsync(string email)
+        {
+            var form = await visitor.PageAsync("/Account/ForgotPassword");
+            var response = await visitor.PostFormAsync("/Account/ForgotPassword", form, "forgot-password", new() { ["Input.Email"] = email });
+            Assert.Equal("/Account/Login", Location(response));
+            return StatusText(await visitor.PageAsync("/Account/Login"));
+        }
+
+        var before = MailsTo("helpme@example.test").Count;
+        var forUnknown = await AskAsync("nobody-at-all@example.test");
+        var forKnown = await AskAsync("helpme@example.test");
+        Assert.True(forKnown.StartsWith("Jeśli to konto istnieje"), forKnown);
+        Assert.Equal(forUnknown, forKnown);
+        Assert.Equal(before + 1, await WaitForMailsAsync("helpme@example.test", before + 1));
+        Assert.Equal("New password for CinemaWatch", MailsTo("helpme@example.test")[^1].Subject);
+        Assert.True(!app.Mail.Sent.Any(m => m.To == "nobody-at-all@example.test"));
+
+        // Again within 15 minutes: the same answer, no e-mail; after 15 minutes the next one goes.
+        Assert.Equal(forKnown, await AskAsync("helpme@example.test"));
+        await Task.Delay(500);
+        Assert.Equal(before + 1, MailsTo("helpme@example.test").Count);
+        app.Time.Advance(PasswordHelpLimits.PerAccountInterval);
+        await AskAsync("helpme@example.test");
+        Assert.Equal(before + 2, await WaitForMailsAsync("helpme@example.test", before + 2));
+
+        // The daily limit, with a limiter that has already counted 20: nothing sent, one event, no address in it.
+        var mails = app.Mail.Sent.Count;
+        var outcome = await WithService(async services =>
+        {
+            var full = new PasswordHelpLimits(app.Time);
+            for (var i = 0; i < PasswordHelpLimits.PerDay; i++)
+                full.TryReserve($"someone-{i}");
+            return await ActivatorUtilities.CreateInstance<AccountService>(services, full).RequestPasswordHelpAsync("helpme@example.test");
+        });
+        Assert.Equal((PasswordHelpOutcome.Limited, mails), (outcome, app.Mail.Sent.Count));
+        var limited = await EventsAsync(ServiceEventKind.AccountMailLimited);
+        Assert.Equal(1, limited.Count);
+        Assert.True(!limited[0].Message.Contains('@'));
+    });
+
+    TestRunner.Add("Owner deletes accounts in /admin/users: a question first; all data and an e-mail; an invitation withdrawn; never the owner; nobody else; the session ends within a minute", async () =>
+    {
+        var gone = await SignedInAsync("gone@example.test", AppLanguage.English);
+        var goneId = await UserIdAsync("gone@example.test");
+        await ImportAsync(goneId, SampleProfile("Do usunięcia"));
+        var member = await SignedInAsync("stays@example.test", AppLanguage.Polish);
+        var owner = await SignInAsync(TestApp.OwnerEmail);
+        var ownerId = await UserIdAsync(TestApp.OwnerEmail);
+        await WithService(async services => (await services.GetRequiredService<AccountService>().InviteAsync("never-came@example.test", AppLanguage.Polish)).Outcome);
+        var pendingId = await UserIdAsync("never-came@example.test");
+        var invitationLink = TestApp.LinkPath(app.Mail.Sent.Last(m => m.To == "never-came@example.test"));
+
+        // Nobody else may; the form token is required.
+        var memberPage = await member.PageAsync("/");
+        Assert.True(Location(await member.PostFormAsync("/admin/users/delete", memberPage, null, new() { ["userId"] = goneId })).StartsWith("/Account/AccessDenied"));
+        var withoutToken = await owner.PostAsync("/admin/users/delete", new FormUrlEncodedContent(new Dictionary<string, string> { ["userId"] = goneId }));
+        Assert.Equal((HttpStatusCode.BadRequest, PublicSurface.InvalidFormText), (withoutToken.StatusCode, await withoutToken.Content.ReadAsStringAsync()));
+        Assert.True(await UserExistsAsync(goneId));
+
+        // The list links every account but the owner's to its question; the question lives in the address.
+        var list = await owner.PageAsync("/admin/users");
+        Assert.True(list.Contains($"admin/users?delete={Uri.EscapeDataString(goneId)}") && list.Contains($"admin/users?delete={Uri.EscapeDataString(pendingId)}"));
+        Assert.True(!list.Contains($"admin/users?delete={Uri.EscapeDataString(ownerId)}") && list.Contains("Twoje konto"));
+        var question = await owner.PageAsync($"/admin/users?delete={Uri.EscapeDataString(goneId)}");
+        Assert.True(question.Contains("Usunąć konto gone@example.test? Znikną też jego profile (1)"), "no question");
+        Assert.True(!(await owner.PageAsync($"/admin/users?delete={Uri.EscapeDataString(ownerId)}")).Contains("Usunąć konto"));
+
+        // The owner's own account: refused even with a forged form.
+        Assert.Equal("/admin/users", Location(await owner.PostFormAsync("/admin/users/delete", question, null, new() { ["userId"] = ownerId })));
+        Assert.True(StatusText(await owner.PageAsync("/admin/users")).StartsWith("Konta właściciela nie można usunąć"));
+        Assert.True(await UserExistsAsync(ownerId));
+
+        // An active account: everything goes, the person gets an e-mail in their language, the event names nobody.
+        Assert.Equal("/admin/users", Location(await owner.PostFormAsync("/admin/users/delete", question, null, new() { ["userId"] = goneId })));
+        Assert.Equal("Konto gone@example.test usunięte (profile: 1). Ta osoba dostała e-mail.", StatusText(await owner.PageAsync("/admin/users")));
+        Assert.True(!await UserExistsAsync(goneId));
+        Assert.Equal(0, await WithService(async services => await services.GetRequiredService<AppDbContext>().Profiles.CountAsync(p => p.UserId == goneId)));
+        Assert.Equal("Your CinemaWatch account has been deleted", MailsTo("gone@example.test")[^1].Subject);
+
+        // A waiting account: the invitation is withdrawn without an e-mail and its link stops working.
+        var mails = app.Mail.Sent.Count;
+        var pendingQuestion = await owner.PageAsync($"/admin/users?delete={Uri.EscapeDataString(pendingId)}");
+        Assert.True(pendingQuestion.Contains("Wycofać zaproszenie dla never-came@example.test?"));
+        await owner.PostFormAsync("/admin/users/delete", pendingQuestion, null, new() { ["userId"] = pendingId });
+        Assert.Equal("Zaproszenie dla never-came@example.test wycofane.", StatusText(await owner.PageAsync("/admin/users")));
+        Assert.Equal(mails, app.Mail.Sent.Count);
+        Assert.True(!await UserExistsAsync(pendingId));
+        Assert.True((await app.CreateBrowser().PageAsync(invitationLink)).Contains("Link jest nieważny albo wygasł."));
+
+        var events = (await EventsAsync(ServiceEventKind.AccountDeleted)).Select(e => e.Message).ToList();
+        Assert.True(events.Contains("Account deleted by the owner (profiles: 1)") && events.Contains("Invitation withdrawn by the owner"));
+        Assert.True(events.All(m => !m.Contains('@') && !m.Contains(goneId) && !m.Contains(pendingId)));
+
+        // An unknown id: only a message.
+        await owner.PostFormAsync("/admin/users/delete", question, null, new() { ["userId"] = "no-such-account" });
+        Assert.Equal("Nie ma takiego konta.", StatusText(await owner.PageAsync("/admin/users")));
+
+        // The deleted person's session ends at the next check (every minute, not after 30); the other account is untouched.
+        Assert.Equal(HttpStatusCode.OK, (await gone.GetAsync("/")).StatusCode);
+        app.Time.Advance(TimeSpan.FromMinutes(2));
+        Assert.True(Location(await gone.GetAsync("/")).StartsWith("/Account/Login"));
+        Assert.Equal(HttpStatusCode.OK, (await member.GetAsync("/")).StatusCode);
     });
 }

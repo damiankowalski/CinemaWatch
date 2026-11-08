@@ -1,5 +1,6 @@
 @page "/Account/Manage/DeleteAccount"
 @inject UserManager<AppUser> UserManager
+@inject AccountService Accounts
 @inject SignInManager<AppUser> SignInManager
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<DeleteAccount> Logger
@@ -49,8 +50,8 @@
             return;
         }
 
-        // Later increments add profiles and history; they are removed with the account (cascade in the database).
-        var result = await UserManager.DeleteAsync(user);
+        // Profiles, notification state and history go with the account (cascades in the database); an event is recorded.
+        var result = await Accounts.DeleteOwnAsync(user);
         if (!result.Succeeded)
         {
             error = string.Join(" ", result.Errors.Select(e => e.Description));

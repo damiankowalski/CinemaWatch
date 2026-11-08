@@ -14,8 +14,18 @@ namespace CinemaWatch.Web;
 /// </summary>
 internal static class BehindProxy
 {
-    /// <summary>Address of the health check for the deployment and the container test; anonymous, no personal data.</summary>
+    /// <summary>
+    /// Address of the health check for the deployment and the container test; anonymous, no personal data. Answered
+    /// only inside the server: a request that came through Cloudflare carries its headers and gets 404 (docs/SAAS.md §9).
+    /// </summary>
     public const string HealthPath = "/healthz";
+
+    /// <summary>Headers Cloudflare adds to every request it passes on (a visitor cannot remove them).</summary>
+    private static readonly string[] CloudflareHeaders = ["CF-Connecting-IP", "CF-Ray"];
+
+    /// <summary>Whether the request came from outside, through Cloudflare and the tunnel.</summary>
+    public static bool CameThroughCloudflare(HttpRequest request) =>
+        CloudflareHeaders.Any(request.Headers.ContainsKey);
 
     public static IServiceCollection AddBehindProxy(this IServiceCollection services)
     {
@@ -31,10 +41,12 @@ internal static class BehindProxy
     /// the server; reveals nothing but that.
     /// </summary>
     public static void MapHealthCheck(this WebApplication app) =>
-        app.MapGet(HealthPath, async (AppDbContext db, CancellationToken cancellationToken) =>
-                await db.Database.CanConnectAsync(cancellationToken)
-                    ? Results.Text("ok")
-                    : Results.Text("database unavailable", statusCode: StatusCodes.Status503ServiceUnavailable))
+        app.MapGet(HealthPath, async (HttpRequest request, AppDbContext db, CancellationToken cancellationToken) =>
+                CameThroughCloudflare(request)
+                    ? Results.NotFound()
+                    : await db.Database.CanConnectAsync(cancellationToken)
+                        ? Results.Text("ok")
+                        : Results.Text("database unavailable", statusCode: StatusCodes.Status503ServiceUnavailable))
             .AllowAnonymous();
 
     /// <summary>

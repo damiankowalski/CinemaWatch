@@ -44,6 +44,8 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
 
     public RecordingHeartbeatClient HeartbeatClient { get; } = new();
 
+    public const int SignInAnswerMilliseconds = 40;
+
     public TestApp(string connectionString)
     {
         Directory.CreateDirectory(FakeFolder);
@@ -55,6 +57,8 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
         Environment.SetEnvironmentVariable("Saas__Poller__Source", "Fake");
         Environment.SetEnvironmentVariable("Saas__Poller__FakeDirectory", FakeFolder);
         Environment.SetEnvironmentVariable("Saas__Heartbeat__Url", HeartbeatUrl);
+        // Sign-in answers are padded to a fixed time (1 s on the server); short here, so the tests stay quick.
+        Environment.SetEnvironmentVariable("Saas__SignInAnswerMilliseconds", SignInAnswerMilliseconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

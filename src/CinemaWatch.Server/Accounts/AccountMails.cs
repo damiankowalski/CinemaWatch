@@ -27,6 +27,21 @@ public static class AccountMails
         T($"Link jest ważny {Hours(validFor)}. Jeśli to nie Ty, zignoruj tę wiadomość: obecne hasło dalej działa.",
           $"The link is valid for {Hours(validFor)}. If this was not you, ignore this message: your current password still works."));
 
+    /// <summary>To the person whose account the owner deleted (active accounts only; a withdrawn invitation gets nothing).</summary>
+    public static OutgoingMail AccountDeleted(string to)
+    {
+        var subject = T("Twoje konto CinemaWatch zostało usunięte", "Your CinemaWatch account has been deleted");
+        var what = T("Właściciel CinemaWatch usunął Twoje konto razem z profilami i historią powiadomień. Nie dostaniesz już powiadomień o zwolnionych miejscach.",
+                     "The owner of CinemaWatch has deleted your account together with its profiles and notification history. You will not get seat notifications any more.");
+        var backups = T("Zaszyfrowane kopie zapasowe bazy znikają po najwyżej 31 dniach.",
+                        "Encrypted database backups are gone after 31 days at most.");
+        var footer = T("Jeśli to pomyłka, skontaktuj się z osobą, która Cię zaprosiła. Na tę wiadomość nie trzeba odpowiadać.",
+                       "If this is a mistake, contact the person who invited you. There is no need to reply to this message.");
+        var text = $"{what}\n\n{backups}\n\n{footer}\n";
+        var html = new MailHtml().Paragraph(what).Paragraph(backups).Paragraph(footer).ToString();
+        return new OutgoingMail(to, subject, text, html);
+    }
+
     private static string Hours(TimeSpan span) =>
         Count((int)Math.Round(span.TotalHours), "godzinę", "godziny", "godzin", "hour", "hours");
 

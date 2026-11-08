@@ -32,6 +32,12 @@ public sealed class SaasOptions
     /// </summary>
     public bool MigrateDatabaseOnStart { get; set; }
 
+    /// <summary>
+    /// The sign-in form answers no faster than this (milliseconds), so the time of the answer does not tell whether an
+    /// address has an account, waits for activation or is locked (docs/SAAS.md §9). 0-5000; the tests use a short value.
+    /// </summary>
+    public int SignInAnswerMilliseconds { get; set; } = 1000;
+
     /// <summary>Whether <see cref="BaseUrl"/> is an https address: the public site is reached over HTTPS only.</summary>
     public bool UsesHttps =>
         Uri.TryCreate(BaseUrl, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;

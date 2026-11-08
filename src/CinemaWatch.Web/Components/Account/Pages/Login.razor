@@ -4,6 +4,7 @@
 @inject SignInManager<AppUser> SignInManager
 @inject UserManager<AppUser> UserManager
 @inject IdentityRedirectManager RedirectManager
+@inject IOptions<SaasOptions> Saas
 @inject ILogger<Login> Logger
 
 <PageTitle>@T("Logowanie", "Sign in") – CinemaWatch</PageTitle>
@@ -59,8 +60,12 @@
             return;
         }
 
-        // Five wrong passwords lock the account for 15 minutes (Program.cs).
+        // Five wrong passwords lock the account for 15 minutes (Program.cs). The answer takes the same time and, unless
+        // the sign-in succeeds, says the same thing for an unknown address, a waiting, a locked or an existing account
+        // (docs/SAAS.md §9).
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var result = await SignInManager.PasswordSignInAsync(Input.Email.Trim(), Input.Password, Input.RememberMe, lockoutOnFailure: true);
+        await PublicSurface.PadAnswerAsync(started, Saas.Value.SignInAnswerMilliseconds);
         if (result.Succeeded)
         {
             if (await UserManager.FindByEmailAsync(Input.Email.Trim()) is { } user)
@@ -68,14 +73,12 @@
             Logger.LogInformation("User signed in");
             RedirectManager.RedirectTo(ReturnUrl);
         }
-        else if (result.IsLockedOut)
-        {
-            Logger.LogWarning("Account locked out after failed sign-ins");
-            RedirectManager.RedirectTo("Account/Lockout");
-        }
         else
         {
-            error = T("Nieprawidłowy e-mail lub hasło.", "Incorrect e-mail or password.");
+            if (result.IsLockedOut)
+                Logger.LogWarning("Sign-in refused: the account is locked after failed sign-ins");
+            error = T("Nieprawidłowy e-mail lub hasło. Po 5 nieudanych próbach logowanie na to konto jest wstrzymane na 15 minut.",
+                      "Incorrect e-mail or password. After 5 failed attempts, signing in to the account is paused for 15 minutes.");
         }
     }
 

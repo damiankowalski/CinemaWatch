@@ -212,6 +212,12 @@ public enum ServiceEventKind
 
     /// <summary>The heartbeat (the external "dead man's switch") could not be reached.</summary>
     HeartbeatFailed,
+
+    /// <summary>An account was deleted (by the owner or by its user) or an invitation withdrawn; no address recorded.</summary>
+    AccountDeleted,
+
+    /// <summary>The daily limit of password help e-mails was reached (docs/SAAS.md §9).</summary>
+    AccountMailLimited,
 }
 
 /// <summary>

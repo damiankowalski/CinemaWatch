@@ -4,10 +4,11 @@
 > Order of trust when something disagrees: **repository code** > **this document** > chat history.
 > Keep it current: update *Status*, *Version history* and *Decision log* with every release or decision.
 >
-> Last updated: 7 November 2026 (desktop 1.4.0; SaaS stage 4 in progress: CinemaWatch runs on the VPS at
-> `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 behind Cloudflare Access, e-mail through Resend, heartbeat
-> alarm tested, daily encrypted backups to Backblaze B2 with a tested restore; SaaS 0.5.2; next: the first test with
-> invited people - plan in
+> Last updated: 8 November 2026 (desktop 1.4.0; SaaS stage 5 - the first test with invited people - runs since 7 Nov
+> 2026: CinemaWatch on the VPS at `staging-cinemawatch.damiankowalski.pl` behind Cloudflare Access, e-mail through
+> Resend, heartbeat alarm tested, daily encrypted backups to Backblaze B2 with a tested restore; SaaS 0.6.0-beta.1;
+> next: MVP 1 (wizard and hall map in the browser, decided 8 Nov 2026) together with desktop 1.5.0 (multi-select on
+> the hall map) - plan in
 > [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md)).
 
 ---
@@ -24,19 +25,27 @@ It only **reads** public seat information. It never logs in, never creates a car
 | Track | State | Notes |
 | --- | --- | --- |
 | Original PowerShell script | Done, kept in `scripts/CinemaWatch.ps1` | E-mail notifications via Gmail SMTP; the origin of the project |
-| **Desktop (Windows)** | **1.4.0 stable** - feature-complete for now | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
+| **Desktop (Windows)** | **1.4.0 stable**; 1.5.0 planned (multi-select on the hall map, §2.1) | WPF, .NET 10; repo `github.com/damiankowalski/CinemaWatch` (MIT) |
 | Android | Planned - concept agreed, nothing built | "Proxy" that checks profiles exported by the desktop app |
-| SaaS (web) | Stage 4 in progress - MVP 0 complete on the PC (accounts by invitation, profile import, poller with e-mails, operator's panel, heartbeat); risk test R1 closed green on 5 Nov 2026; SaaS 0.5.0: container image (`src/CinemaWatch.Web/Dockerfile`), `infra/compose/`, container test in CI, images to GHCR on `web-v*` tags; accounts ready: e-mail through Resend, Cloudflare tunnel and Access, Healthchecks.io; the VPS configured by Ansible (`infra/ansible`); running on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 (`infra/compose/deploy.sh`). daily encrypted backups to Backblaze B2 (`infra/backup`), restore tested. Next: a first test with invited people (stage 5) and MVP 1 (wizard and hall map in the browser) | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
+| SaaS (web) | Stage 5 (first test with invited people) since 7 Nov 2026; SaaS 0.6.0-beta.1 (the owner deletes accounts, hardened public pages). Stage 4 done - MVP 0 complete on the PC (accounts by invitation, profile import, poller with e-mails, operator's panel, heartbeat); risk test R1 closed green on 5 Nov 2026; SaaS 0.5.0: container image (`src/CinemaWatch.Web/Dockerfile`), `infra/compose/`, container test in CI, images to GHCR on `web-v*` tags; accounts ready: e-mail through Resend, Cloudflare tunnel and Access, Healthchecks.io; the VPS configured by Ansible (`infra/ansible`); running on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026 (`infra/compose/deploy.sh`). daily encrypted backups to Backblaze B2 (`infra/backup`), restore tested. Next: MVP 1 (wizard and hall map in the browser; profile import stays) | Private tool for the owner and invited friends; plan in [`docs/SAAS.md`](SAAS.md), infrastructure in [`docs/SAAS_INFRA.md`](SAAS_INFRA.md) |
 
 ---
 
 ## 2. Roadmap and product tracks
 
-### 2.1 Desktop - done for now (1.4.0)
+### 2.1 Desktop - 1.4.0 stable, 1.5.0 planned
 
 Wizard (city & dates → film & screenings → hall map → summary), clickable steps, profile tabs, check now / check
 all, background checks via Windows Task Scheduler with Windows notifications, Polish/English UI, six IMAX cinemas.
 Desktop has priority; work on other tracks must not take ideas away from it.
+
+Planned **1.5.0** (decided 8 Nov 2026, built together with the SaaS hall map - [`docs/SAAS.md`](SAAS.md) §5.2, stage
+6.4.1): multi-select on the hall map. A click toggles one seat as today; **painting** - press on a seat and drag, the
+first seat decides select or deselect; **rectangle** - press on the background and drag, the seats whose centre lies
+inside are all selected, or all deselected when every one already was (the row-label rule). Painting and the
+rectangle skip wheelchair spaces; Esc cancels a gesture; no modifier keys. The rules live once in
+`CinemaWatch.Core`; a shared case file (`tests/Fixtures/seat-selection-cases.json`) keeps the desktop and the site
+behaving the same.
 
 Backlog ideas (not planned yet):
 - Other technologies (2D, 3D, 4DX) and the remaining Cinema City cinemas - the data model is ready.
@@ -376,6 +385,8 @@ Seat names for the text ("row 8: 12, 13") come from the hall layout (`n` labels;
 | Oct 2026 | Mobile = profile-consuming proxy, no seat map, no backend yet | Smallest useful mobile scope; desktop keeps priority |
 | Oct 2026 | SaaS in this repository; its plan and decision log in `docs/SAAS.md` | Reuse `CinemaWatch.Core` directly; one place for SaaS details |
 | Oct 2026 | SaaS MVP 0 = server-side profile proxy; risk test from a datacenter IP first | Biggest risk before the biggest UI work |
+| Nov 2026 | Multi-select on the hall map (painting and a rectangle, no modifier keys) in 1.5.0, built together with the SaaS map; rules in Core, one shared case file tested in C# and JavaScript | Fewer clicks for blocks of seats; one behaviour in both clients, guarded by CI |
+| Nov 2026 | The SaaS wizard copies the desktop wizard (steps, date ranges, map geometry) but not `CinemaWatch.ViewModels` | One product in two places; the view models are WPF-shaped, the logic is in Core |
 
 ---
 

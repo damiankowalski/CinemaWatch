@@ -221,6 +221,9 @@ button.link {
     cursor: pointer;
 }
 
+/* "Delete account" in the owner's list: a link that opens the question, in the danger colour. */
+a.link.danger { color: var(--danger); text-decoration-color: var(--danger); }
+
 form.inline { display: inline; }
 
 .actions {

@@ -9,11 +9,15 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 7 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
+> Last updated: 8 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
 > skipped on purpose (§11). CinemaWatch runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026
 > (now 0.5.2), behind Cloudflare Access; e-mail through Resend; heartbeat and backup monitored by Healthchecks.io; daily
 > encrypted backups to Backblaze B2, restore tested; testers invited, the two-week test runs since 7 Nov 2026. Decided
-> (§9): access model A, no public account request form, the owner deletes accounts; next: SaaS 0.6.0 (§7, 5.2-5.5).
+> (§9): no public account request form; the owner deletes accounts; the switch to access model A postponed (§11),
+> Access stays in front of the whole site. SaaS 0.6.0-beta.1 runs on staging since 7-8 Nov 2026 (account deletion,
+> hardened public pages); stable 0.6.0 on or after 13 Nov with `cloudflared` 2026.10.7. Next: MVP 1 (stage 6),
+> **planned and decided on 8 Nov 2026** (§5.2, §7, §9): the wizard and hall map as close to the desktop app as possible,
+> with multi-select on the map built for the desktop (1.5.0) and the site together; code starts after the 0.6.0 merge.
 
 ---
 
@@ -192,6 +196,8 @@ safety net against application bugs.
   the Development environment.
 - Adaptive interval (proposal, not built): screenings weeks away less often, the last 48 hours more often; never more
   often than the minimum allowed for the profile.
+- Wizard requests (MVP 1, decided 8 Nov 2026, not built yet): a budget of their own next to the poller's (§5.2), so the
+  wizard never slows the poller; the same request guard (block, pause, request log, honest User-Agent).
 
 ### 4.4 Hosting and infrastructure
 
@@ -318,10 +324,43 @@ no 403/429 blocks, e-mails land in the inbox (not spam) and requests stay within
 
 ### 5.2 MVP 1 - wizard and hall map in the browser
 
-Steps as in the desktop app (city & dates → film & screenings → hall map → summary). The hall map is drawn as SVG:
-the layout's `cx/cy` (+ group offset) and `seatRadius` map directly to SVG circles (KB §3.3). The repertoire and
-layouts are shared by all users, so a server-side cache saves requests. Desktop and SaaS profiles stay
-interchangeable.
+Goal: the result as close to the desktop app as possible (decided 8 Nov 2026, §9). Profile import stays as it is.
+
+- **Steps** as in the desktop app: city & dates → film & screenings → hall map → summary. Clickable steps: back is
+  instant, forward runs the same checks and loading as *Next*. Date ranges as in the desktop: 31 days for one city,
+  14 days for all six. Cities and cinemas from `Locations` (no request). The suggested profile name, the minimum of
+  adjacent seats, copying a selection to screenings with the same layout and the row labels that toggle a whole row
+  (wheelchair spaces excluded) work as in the desktop app.
+- **State between steps** travels in the form (hidden fields), not in the database: no migration. The server checks
+  everything again when the profile is saved.
+- **Saving** builds a format-1 profile (KB §5) and runs it through the same validation and limits as an import, so a
+  profile made on the site equals an imported one (list, check now, download for the desktop app). **Editing** any
+  profile (imported ones too) opens the wizard; the notification state stays for screenings that did not change.
+- **Cinema City data on demand** (only for signed-in people, read-only): a cache in the server's memory shared by all
+  accounts - repertoire per cinema and day 30 minutes for today and tomorrow, 3 hours for later days; screening
+  details 1 day; free seats for the map from the poller's latest result when younger than 10 minutes, otherwise
+  fetched; layouts from `seat_plans`. Identical requests running at the same time go out once. A **wizard budget**
+  of its own (proposed 120 requests an hour, at most 90 saved up - enough for the largest search, 6 cinemas × 14 days
+  = 84 requests) next to the poller's 120; limits per account: one loading at a time, at most 90 requests an hour that
+  miss the cache. Values in configuration and changeable in the operator's panel; final numbers after the stage 5
+  test (§10). Requests one after the other, 1 s apart; loading runs in the background and the page shows its progress
+  (Cloudflare ends a proxied request after 100 s). A block, the owner's pause or a used-up budget: nothing is sent and
+  the page says when to try again; no queue.
+- **Hall map:** HTML checkboxes drawn as circles in a scaled container, positioned from the layout's `cx/cy` (+ group
+  offset) and `seatRadius` (KB §3.3), not SVG (an SVG circle cannot be a form field). The same geometry as the
+  desktop map (row numbers in two edge columns, the screen bar). A small own script (`wwwroot/seatmap.js`, no
+  libraries) adds the row toggle without a reload, a live counter and multi-select; without JavaScript the map still
+  works through the form. `CinemaWatch.ViewModels` is not used on the site (WPF-shaped); the logic comes from
+  `CinemaWatch.Core`.
+- **Multi-select** (the desktop app gets the same in 1.5.0): a click toggles one seat (also wheelchair spaces);
+  **painting** - press on a seat and drag: the first seat decides whether the seats passed over are selected or
+  deselected; **rectangle** - press on the background and drag: the seats whose centre lies inside are all selected,
+  or all deselected when every one of them already was (the row-label rule). Painting and the rectangle skip
+  wheelchair spaces. Esc during a gesture restores the state from before it. No modifier keys (a click already adds
+  to the selection). On a touch screen a tap toggles one seat and dragging scrolls the page; painting and the
+  rectangle work with a mouse or a pen. The rules live once in `CinemaWatch.Core` (reference implementation); the
+  script mirrors them; one file of cases (`tests/Fixtures/seat-selection-cases.json`) is run by the C# tests and by a
+  JavaScript test in CI (`node --test`, no packages).
 
 ---
 
@@ -336,7 +375,7 @@ interchangeable.
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
-  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.5.2). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.6.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
   database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
@@ -494,7 +533,8 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
 - [x] 5.1 Documents (7 Nov 2026): this list, the open questions (§10), the backlog (§11); in `SAAS_INFRA.md` the lesson
       about the Access policy (testers invited in the app but missing from the policy got no PIN; a duplicate policy
       appeared while editing) and runbook §4.22 made more precise.
-- [ ] 5.2 Access model: **decided A** (7 Nov 2026, §9): Cloudflare Access only on `/admin`; everything else behind the
+- [x] 5.2 Access model: **decided A** (7 Nov 2026, §9), **switch postponed** on 8 Nov 2026 (§9, §11): step 1 shipped in
+      SaaS 0.6.0, steps 3-4 (Cloudflare rule, removing the Access application of the whole host) wait. Original plan: Cloudflare Access only on `/admin`; everything else behind the
       app's own sign-in; accounts only by the owner's invitation. Rule: a visitor without an account can cause no cost
       and no damage (§9). Order: (1) SaaS 0.6.0 hardens everything a visitor without an account can reach - password
       help e-mails limited per account and per day and sent in the background, sign-in and password help answer in the
@@ -502,11 +542,15 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
       `robots.txt` and `noindex`, a test that anonymous requests write nothing to the database; (2) deploy and test;
       (3) one Cloudflare rate limiting rule on the account forms, `curl` checks (`SAAS_INFRA.md` §4.21); (4) only then
       remove the Access application of the whole host; `/admin` keeps its own. Runbooks §2.4, §4.21, §4.22 updated.
-- [ ] 5.3 The owner deletes an account in `/admin/users` (SaaS 0.6.0; decided 7 Nov 2026, §9): with all its data
+      Step 1 **built in SaaS 0.6.0** (7 Nov 2026; also: the sign-in answer is the same for unknown, waiting and locked
+      accounts and the lockout page is gone; refused forms get a plain 400). Steps 3-4: `SAAS_INFRA.md` §4.28 (kept as
+      a ready runbook for later).
+- [x] 5.3 The owner deletes an account in `/admin/users` (SaaS 0.6.0; decided 7 Nov 2026, §9): with all its data
       (profiles, notification state, history), after a confirmation, enforced on the server (owner policy,
       antiforgery, never the owner's own account); a pending invitation is withdrawn the same way. The person gets a
       short e-mail (active accounts only); the event names no e-mail address; sessions are re-checked every minute,
-      so a deleted account is signed out at once. Runbook §4.22 ("remove a tester") then uses it.
+      so a deleted account is signed out at once. Runbook §4.22 ("remove a tester") then uses it. **Done:** 0.6.0-beta.1
+      deployed on staging and checked by the owner in the browser (by 8 Nov 2026).
 - [x] 5.4 "Request an account": **dropped** (7 Nov 2026, §9). New accounts come only from the owner's invitation by
       e-mail; there is no public form.
 - [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). Part of SaaS
@@ -527,6 +571,32 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
       the way back for each. Safety first: no component left unpatched for long, no update without a way back.
 
 ### Stage 6 - MVP 1 (§5.2)
+Planned in its own chat while the stage 5 test runs; decided 8 Nov 2026 (§9). Code on branches from `main` once
+0.6.0 is merged (13 Nov 2026). Profile import stays as it is. Two tracks run side by side: the desktop app gets
+multi-select on the hall map (1.5.0) and the site's map is built with the same rules from its first version.
+- [x] 6.1 Cinema City data on demand (decided 8 Nov 2026): shared cache in memory, a wizard budget of its own next to
+      the poller's, limits per account, loading in the background with progress, desktop date ranges (§5.2). Final
+      numbers after the stage 5 test (§10).
+- [x] 6.2 Interactivity (decided 8 Nov 2026): static pages plus a small own script for the map; the map as HTML
+      checkboxes, not SVG; no interactive Blazor; `CinemaWatch.ViewModels` not reused on the site (§5.2, §9).
+- [x] 6.3 The wizard (decided 8 Nov 2026): the four desktop steps, clickable; state in the form; saving through the
+      import's validation; editing of every profile in MVP 1 (§5.2).
+- [ ] 6.4 Increments (each with tests; the desktop tests keep passing; a short plan before each):
+  - [ ] 6.4.1 **Desktop 1.5.0 - multi-select** (`feature/seat-multiselect`): the rules in `CinemaWatch.Core` with
+        tests and the shared case file; gestures in `HallMapViewModel` and the WPF map (mouse capture, the rectangle
+        drawn on the map). XAML cannot be built in Claude's sandbox: the owner builds and tests the window. Beta
+        (draft release) → owner's tests → `v1.5.0`; release notes, README, KB.
+  - [ ] 6.4.2 **Wizard data** (`feature/saas-wizard`, SaaS 0.7.0; does not wait for 6.4.1): cache, single flight,
+        the wizard budget and the limits per account, background loading jobs, the same request guard; the request
+        log and the operator's panel tell wizard requests from poller requests and show the new settings; the
+        development fake learns the repertoire (captured fixtures). No pages yet.
+  - [ ] 6.4.3 Steps 1-2: city & dates, film & screenings, the progress page, clickable steps, state in the form.
+  - [ ] 6.4.4 Step 3, the hall map: geometry as in the desktop map, row labels, copying between screenings with the
+        same layout, `seatmap.js` with the rules of 6.4.1 (once merged) and its `node --test` step in CI.
+  - [ ] 6.4.5 Step 4, saving and editing: the import's validation and limits, the notification state kept for
+        unchanged screenings, a test that a profile made on the site reads in the desktop app's `WatchProfile`.
+  - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's and testers' checks, stable `web-v0.7.0`; documents
+        (§7, §9, §10, `SAAS_INFRA.md` state and work log).
 
 ### After the MVP (order flexible)
 Plans and limits → Stripe test mode → OIDC provider (Keycloak) → queue between poller and notifier → Kubernetes (k3s)
@@ -731,6 +801,16 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | `/healthz` answers only inside the server (requests through the tunnel get 404); `/admin` answers only in lower case | `deploy.sh` and the container test call it directly; outside it only costs a database query. ASP.NET ignores case in paths; other Cloudflare products match paths case-sensitively and Access is not documented either way: `/ADMIN` must not slip past the admin application |
 | Nov 2026 | No exception for `cloudflared` 2026.10.7: it comes with SaaS 0.6.0, tagged on or after 13 Nov 2026 | Its fixes touch nothing we use (metrics server, libraries, HTTP/2 fallback); `cloudflared` sees every request decrypted and holds the tunnel token, the worst place for a bad release; waiting six days also brings the .NET patch of 10 Nov 2026 into the same image |
 | Nov 2026 | The stage 5 test starts at once (7 Nov 2026), alongside 0.6.0 | 0.6.0 changes accounts and public pages, not the poller, so the measurements are not disturbed |
+| Nov 2026 | Sign-in: unless it succeeds, the same message for an unknown address, a waiting, a locked or an existing account (it mentions the 15-minute pause); the lockout page removed; the answer padded to `Saas:SignInAnswerMilliseconds` (1 s) | The lockout page and the time Identity needs (no hash for an unknown address, none for a locked or waiting one) told who has an account |
+| Nov 2026 | Password help through a bounded in-memory queue (100, new requests dropped when full) and limits in memory (1 per account per 15 min, 20 a day); no table | The page does no lookup, so its answer is the same and as fast for every address; one server, so memory is enough and a restart only resets the counters; no migration, so no restore test for 0.6.0 |
+| Nov 2026 | A form posted without a valid antiforgery token gets a short plain-text 400 before anything reads it | Reading such a form threw, and the error page, run again for the same post, threw too: an unhandled 500 (found by the 0.6.0 tests; affected every form) |
+| Nov 2026 | The switch to access model A is **postponed** (owner's call, 8 Nov 2026): Access keeps guarding the whole site; a tester is still added in the Access policy and invited in the app (`SAAS_INFRA.md` §4.22); the hardening of 0.6.0 stays | Too much new at once (rate limiting rules, Zero Trust applications) next to the test; the current state is safe, only less convenient. Runbook `SAAS_INFRA.md` §4.28 is kept for later (§11) |
+| Nov 2026 | The privacy notice names Backblaze B2 (encrypted backups, 31 days) and deletion by the owner; the Access gate is described for the owner's pages, and for the whole site only while testing | The backups of stage 4.5 were missing from the notice; model A changes who meets the gate |
+| Nov 2026 | MVP 1 (stage 6) as close to the desktop app as possible: the same four clickable steps, the same date ranges (31 days / 14 for all cities), editing of every profile, saving through the import's validation | One product in two places; a profile made on the site must behave like an imported one and open in the desktop app |
+| Nov 2026 | Wizard data: a cache in memory shared by all accounts (repertoire 30 min near / 3 h later, details 1 day, free seats from the poller's result up to 10 min), a wizard budget of its own (proposed 120 an hour, 90 saved up) next to the poller's, one loading and 90 cache misses an hour per account, background loading with progress | The largest desktop search (84 requests) must fit without waiting, without slowing the poller; the repertoire and layouts are the same for everybody; Cloudflare ends a proxied request after 100 s. Numbers confirmed after the stage 5 test |
+| Nov 2026 | Static pages plus a small own script for the hall map (HTML checkboxes drawn as circles), not SVG and not interactive Blazor; `CinemaWatch.ViewModels` not reused on the site | Works without JavaScript and with a keyboard; no SignalR circuit that a deployment or the nightly reboot would cut; the view models are WPF-shaped, the logic lives in Core |
+| Nov 2026 | Wizard state in the form, not in the database | No migration and no restore test; the server validates everything when saving anyway |
+| Nov 2026 | Multi-select on the hall map for the desktop app (1.5.0) and the site together: painting (press on a seat and drag), a rectangle from the background with the row-label rule, no modifier keys, wheelchair spaces only by a single click; the rules once in Core, mirrored by the script, one shared case file tested in C# and in JavaScript | Fewer clicks for whole blocks of seats; the same behaviour in both clients, guarded by CI instead of by memory; cheaper to build into the new web map than to add later |
 
 ---
 
@@ -741,7 +821,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Check interval | MVP 0: the profile's interval with a server minimum of 10 minutes (decided Nov 2026); the adaptive rules (§4.3) tuned with the stage 4 data |
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
-| Reuse of `CinemaWatch.ViewModels` in the browser | Open until MVP 1 (wizard and hall map need interactivity; MVP 0 pages are static) |
+| Wizard budget numbers (stage 6) | Proposed: 120 requests an hour, 90 saved up, 90 cache misses an hour per account (§5.2); confirm or change with the stage 5 numbers (requests per hour against 120) after 21 Nov 2026. (Reuse of `CinemaWatch.ViewModels` closed 8 Nov 2026: not on the site, §9) |
 | Updates of every component (stage 5.8) | Some parts update themselves (Ubuntu packages and kernel with the 03:30 reboot, Docker from its repository), others only when we deploy: PostgreSQL minor versions (pulled by `deploy.sh` only), .NET and the base image (only when a tag builds a new image), NuGet packages, `cloudflared` (pinned, two-week rule), CI tools. To decide: a regular cadence (e.g. a monthly release after the .NET patch Tuesday), how to notice security fixes, checks and the way back |
 
 ---
@@ -772,6 +852,11 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
   `deploy.sh` (`command=` in `authorized_keys`), never the `docker` group (equals root); the key in GitHub Secrets.
 - **Private repository:** the server clones the public repository without credentials (`deploy.sh`, Ansible). If the
   repository ever becomes private, the server needs a read-only deploy key for this repository only.
+- **Access model A** (postponed 8 Nov 2026, §9): today two gates stand in front of the site - Cloudflare Access (a
+  one-time PIN by e-mail) and the app's own password - so a tester is added in two places. Model A removes the
+  Access gate for everything except the owner's `/admin`, so a tester is only invited in the app; one Cloudflare rate
+  limiting rule then stops a single IP address from trying the account forms more than 10 times in 10 seconds. The
+  app is ready for it (SaaS 0.6.0); the steps, the checks and the way back are in `SAAS_INFRA.md` §4.28.
 - **Turnstile on the sign-in and password-help forms** only if the rate limiting rule and the app's own limits prove
   not enough; it means a third-party script and a secret key on the server. (A public account request form was
   dropped for good, §9.)
