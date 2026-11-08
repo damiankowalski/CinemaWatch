@@ -584,7 +584,7 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
 - [x] 6.3 The wizard (decided 8 Nov 2026): the four desktop steps, clickable; state in the form; saving through the
       import's validation; editing of every profile in MVP 1 (§5.2).
 - [ ] 6.4 Increments (each with tests; the desktop tests keep passing; a short plan before each):
-  - [ ] 6.4.1 **Desktop 1.5.0 - multi-select** (`feature/seat-multiselect`): the rules in `CinemaWatch.Core` with
+  - [x] 6.4.1 **Desktop 1.5.0 - multi-select** (done: `v1.5.0`) (`feature/seat-multiselect`): the rules in `CinemaWatch.Core` with
         tests and the shared case file; gestures in `HallMapViewModel` and the WPF map (mouse capture, the rectangle
         drawn on the map). XAML cannot be built in Claude's sandbox: the owner builds and tests the window. Beta
         (draft release) → owner's tests → `v1.5.0`; release notes, README, KB.

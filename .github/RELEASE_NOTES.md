@@ -1,6 +1,4 @@
-## CinemaWatch 1.5.0 beta 1
-
-> **Pre-release.** For testing multi-select on the hall map - the stable version is still 1.4.0.
+## CinemaWatch 1.5.0
 
 - **Multi-select on the hall map** - fewer clicks for blocks of seats, no modifier keys:
   - **Painting:** press on a seat and drag. The first seat decides: if it was not watched, every seat you pass over
