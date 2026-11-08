@@ -10,11 +10,11 @@
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 7 November 2026 - stage 4 done (4.6 skipped on purpose): CinemaWatch runs on the VPS behind Cloudflare
+> Last updated: 8 November 2026 - stage 4 done (4.6 skipped on purpose): CinemaWatch runs on the VPS behind Cloudflare
 > Tunnel and Access since 6 Nov 2026, now 0.5.2; encrypted daily database backup to Backblaze B2 (EU Central), restore
 > tested (§1.8). Stage 5 started: testers added to the Access policy and invited in the app (§3, §4.22); the two-week
-> test runs since 7 Nov 2026 (§4.27). Access model A decided ([`SAAS.md`](SAAS.md) §9): Access for the whole host goes
-> after SaaS 0.6.0 (built 7 Nov 2026; switch: §4.28).
+> test runs since 7 Nov 2026 (§4.27); SaaS 0.6.0-beta.1 deployed 7-8 Nov. Access keeps guarding the whole host: the
+> switch to model A is postponed ([`SAAS.md`](SAAS.md) §9, §11; ready runbook §4.28).
 
 ---
 
@@ -34,7 +34,7 @@
 | DNSSEC | On since 31 Oct 2026: Cloudflare signs the zone; DS at the registry with key tag 2371, algorithm 13, digest type 2 |
 | Cloudflare zone extras | AI crawler policy at defaults (allow); Bot Preference Sync on (robots.txt) - irrelevant until a site exists |
 | Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026; reinstalled on 6 Nov 2026 and configured by `infra/ansible` (§1.3); runs the app's containers since 6 Nov 2026 |
-| Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch since 6 Nov 2026 (0.5.2 since 7 Nov), behind Cloudflare Access (§1.6) and the app's own sign-in |
+| Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch since 6 Nov 2026 (0.6.0-beta.1 since 7-8 Nov), behind Cloudflare Access (§1.6) and the app's own sign-in |
 | E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
 | Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1`, `0.5.2` (deployed), with `sha-<commit>` tags |
 | Heartbeat monitor | Healthchecks.io, checks `cinemawatch-staging` (§1.7; the alarm by e-mail tested on 7 Nov 2026) and `cinemawatch-backup` (§1.8) |
@@ -105,7 +105,7 @@ address, not an address on the new domain: losing the domain must not lock the o
 | App folder | `/opt/cinemawatch` (root, `0750`): `compose.yaml` (copied from the deployed tag), `.env` (root, `600`; §4.23), `backups/` (root, `0700`; a `pg_dump` before every deployment, the newest 10; `daily/` the newest 7 encrypted daily backups) |
 | Backup job | `/usr/local/sbin/cinemawatch-backup` (from `infra/backup/backup.sh`), `cinemawatch-backup.service` + `.timer` (02:30 UTC, up to 5 min random delay, `Persistent`); config `/etc/cinemawatch/backup.env` (root, `600`); log: `journalctl -u cinemawatch-backup.service` (§1.8, §4.25) |
 | Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9); after the reinstall with the new password - test it once |
-| Our services | Since 6 Nov 2026 the containers of `infra/compose/compose.yaml`, project `cinemawatch`: `postgres` (18), `web` (0.5.2 since 7 Nov), `cloudflared` (2026.10.3); deployed with `deploy.sh` (§4.24). Memory on 7 Nov: web 222 MiB, postgres 38 MiB, cloudflared 16 MiB. `CinemaWatch.Probe` ran 2-6 Nov 2026 and went with the reinstall (§1.4) |
+| Our services | Since 6 Nov 2026 the containers of `infra/compose/compose.yaml`, project `cinemawatch`: `postgres` (18), `web` (0.6.0-beta.1 since 7-8 Nov), `cloudflared` (2026.10.3); deployed with `deploy.sh` (§4.24). Memory on 7 Nov: web 222 MiB, postgres 38 MiB, cloudflared 16 MiB. `CinemaWatch.Probe` ran 2-6 Nov 2026 and went with the reinstall (§1.4) |
 
 ### 1.4 CinemaWatch.Probe (stage 2, risk test R1)
 
@@ -524,6 +524,10 @@ Browser --HTTPS--> Cloudflare (WAW)
    `/admin` only in lower case, `/healthz` only inside the server, `robots.txt` and `noindex`, refused forms a plain
    400); the privacy notice names Backblaze B2. No database migration. Beta on staging first; the stable tag on or
    after 13 Nov 2026 with `cloudflared` 2026.10.7; then §4.28.
+6. **0.6.0-beta.1 deployed** (7-8 Nov 2026, §4.24) and checked by the owner in the browser: account deletion, password
+   help, the sign-in message. **The switch to model A (§4.28) postponed** on 8 Nov 2026: Access keeps guarding the whole
+   host, testers are still added as in §4.22. While preparing it: the rate limiting rules of the Free plan may only use
+   the *URI Path* field (host, method and functions such as `lower()` need higher plans); §4.28 step 2 corrected.
 
 ---
 
@@ -1264,26 +1268,22 @@ df -h /
 Expected: few error lines (read them: `cw logs --since 168h web 2>&1 | grep -iE 'fail|error|exception' | tail -20`),
 about 300 MiB for the three containers, the disk far from full. Nothing here changes anything on the server.
 
-### 4.28 Switch to access model A (stage 5.2)
+### 4.28 Switch to access model A (stage 5.2) - not done, kept for later
 
+**Postponed on 8 Nov 2026** ([`SAAS.md`](SAAS.md) §9, §11): nothing below has been done; Access guards the whole host.
 Access stops guarding the whole host and keeps guarding `/admin` (owner only); the app's own sign-in guards the rest
 ([`SAAS.md`](SAAS.md) §9). **Only after** SaaS 0.6.0 (stable) is deployed (§4.24) and its pages work on staging. Each
 step says how to check it; the way back is at the end. Nothing here touches the server.
 
 1. **Before - Windows (PowerShell):** run §4.21 and note the application id (`kid=…`) for `/admin`. Expected: two
    different ids for `/` and `/admin`.
-2. **Rate limiting rule - Cloudflare dashboard:** the domain `damiankowalski.pl` → *Security → WAF → Rate limiting
-   rules* → *Create rule*. Name `CinemaWatch account forms`. *Edit expression*:
-
-   ```text
-   (http.host eq "staging-cinemawatch.damiankowalski.pl" and http.request.method eq "POST" and starts_with(lower(http.request.uri.path), "/account/"))
-   ```
-
-   Characteristics: IP (the only one on Free). When rate exceeds: **5** requests per **10 seconds**; action *Block*;
-   duration 10 seconds (fixed on Free). Deploy. If the Free editor refuses a field or `lower()`, build the simplest
-   rule it allows: *URI Path* *starts with* `/Account/`, **10** requests per 10 seconds (all methods, so a bit more
-   room for normal clicking); the app's own limits stay the real protection. Why: one IP cannot try passwords or
-   password help faster than this; the rule costs nothing and touches no other path.
+2. **Rate limiting rule - Cloudflare dashboard:** the domain `damiankowalski.pl` → *Security → Security rules* (older
+   layout: *WAF → Rate limiting rules*) → *Create rule* → *Rate limiting rule*. Name `CinemaWatch account forms`. The
+   Free plan allows only the *URI Path* field (no host, no method, no functions): condition *URI Path* *starts with*
+   `/Account/` **or** *URI Path* *starts with* `/account/`. Counted per IP (the only choice on Free): **10** requests
+   per **10 seconds** (all methods, so room for normal clicking); action *Block*; duration 10 seconds (fixed on Free).
+   Deploy. The rule covers the whole zone, but only CinemaWatch has `/Account/` paths; other spellings of the path
+   escape it, and the app's own limits stay the real protection. Undo: switch the rule off or delete it.
 3. **Remove the host-wide Access application:** Zero Trust → *Access controls → Applications* → `CinemaWatch staging`
    (the whole host, **not** `CinemaWatch staging admin`) → *Delete*. Keep the policy `Owner and testers` for a week
    (the way back needs it), then delete it under *Access controls → Policies*: the testers' addresses then leave
@@ -1313,8 +1313,8 @@ Applications* → *Add an application* → *Self-hosted* → name `CinemaWatch s
 
 Stage 5 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- Stage 5 ([`SAAS.md`](SAAS.md) §7): SaaS 0.6.0 (built 7 Nov 2026) as a beta on staging (§4.24); the stable tag on or
-  after 13 Nov 2026 with `cloudflared` 2026.10.7; then the switch to model A (§4.28) and §1.6, §2.4 rewritten for it.
+- Stage 5 ([`SAAS.md`](SAAS.md) §7): the stable SaaS 0.6.0 on or after 13 Nov 2026 with `cloudflared` 2026.10.7,
+  deployed with §4.24; the test runs until about 21 Nov (§4.27). The switch to model A (§4.28) is postponed.
 - Stage 5.8: an inventory of everything that needs updates and a runbook for it.
 - Restore test again in February 2027 (§4.26).
 - 4.6 (deployment from GitHub Actions) was skipped; it stays in the backlog ([`SAAS.md`](SAAS.md) §11).

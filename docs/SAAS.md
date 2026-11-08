@@ -9,13 +9,14 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> Last updated: 7 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
+> Last updated: 8 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
 > skipped on purpose (§11). CinemaWatch runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026
 > (now 0.5.2), behind Cloudflare Access; e-mail through Resend; heartbeat and backup monitored by Healthchecks.io; daily
 > encrypted backups to Backblaze B2, restore tested; testers invited, the two-week test runs since 7 Nov 2026. Decided
-> (§9): access model A, no public account request form, the owner deletes accounts. SaaS 0.6.0 built (7 Nov 2026):
-> hardened public pages and account deletion; beta on staging, stable on or after 13 Nov with `cloudflared` 2026.10.7,
-> then the switch to model A (`SAAS_INFRA.md` §4.28).
+> (§9): no public account request form; the owner deletes accounts; the switch to access model A postponed (§11),
+> Access stays in front of the whole site. SaaS 0.6.0-beta.1 runs on staging since 7-8 Nov 2026 (account deletion,
+> hardened public pages); stable 0.6.0 on or after 13 Nov with `cloudflared` 2026.10.7. Next: MVP 1 (stage 6),
+> planned in its own chat while the test runs.
 
 ---
 
@@ -338,7 +339,7 @@ interchangeable.
   behaviour unintentionally.
 - Branches `feature/saas-<name>`; the same Squash-and-merge flow as the desktop (KB §7.1).
 - **Separate versioning:** the root `Directory.Build.props` holds the desktop version; SaaS projects set their own
-  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.5.2). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
+  `<Version>` in the project file (`CinemaWatch.Server` and `CinemaWatch.Web` 0.6.0). Tags `web-vX.Y.Z` do not match the desktop `release.yml`
   filter `v*`, so no desktop release is created by mistake.
 - CI: the Windows job (tests + desktop build) stays and also runs the probe tests and the SaaS tests without a
   database; the `linux` job runs the shared tests, the probe tests and all SaaS tests on `ubuntu-26.04` (the server's
@@ -496,7 +497,8 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
 - [x] 5.1 Documents (7 Nov 2026): this list, the open questions (§10), the backlog (§11); in `SAAS_INFRA.md` the lesson
       about the Access policy (testers invited in the app but missing from the policy got no PIN; a duplicate policy
       appeared while editing) and runbook §4.22 made more precise.
-- [ ] 5.2 Access model: **decided A** (7 Nov 2026, §9): Cloudflare Access only on `/admin`; everything else behind the
+- [x] 5.2 Access model: **decided A** (7 Nov 2026, §9), **switch postponed** on 8 Nov 2026 (§9, §11): step 1 shipped in
+      SaaS 0.6.0, steps 3-4 (Cloudflare rule, removing the Access application of the whole host) wait. Original plan: Cloudflare Access only on `/admin`; everything else behind the
       app's own sign-in; accounts only by the owner's invitation. Rule: a visitor without an account can cause no cost
       and no damage (§9). Order: (1) SaaS 0.6.0 hardens everything a visitor without an account can reach - password
       help e-mails limited per account and per day and sent in the background, sign-in and password help answer in the
@@ -505,13 +507,14 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
       (3) one Cloudflare rate limiting rule on the account forms, `curl` checks (`SAAS_INFRA.md` §4.21); (4) only then
       remove the Access application of the whole host; `/admin` keeps its own. Runbooks §2.4, §4.21, §4.22 updated.
       Step 1 **built in SaaS 0.6.0** (7 Nov 2026; also: the sign-in answer is the same for unknown, waiting and locked
-      accounts and the lockout page is gone; refused forms get a plain 400). Steps 3-4: `SAAS_INFRA.md` §4.28.
-- [ ] 5.3 The owner deletes an account in `/admin/users` (SaaS 0.6.0; decided 7 Nov 2026, §9): with all its data
+      accounts and the lockout page is gone; refused forms get a plain 400). Steps 3-4: `SAAS_INFRA.md` §4.28 (kept as
+      a ready runbook for later).
+- [x] 5.3 The owner deletes an account in `/admin/users` (SaaS 0.6.0; decided 7 Nov 2026, §9): with all its data
       (profiles, notification state, history), after a confirmation, enforced on the server (owner policy,
       antiforgery, never the owner's own account); a pending invitation is withdrawn the same way. The person gets a
       short e-mail (active accounts only); the event names no e-mail address; sessions are re-checked every minute,
-      so a deleted account is signed out at once. Runbook §4.22 ("remove a tester") then uses it. **Built in SaaS
-      0.6.0** (7 Nov 2026); done once deployed and checked on staging.
+      so a deleted account is signed out at once. Runbook §4.22 ("remove a tester") then uses it. **Done:** 0.6.0-beta.1
+      deployed on staging and checked by the owner in the browser (by 8 Nov 2026).
 - [x] 5.4 "Request an account": **dropped** (7 Nov 2026, §9). New accounts come only from the owner's invitation by
       e-mail; there is no public form.
 - [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). Part of SaaS
@@ -532,6 +535,18 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
       the way back for each. Safety first: no component left unpatched for long, no update without a way back.
 
 ### Stage 6 - MVP 1 (§5.2)
+Planned in its own chat while the stage 5 test runs; code on a `feature/saas-<name>` branch from `main` once 0.6.0 is
+merged. Profile import stays as it is. To decide first:
+- [ ] 6.1 Cinema City data on demand: the wizard needs the repertoire, the screenings, the layout and the free seats
+      when a person builds a profile - requests started by people, not by the poller. How they share the request
+      budget with the poller (§4.3; numbers from the stage 5 test), the server-side cache (repertoire and layouts are
+      the same for everybody) and the limits per person. Read-only as always: never the cart, never Turnstile.
+- [ ] 6.2 Interactivity: the MVP 0 pages are static without JavaScript; choosing seats on an SVG map needs clicks.
+      Static forms, a small script for the map only, or interactive Blazor (and with it §10, reuse of
+      `CinemaWatch.ViewModels`).
+- [ ] 6.3 The wizard's steps and pages (city and dates → film and screenings → hall map → summary, like the desktop
+      app); a profile made on the site is the same as an imported one (limits, editing, desktop-compatible download).
+- [ ] 6.4 Increments, tests, deployment and the documents, as in stages 3-5.
 
 ### After the MVP (order flexible)
 Plans and limits → Stripe test mode → OIDC provider (Keycloak) → queue between poller and notifier → Kubernetes (k3s)
@@ -739,6 +754,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Sign-in: unless it succeeds, the same message for an unknown address, a waiting, a locked or an existing account (it mentions the 15-minute pause); the lockout page removed; the answer padded to `Saas:SignInAnswerMilliseconds` (1 s) | The lockout page and the time Identity needs (no hash for an unknown address, none for a locked or waiting one) told who has an account |
 | Nov 2026 | Password help through a bounded in-memory queue (100, new requests dropped when full) and limits in memory (1 per account per 15 min, 20 a day); no table | The page does no lookup, so its answer is the same and as fast for every address; one server, so memory is enough and a restart only resets the counters; no migration, so no restore test for 0.6.0 |
 | Nov 2026 | A form posted without a valid antiforgery token gets a short plain-text 400 before anything reads it | Reading such a form threw, and the error page, run again for the same post, threw too: an unhandled 500 (found by the 0.6.0 tests; affected every form) |
+| Nov 2026 | The switch to access model A is **postponed** (owner's call, 8 Nov 2026): Access keeps guarding the whole site; a tester is still added in the Access policy and invited in the app (`SAAS_INFRA.md` §4.22); the hardening of 0.6.0 stays | Too much new at once (rate limiting rules, Zero Trust applications) next to the test; the current state is safe, only less convenient. Runbook `SAAS_INFRA.md` §4.28 is kept for later (§11) |
 | Nov 2026 | The privacy notice names Backblaze B2 (encrypted backups, 31 days) and deletion by the owner; the Access gate is described for the owner's pages, and for the whole site only while testing | The backups of stage 4.5 were missing from the notice; model A changes who meets the gate |
 
 ---
@@ -781,6 +797,11 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
   `deploy.sh` (`command=` in `authorized_keys`), never the `docker` group (equals root); the key in GitHub Secrets.
 - **Private repository:** the server clones the public repository without credentials (`deploy.sh`, Ansible). If the
   repository ever becomes private, the server needs a read-only deploy key for this repository only.
+- **Access model A** (postponed 8 Nov 2026, §9): today two gates stand in front of the site - Cloudflare Access (a
+  one-time PIN by e-mail) and the app's own password - so a tester is added in two places. Model A removes the
+  Access gate for everything except the owner's `/admin`, so a tester is only invited in the app; one Cloudflare rate
+  limiting rule then stops a single IP address from trying the account forms more than 10 times in 10 seconds. The
+  app is ready for it (SaaS 0.6.0); the steps, the checks and the way back are in `SAAS_INFRA.md` §4.28.
 - **Turnstile on the sign-in and password-help forms** only if the rate limiting rule and the app's own limits prove
   not enough; it means a third-party script and a secret key on the server. (A public account request form was
   dropped for good, §9.)
