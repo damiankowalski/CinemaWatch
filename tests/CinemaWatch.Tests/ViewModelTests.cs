@@ -558,6 +558,109 @@ internal static class ViewModelTests
         });
     }
 
+    public static void RegisterHallMapGestureTests()
+    {
+        TestRunner.Add("Hall map gestures: painting a row live, one selection change at the release, then a click", async () =>
+        {
+            using var client = new CinemaCityClient(new AnyScreeningHandler());
+            var vm = await OpenSeatsStepAsync(client, new FakeUi(), new FakeScheduler());
+            var seats = vm.SeatsStep;
+            var map = seats.Items[0].Map!;
+            var stepEvents = 0;
+            var tabUpdates = 0;
+            seats.SelectionChanged += (_, _) => stepEvents++;
+            seats.Items[0].PropertyChanged += (_, e) => tabUpdates += e.PropertyName == nameof(ScreeningSeatsItem.WatchedText) ? 1 : 0;
+
+            var row4 = map.SeatViews.Where(s => s.Seat.RowKey == "4").OrderBy(s => s.Seat.Position).ToList();
+            var label4 = map.RowLabels.First(l => l.Label == row4[0].Seat.Row);
+            Press(map, row4[0]);
+            Assert.True(map.IsGestureActive && !map.IsRectangleVisible);
+            Assert.Equal(1, map.WatchedCount);
+            Assert.True(label4.IsPartial);
+            Drag(map, row4[^1]);
+            Assert.Equal(31, map.WatchedCount);
+            Assert.True(label4.IsFull);
+            Assert.Equal(0, stepEvents);
+            Assert.Equal(0, tabUpdates); // the tab and the texts above the map follow at the release
+            map.EndGesture();
+            Assert.True(!map.IsGestureActive);
+            Assert.Equal(1, stepEvents);
+            Assert.Equal(1, tabUpdates);
+            Assert.Equal(31, seats.Items[0].WatchedCount);
+
+            // Painting back from a watched seat deselects; a click is a gesture without a move.
+            Press(map, row4[^1]);
+            Drag(map, row4[^3]);
+            map.EndGesture();
+            Assert.Equal(28, map.WatchedCount);
+            Press(map, row4[0]);
+            map.EndGesture();
+            Assert.Equal(27, map.WatchedCount);
+            Assert.Equal(3, stepEvents);
+
+            // The result of a gesture is copied like any other selection.
+            seats.ApplyToAllCommand.Execute(null);
+            Assert.Equal(27, seats.Items[1].WatchedCount);
+        });
+
+        TestRunner.Add("Hall map gestures: rectangle from the background, Esc restores without an event, wheelchair only by itself", async () =>
+        {
+            using var client = new CinemaCityClient(new AnyScreeningHandler());
+            var vm = await OpenSeatsStepAsync(client, new FakeUi(), new FakeScheduler());
+            var map = vm.SeatsStep.Items[0].Map!;
+            var events = 0;
+            map.SelectionChanged += (_, _) => events++;
+            var first = map.SeatViews.First(s => !s.IsWheelchair);
+            map.SetWatched([first.Key]);
+            events = 0;
+
+            // The top-left corner of the map is background: the press starts a rectangle.
+            map.BeginGesture(1, 1);
+            Assert.True(map.IsRectangleVisible);
+            Assert.Equal(1, map.WatchedCount);
+            map.MoveGesture(map.Width - 1, map.Height - 1);
+            Assert.Equal(383, map.WatchedCount); // every regular seat, no wheelchair space
+            Assert.Equal(map.Width - 2, map.RectangleWidth);
+            Assert.Equal(1.0, map.RectangleLeft);
+            map.CancelGesture();
+            Assert.True(!map.IsGestureActive && !map.IsRectangleVisible);
+            Assert.True(map.WatchedKeys.SetEquals([first.Key]));
+            Assert.Equal(0, events);
+
+            // A rectangle that shrinks back to nothing, or a press without a move, changes nothing.
+            map.BeginGesture(1, 1);
+            map.MoveGesture(map.Width / 2, map.Height / 2);
+            map.MoveGesture(2, 2);
+            map.EndGesture();
+            map.BeginGesture(1, 1);
+            map.EndGesture();
+            Assert.Equal(1, map.WatchedCount);
+            Assert.Equal(0, events);
+
+            // Pressing on a wheelchair space and dragging over its row toggles just that space.
+            var wheelchair = map.SeatViews.Single(s => s.Seat.Label == "1N");
+            var row12 = map.SeatViews.Where(s => s.Seat.RowKey == wheelchair.Seat.RowKey).OrderBy(s => s.Seat.Position).ToList();
+            Press(map, wheelchair);
+            Drag(map, row12[^1]);
+            Drag(map, row12[0]);
+            map.EndGesture();
+            Assert.True(map.WatchedKeys.SetEquals([first.Key, wheelchair.Key]));
+            Assert.Equal(1, events);
+
+            // A row number during a gesture ends it; its own change wins.
+            Press(map, row12[10]);
+            map.RowLabels.First(l => l.Label == "12").ToggleCommand.Execute(null);
+            Assert.True(!map.IsGestureActive);
+            Assert.Equal(2 + 35, map.WatchedCount);
+        });
+    }
+
+    private static void Press(HallMapViewModel map, SeatViewModel seat) =>
+        map.BeginGesture(seat.Left + seat.Size / 2, seat.Top + seat.Size / 2);
+
+    private static void Drag(HallMapViewModel map, SeatViewModel seat) =>
+        map.MoveGesture(seat.Left + seat.Size / 2, seat.Top + seat.Size / 2);
+
     /// <summary>A profile tab with the shared test services.</summary>
     private static ProfileSessionViewModel NewSession(CinemaCityClient client, FakeUi ui, FakeScheduler scheduler, Func<DateTime>? clock = null) =>
         new(new SessionServices(client, new SeatAvailabilityService(client), ui, scheduler, Environment, clock ?? (() => Now)));

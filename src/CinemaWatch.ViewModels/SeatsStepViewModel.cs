@@ -36,8 +36,10 @@ public sealed class SeatsStepViewModel : ObservableObject
     public IReadOnlyList<int> AdjacentOptions => AdjacentChoices;
 
     public string HintText => T(
-        "Kliknij numer rzędu, aby zaznaczyć cały rząd. Kliknij miejsce, aby je dodać lub usunąć - także zajęte.",
-        "Click a row number to select the whole row. Click a seat to add or remove it - taken seats too.");
+        "Kliknij numer rzędu, aby zaznaczyć cały rząd. Kliknij miejsce, aby je dodać lub usunąć - także zajęte. " +
+        "Przeciągnij od miejsca, aby malować; od pustego pola, aby zaznaczyć ramką. Esc anuluje.",
+        "Click a row number to select the whole row. Click a seat to add or remove it - taken seats too. " +
+        "Drag from a seat to paint, from an empty spot to draw a rectangle. Esc cancels.");
 
     public ScreeningSeatsItem? SelectedItem
     {

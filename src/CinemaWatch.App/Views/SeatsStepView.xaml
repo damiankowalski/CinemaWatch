@@ -77,10 +77,18 @@
             </Setter>
         </Style>
 
-        <!-- The hall map, scaled to the available space. -->
+        <!-- The hall map, scaled to the available space. The map handles the left mouse button itself: a click toggles
+             a seat, dragging from a seat paints, dragging from the background draws a rectangle, Esc cancels (rules in
+             CinemaWatch.Core SeatSelection; code-behind only forwards the mouse). Row numbers stay buttons. -->
         <DataTemplate DataType="{x:Type vm:HallMapViewModel}">
             <Viewbox Stretch="Uniform">
-                <Grid Width="{Binding Width}" Height="{Binding Height}">
+                <Grid Width="{Binding Width}" Height="{Binding Height}" Background="Transparent"
+                      Focusable="True" FocusVisualStyle="{x:Null}"
+                      PreviewMouseLeftButtonDown="Map_PreviewMouseLeftButtonDown"
+                      PreviewMouseMove="Map_PreviewMouseMove"
+                      PreviewMouseLeftButtonUp="Map_PreviewMouseLeftButtonUp"
+                      LostMouseCapture="Map_LostMouseCapture"
+                      PreviewKeyDown="Map_PreviewKeyDown">
                     <Canvas>
                         <StackPanel Canvas.Left="{Binding ScreenLeft}" Canvas.Top="{Binding ScreenTop}"
                                     Width="{Binding ScreenWidth}">
@@ -121,6 +129,17 @@
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
+
+                    <!-- Rectangle of a drag that started on the background (map units, above the seats). -->
+                    <Canvas IsHitTestVisible="False">
+                        <Grid Canvas.Left="{Binding RectangleLeft}" Canvas.Top="{Binding RectangleTop}"
+                              Width="{Binding RectangleWidth}" Height="{Binding RectangleHeight}"
+                              Visibility="{Binding IsRectangleVisible, Converter={StaticResource BoolToVisibility}}">
+                            <Rectangle Fill="{StaticResource SeatWatchedBrush}" Opacity="0.15" RadiusX="6" RadiusY="6" />
+                            <Rectangle Stroke="{StaticResource SeatWatchedBrush}" StrokeThickness="4"
+                                       StrokeDashArray="3 2" RadiusX="6" RadiusY="6" />
+                        </Grid>
+                    </Canvas>
                 </Grid>
             </Viewbox>
         </DataTemplate>

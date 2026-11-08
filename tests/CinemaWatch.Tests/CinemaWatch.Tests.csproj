@@ -14,6 +14,8 @@
 
   <ItemGroup>
     <None Include="Fixtures\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Cases shared with the site's JavaScript tests (one file, linked - not copied - into this project). -->
+    <None Include="..\Fixtures\*.json" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

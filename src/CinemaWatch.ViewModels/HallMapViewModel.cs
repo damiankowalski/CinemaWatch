@@ -7,8 +7,11 @@ namespace CinemaWatch.ViewModels;
 /// <summary>
 /// Interactive hall map of one screening. Seat positions come straight from the Cinema City seat plan
 /// (plan units); the view scales the whole canvas with a Viewbox.
-/// Selection model: every seat is watched or not. Clicking a row number toggles all regular seats of
-/// the row (wheelchair spaces are only toggled individually).
+/// Selection model: every seat is watched or not. The rules live in <see cref="SeatSelection"/> (shared with the
+/// site): a row number toggles all regular seats of the row; a click toggles one seat; pressing on a seat and
+/// dragging paints; pressing on the background and dragging draws a rectangle. The view reports a gesture in map
+/// units (<see cref="BeginGesture"/>, <see cref="MoveGesture"/>, <see cref="EndGesture"/>,
+/// <see cref="CancelGesture"/>); the seats change live and <see cref="SelectionChanged"/> is raised once, at the end.
 /// </summary>
 public sealed class HallMapViewModel : ObservableObject
 {
@@ -19,8 +22,11 @@ public sealed class HallMapViewModel : ObservableObject
 
     private readonly Dictionary<(string Section, string RowKey), List<SeatViewModel>> _rows = [];
     private readonly Dictionary<(string Section, string RowKey), List<RowLabelViewModel>> _rowLabels = [];
+    private readonly double _offsetX;
+    private readonly double _offsetY;
     private HashSet<string> _watched = new(StringComparer.Ordinal);
     private bool _suppressChanges;
+    private SeatSelectionGesture? _gesture;
 
     public HallMapViewModel(ScreeningSeats seats, IEnumerable<string>? watchedKeys = null)
     {
@@ -54,6 +60,8 @@ public sealed class HallMapViewModel : ObservableObject
 
         Width = maxX - minX;
         Height = maxY - minY;
+        _offsetX = minX;
+        _offsetY = minY;
 
         var seatMinX = plan.Seats.Min(s => s.X);
         var seatMaxX = plan.Seats.Max(s => s.X);
@@ -123,24 +131,102 @@ public sealed class HallMapViewModel : ObservableObject
 
     public void ToggleRow((string Section, string RowKey) row)
     {
-        if (!_rows.TryGetValue(row, out var seats)) return;
-        var regular = seats.Where(s => !s.IsWheelchair).ToList();
-        var select = !regular.All(s => s.IsWatched);
-        Batch(() =>
-        {
-            foreach (var seat in regular)
-                seat.IsWatched = select;
-        });
+        if (!_rows.ContainsKey(row)) return;
+        var result = SeatSelection.ToggleRow(_watched, Seats.Plan, row.Section, row.RowKey);
+        Batch(() => Apply(result));
     }
 
     public void SetWatched(IEnumerable<string> keys)
     {
         var set = new HashSet<string>(keys, StringComparer.Ordinal);
-        Batch(() =>
+        Batch(() => Apply(set));
+    }
+
+    // ----- Gestures (mouse): press, drag, release. Points are map units, the coordinates of the drawn canvas. -----
+
+    /// <summary>True between the press and the release (or a cancel).</summary>
+    public bool IsGestureActive => _gesture is not null;
+
+    /// <summary>The rectangle of a gesture that started on the background, in map units.</summary>
+    public bool IsRectangleVisible => _gesture?.Kind == SeatSelectionGestureKind.Rectangle;
+    public double RectangleLeft => _gesture is null ? 0 : Math.Min(_gesture.Start.X, _gesture.Current.X) - _offsetX;
+    public double RectangleTop => _gesture is null ? 0 : Math.Min(_gesture.Start.Y, _gesture.Current.Y) - _offsetY;
+    public double RectangleWidth => _gesture is null ? 0 : Math.Abs(_gesture.Current.X - _gesture.Start.X);
+    public double RectangleHeight => _gesture is null ? 0 : Math.Abs(_gesture.Current.Y - _gesture.Start.Y);
+
+    /// <summary>Press: starts a click, painting or a rectangle, depending on what lies under the point.</summary>
+    public void BeginGesture(double x, double y)
+    {
+        CancelGesture();
+        _gesture = new SeatSelectionGesture(Seats.Plan, _watched, ToPlan(x, y));
+        ApplyLive(_gesture.Result);
+        RaiseGestureProperties();
+    }
+
+    /// <summary>The pointer moved with the button pressed: the seats follow live.</summary>
+    public void MoveGesture(double x, double y)
+    {
+        if (_gesture is null) return;
+        if (_gesture.MoveTo(ToPlan(x, y)))
+            ApplyLive(_gesture.Result);
+        if (_gesture.Kind == SeatSelectionGestureKind.Rectangle)
+            RaiseRectangleProperties();
+    }
+
+    /// <summary>Release: the selection stays; <see cref="SelectionChanged"/> is raised when it differs from before the press.</summary>
+    public void EndGesture()
+    {
+        if (_gesture is not { } gesture) return;
+        _gesture = null;
+        RaiseGestureProperties();
+        if (!_watched.SetEquals(gesture.Before))
+            RecalculateSelection(raiseEvent: true);
+    }
+
+    /// <summary>Esc or lost mouse capture: the selection from before the press comes back; no event.</summary>
+    public void CancelGesture()
+    {
+        if (_gesture is not { } gesture) return;
+        _gesture = null;
+        ApplyLive(gesture.Before);
+        RaiseGestureProperties();
+    }
+
+    private PlanPoint ToPlan(double x, double y) => new(x + _offsetX, y + _offsetY);
+
+    private void ApplyLive(IReadOnlySet<string> keys)
+    {
+        _suppressChanges = true;
+        try
         {
-            foreach (var seat in SeatViews)
-                seat.IsWatched = set.Contains(seat.Key);
-        });
+            Apply(keys);
+        }
+        finally
+        {
+            _suppressChanges = false;
+        }
+        RecalculateSelection(raiseEvent: false);
+    }
+
+    private void Apply(IReadOnlySet<string> keys)
+    {
+        foreach (var seat in SeatViews)
+            seat.IsWatched = keys.Contains(seat.Key);
+    }
+
+    private void RaiseGestureProperties()
+    {
+        OnPropertyChanged(nameof(IsGestureActive));
+        OnPropertyChanged(nameof(IsRectangleVisible));
+        RaiseRectangleProperties();
+    }
+
+    private void RaiseRectangleProperties()
+    {
+        OnPropertyChanged(nameof(RectangleLeft));
+        OnPropertyChanged(nameof(RectangleTop));
+        OnPropertyChanged(nameof(RectangleWidth));
+        OnPropertyChanged(nameof(RectangleHeight));
     }
 
     public void Clear() => SetWatched([]);
@@ -153,6 +239,12 @@ public sealed class HallMapViewModel : ObservableObject
 
     private void Batch(Action action)
     {
+        // A change from outside (row number, Apply to all, Clear) ends a gesture in progress; its result stays.
+        if (_gesture is not null)
+        {
+            _gesture = null;
+            RaiseGestureProperties();
+        }
         _suppressChanges = true;
         try
         {

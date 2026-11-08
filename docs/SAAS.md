@@ -356,11 +356,13 @@ Goal: the result as close to the desktop app as possible (decided 8 Nov 2026, §
   **painting** - press on a seat and drag: the first seat decides whether the seats passed over are selected or
   deselected; **rectangle** - press on the background and drag: the seats whose centre lies inside are all selected,
   or all deselected when every one of them already was (the row-label rule). Painting and the rectangle skip
-  wheelchair spaces. Esc during a gesture restores the state from before it. No modifier keys (a click already adds
+  wheelchair spaces; a press on a wheelchair space toggles only that space, also when the pointer then moves. A
+  gesture runs from the press to the release; Esc during a gesture, or a lost pointer capture, restores the state
+  from before it. No modifier keys (a click already adds
   to the selection). On a touch screen a tap toggles one seat and dragging scrolls the page; painting and the
   rectangle work with a mouse or a pen. The rules live once in `CinemaWatch.Core` (reference implementation); the
-  script mirrors them; one file of cases (`tests/Fixtures/seat-selection-cases.json`) is run by the C# tests and by a
-  JavaScript test in CI (`node --test`, no packages).
+  script mirrors them; one file of cases (`tests/Fixtures/seat-selection-cases.json`, gestures as pointer paths in plan units, so
+  hit testing is shared too) is run by the C# tests and by a JavaScript test in CI (`node --test`, no packages).
 
 ---
 
