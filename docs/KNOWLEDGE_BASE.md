@@ -39,7 +39,7 @@ Wizard (city & dates → film & screenings → hall map → summary), clickable 
 all, background checks via Windows Task Scheduler with Windows notifications, Polish/English UI, six IMAX cinemas.
 Desktop has priority; work on other tracks must not take ideas away from it.
 
-**1.5.0** (decided 8 Nov 2026, beta tested by the owner, merged after the SaaS 0.6.0 tag; built together with the SaaS hall map - [`docs/SAAS.md`](SAAS.md) §5.2, stage
+**1.5.0** (decided 8 Nov 2026, beta tested by the owner, released 8 Nov 2026 - before the SaaS 0.6.0 tag, §9; built together with the SaaS hall map - [`docs/SAAS.md`](SAAS.md) §5.2, stage
 6.4.1): multi-select on the hall map. A click toggles one seat as today; **painting** - press on a seat and drag, the
 first seat decides select or deselect; **rectangle** - press on the background and drag, the seats whose centre lies
 inside are all selected, or all deselected when every one already was (the row-label rule). Painting and the
@@ -398,6 +398,7 @@ Seat names for the text ("row 8: 12, 13") come from the hall layout (`n` labels;
 | Oct 2026 | SaaS MVP 0 = server-side profile proxy; risk test from a datacenter IP first | Biggest risk before the biggest UI work |
 | Nov 2026 | Multi-select on the hall map (painting and a rectangle, no modifier keys) in 1.5.0, built together with the SaaS map; rules in Core, one shared case file tested in C# and JavaScript | Fewer clicks for blocks of seats; one behaviour in both clients, guarded by CI |
 | Nov 2026 | Multi-select details: a press on a wheelchair space toggles only it; live preview, one selection change at the release; Esc or lost mouse capture cancels; shared cases describe gestures in plan coordinates (hit testing shared too), file in `tests/Fixtures/` | Wheelchair spaces stay deliberate; a cancelled drag leaves no trace; both clients must hit the same seats at the edges |
+| Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before the `web-v0.6.0` tag (instead of waiting for it) | The SaaS image only gains an unused class in `CinemaWatch.Core` (Web and Server keep their own version 0.6.0); CI on the merge result - SaaS tests with the database, container smoke test - was green; no reason to hold a finished desktop release |
 | Nov 2026 | The SaaS wizard copies the desktop wizard (steps, date ranges, map geometry) but not `CinemaWatch.ViewModels` | One product in two places; the view models are WPF-shaped, the logic is in Core |
 
 ---

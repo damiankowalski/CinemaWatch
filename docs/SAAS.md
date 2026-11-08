@@ -574,7 +574,7 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
 
 ### Stage 6 - MVP 1 (§5.2)
 Planned in its own chat while the stage 5 test runs; decided 8 Nov 2026 (§9). Code on branches from `main` once
-0.6.0 is merged (13 Nov 2026). Profile import stays as it is. Two tracks run side by side: the desktop app gets
+0.6.0 is merged (8 Nov 2026; desktop 1.5.0 followed the same day, before the `web-v0.6.0` tag). Profile import stays as it is. Two tracks run side by side: the desktop app gets
 multi-select on the hall map (1.5.0) and the site's map is built with the same rules from its first version.
 - [x] 6.1 Cinema City data on demand (decided 8 Nov 2026): shared cache in memory, a wizard budget of its own next to
       the poller's, limits per account, loading in the background with progress, desktop date ranges (§5.2). Final
@@ -813,6 +813,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Static pages plus a small own script for the hall map (HTML checkboxes drawn as circles), not SVG and not interactive Blazor; `CinemaWatch.ViewModels` not reused on the site | Works without JavaScript and with a keyboard; no SignalR circuit that a deployment or the nightly reboot would cut; the view models are WPF-shaped, the logic lives in Core |
 | Nov 2026 | Wizard state in the form, not in the database | No migration and no restore test; the server validates everything when saving anyway |
 | Nov 2026 | Multi-select on the hall map for the desktop app (1.5.0) and the site together: painting (press on a seat and drag), a rectangle from the background with the row-label rule, no modifier keys, wheelchair spaces only by a single click; the rules once in Core, mirrored by the script, one shared case file tested in C# and in JavaScript | Fewer clicks for whole blocks of seats; the same behaviour in both clients, guarded by CI instead of by memory; cheaper to build into the new web map than to add later |
+| Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 
 ---
 
