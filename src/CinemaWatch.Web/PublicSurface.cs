@@ -90,8 +90,10 @@ public static class PublicSurface
     /// </summary>
     public static async Task PadAnswerAsync(long startedTimestamp, int minimumMilliseconds, CancellationToken cancellationToken = default)
     {
-        var remaining = TimeSpan.FromMilliseconds(minimumMilliseconds) - Stopwatch.GetElapsedTime(startedTimestamp);
-        if (remaining > TimeSpan.Zero)
-            await Task.Delay(remaining, cancellationToken);
+        // A timer may wake up a fraction of a millisecond early (Windows' timer resolution), so check again.
+        var minimum = TimeSpan.FromMilliseconds(minimumMilliseconds);
+        TimeSpan remaining;
+        while ((remaining = minimum - Stopwatch.GetElapsedTime(startedTimestamp)) > TimeSpan.Zero)
+            await Task.Delay(remaining < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : remaining, cancellationToken);
     }
 }

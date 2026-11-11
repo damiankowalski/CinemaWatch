@@ -605,7 +605,9 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         same layout, `seatmap.js` with the rules of 6.4.1 (once merged) and its `node --test` step in CI.
         **Step 3 without JavaScript built 12 Nov 2026** (decisions in §9): the geometry moved to `CinemaWatch.Core`
         (`HallLayout`, used by the desktop map too), `SeatCode`, `SeatsStep.razor`, the hall maps' loading through the
-        progress page, `WizardJobs.PeekScreeningsAsync`. `seatmap.js` and its CI step follow.
+        progress page, `WizardJobs.PeekScreeningsAsync`. **`seatmap.js` built 12 Nov 2026**: painting, the
+        rectangle, Esc, row numbers without a reload, live counts; `tests/web/seatmap.test.js` (`node --test`, the
+        shared case file) and its step in the Linux CI job. Owner's check in the browser still to do.
   - [ ] 6.4.5 Step 4, saving and editing: the import's validation and limits, the notification state kept for
         unchanged screenings, a test that a profile made on the site reads in the desktop app's `WatchProfile`.
   - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's and testers' checks, stable `web-v0.7.0`; documents
@@ -839,6 +841,8 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Step 3 shows one hall map at a time (tabs as form buttons, as in the desktop app); a row number is a form button without JavaScript; occupancy older than 10 minutes is not shown, "Refresh the occupancy" loads only the free seats | The same steps as the desktop; nothing reaches Cinema City without a click |
 | Nov 2026 | The hall map's geometry moved from `HallMapViewModel` to `CinemaWatch.Core` (`HallLayout`); the desktop map and the site use it | Both maps must look the same; the desktop's tests guard it |
 | Nov 2026 | Node.js 26 LTS (zip, `C:\DEV\CINEMAWATCH
+| Nov 2026 | `seatmap.js` is loaded by every page (`App.razor`, deferred, fingerprinted) and acts only where a map is; it keeps the form's check boxes as the truth (a gesture sets them), so the form posts what the page shows | One small file, cached once; no second source of state; without the script nothing is lost |
+| Nov 2026 | The sign-in answer's padding checks the time again after waiting (a Windows timer can wake up a fraction of a millisecond early) | "Never faster than the set time" holds exactly; the test was flaky (found in 6.4.4) |
 ode`, outside PATH) on the owner's PC for `seatmap.js`'s tests; CI runs them on its Ubuntu runner | Quick feedback for the script that mirrors the Core rules, without waiting for CI; remove = delete the folder |
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 

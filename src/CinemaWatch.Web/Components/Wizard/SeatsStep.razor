@@ -32,7 +32,7 @@
         {
             <span class="hall-tab current" role="tab" aria-selected="true">
                 <strong>@map.Title</strong>
-                <span class="hint">@map.TabStatus</span>
+                <span class="hint">@T("Monitorowane", "Watched"): <span data-seatmap-watched>@map.Selection.Count</span>@map.TabOccupancy</span>
             </span>
         }
         else
@@ -72,7 +72,8 @@ else
     }
 
     <div class="hall" data-seatmap style="aspect-ratio: @N(layout.Width) / @N(layout.Height); --seat-size: @(N(layout.SeatSize / layout.Width * 100))cqw"
-         data-radius="@N(layout.SeatSize / 2)" data-width="@N(layout.Width)" data-height="@N(layout.Height)" data-offset-x="@N(layout.OffsetX)" data-offset-y="@N(layout.OffsetY)">
+         data-radius="@N(layout.SeatSize / 2)" data-width="@N(layout.Width)" data-height="@N(layout.Height)" data-offset-x="@N(layout.OffsetX)" data-offset-y="@N(layout.OffsetY)"
+         data-occupancy="@(current.Result.FreeSeatKeys is null ? "0" : "1")">
         <div class="screen" style="left: @X(layout, layout.ScreenLeft); top: @Y(layout, layout.ScreenTop); width: @X(layout, layout.ScreenWidth); height: @Y(layout, HallLayout.ScreenBarHeight)">
             <span>@T("EKRAN", "SCREEN")</span>
         </div>
@@ -89,13 +90,18 @@ else
             <label class="@SeatClass(seat, free)"
                    style="left: @X(layout, placed.Left); top: @Y(layout, placed.Top)" title="@SeatTitle(seat, free)">
                 <input type="checkbox" name="seat" value="@seat.Key" checked="@current.Selection.Contains(seat.Key)"
-                       data-x="@N(seat.X)" data-y="@N(seat.Y)" data-section="@seat.Section" data-row="@seat.RowKey" data-wheelchair="@(seat.IsWheelchair ? "1" : null)" />
+                       data-x="@N(seat.X)" data-y="@N(seat.Y)" data-position="@seat.Position" data-section="@seat.Section" data-row="@seat.RowKey" data-wheelchair="@(seat.IsWheelchair ? "1" : null)" />
                 <span aria-hidden="true">@(seat.IsWheelchair ? "♿" : seat.Label)</span>
             </label>
         }
     </div>
 
-    <p class="selection-text" data-seatmap-summary>@current.SelectionText(State.MinAdjacent)</p>
+    @* The script rewrites this line live from the templates (the server's texts, both plural rules mirrored). *@
+    <p class="selection-text" data-seatmap-summary data-lang="@(Language == AppLanguage.English ? "en" : "pl")"
+       data-forms="@T("miejsce|miejsca|miejsc", "seat|seats")" data-none="@T("Nic nie zaznaczono", "Nothing selected")"
+       data-template="@T("Monitorujesz {seats} · teraz wolnych: {free}", "Watching {seats} · free now: {free}")"
+       data-adjacent="@T("Monitorujesz {seats} · teraz wolnych (min. {adj} obok siebie): {free}", "Watching {seats} · free now ({adj}+ together): {free}")"
+       data-unknown="@T("Monitorujesz {seats}", "Watching {seats}")">@current.SelectionText(State.MinAdjacent)</p>
 
     <div class="seat-tools">
         <label for="adj">@T("Powiadom, gdy wolnych obok siebie jest co najmniej", "Notify when at least this many are free next to each other")</label>
@@ -189,16 +195,18 @@ else
         }
 
         /// <summary>"Monitorowane: 4 · Wolne: 3 z 385", as on the desktop's tabs.</summary>
-        public string TabStatus
+        public string TabStatus => $"{T("Monitorowane", "Watched")}: {Selection.Count}{TabOccupancy}";
+
+        /// <summary>" · Wolne: 3 z 385" (the part after the watched count).</summary>
+        public string TabOccupancy
         {
             get
             {
-                var watched = $"{T("Monitorowane", "Watched")}: {Selection.Count}";
                 if (Result.Error is not null || Result.Plan is null)
-                    return watched + T(" · brak mapy", " · no map");
+                    return T(" · brak mapy", " · no map");
                 if (Seats is not { } seats)
-                    return watched;
-                return watched + " · " + (seats.FreeCount == 0 ? T("Brak wolnych miejsc", "No free seats") : T($"Wolne: {seats.FreeCount} z {seats.TotalCount}", $"Free: {seats.FreeCount} of {seats.TotalCount}"));
+                    return "";
+                return " · " + (seats.FreeCount == 0 ? T("Brak wolnych miejsc", "No free seats") : T($"Wolne: {seats.FreeCount} z {seats.TotalCount}", $"Free: {seats.FreeCount} of {seats.TotalCount}"));
             }
         }
 

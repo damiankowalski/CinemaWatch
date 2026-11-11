@@ -2691,8 +2691,9 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
 
         page = await browser.PageAsync(stepThree);
         Assert.Equal(385, Regex.Matches(page, "name=\"seat\" value=").Count);
-        Assert.True(page.Contains("<label class=\"seat free\"") && page.Contains("title=\"Rząd 4, miejsce 19 · wolne\"") && page.Contains("Monitorowane: 0 · Wolne: 3 z "));
-        Assert.True(page.Contains("value=\"row:1|4\"") && page.Contains("Nic nie zaznaczono") && page.Contains("data-seatmap"));
+        Assert.True(page.Contains("<label class=\"seat free\"") && page.Contains("title=\"Rząd 4, miejsce 19 · wolne\"") && page.Contains("Monitorowane: <span data-seatmap-watched>0</span> · Wolne: 3 z "));
+        Assert.True(page.Contains("value=\"row:1|4\"") && page.Contains("Nic nie zaznaczono") && page.Contains("data-seatmap") && page.Contains("data-occupancy=\"1\"") && page.Contains("data-position=\"19\""));
+        Assert.True(page.Contains("<script src=\"seatmap") && page.Contains("data-template=\"Monitorujesz {seats} · teraz wolnych: {free}\""));
         Assert.True(page.Contains($"value=\"tab:{second}\"") && page.Contains("Brak wolnych miejsc")); // the second tab: sold out
         Assert.True(page.Contains("<button type=\"submit\" name=\"go\" value=\"2\" class=\"step\""));
 

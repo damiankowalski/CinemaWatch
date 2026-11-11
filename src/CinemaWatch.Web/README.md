@@ -10,7 +10,7 @@ request statistics, events, a pause switch, poller settings) and a heartbeat for
 | Project | Contents |
 | --- | --- |
 | `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `UpstreamBlocks`, `CheckService`, `PollerSettings`, the development fake), the wizard's Cinema City data on demand (`Wizard/`: `WizardJobs`, `CinemaCityCache`, `LoadingTokens`; the wizard's state and step 2's lists: `WizardState`, `ScreeningChoices`), the operator's panel and the heartbeat (`Operations/`) |
-| `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms, no JavaScript); hosts the background services in MVP 0; the wizard's pages in `Components/Pages/Wizard*.razor` and `Components/Wizard/` |
+| `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms; one small script for the hall map, every page works without it); hosts the background services in MVP 0; the wizard's pages in `Components/Pages/Wizard*.razor` and `Components/Wizard/` |
 | `tests/CinemaWatch.Saas.Tests` | Logic tests, database tests and the whole web flow (real app in memory, e-mails recorded) |
 
 How it works:
@@ -64,7 +64,11 @@ How it works:
   free seats) the same way, unless everything is known. Step 3 (`/wizard/3`): one hall map per tab, drawn from the
   geometry the desktop map uses (`CinemaWatch.Core` `HallLayout`): every seat a check box drawn as a circle (free
   green, taken grey, watched ringed), row numbers that toggle the row, the minimum of adjacent seats, "Copy to
-  screenings in the same hall", "Clear", "Refresh the occupancy" when it is older than 10 minutes. Step 4 (saving)
+  screenings in the same hall", "Clear", "Refresh the occupancy" when it is older than 10 minutes. The site's only
+  script, `wwwroot/seatmap.js` (no libraries, loaded on every page, active only on a map), adds painting (press on
+  a seat and drag), the rectangle (press on the background and drag), Esc, row numbers without a reload and live
+  counts - the rules of `CinemaWatch.Core` `SeatSelection`, tested against the same case file. With a finger a tap
+  toggles a seat and dragging scrolls; without JavaScript everything works through the form. Step 4 (saving)
   follows in 6.4.5; *Next* on step 3 only checks that a seat is selected for now. All of it posts to `/wizard/go`;
   the state (`city`, `from`, `to`, `film`, `s`, `max`, `m` - each screening's seats as one bit per seat of its
   layout, Base64Url (`SeatCode`) -, `tab`, `adj`) travels in hidden fields and in the address of the page the
@@ -303,6 +307,15 @@ $env:CINEMAWATCH_TEST_DB = $builder.ConnectionString
 Remove-Variable password, builder
 dotnet run --project tests\CinemaWatch.Saas.Tests
 Remove-Item Env:CINEMAWATCH_TEST_DB
+```
+
+The hall map's script against the case file shared with the C# tests (Node.js; on the development PC the zip in
+`C:\DEV\CINEMAWATCH
+ode`, not on PATH; CI uses the runner's Node):
+```powershell
+& C:\DEV\CINEMAWATCH
+ode
+ode.exe --test tests\web
 ```
 
 ### A new migration (after changing the data model)

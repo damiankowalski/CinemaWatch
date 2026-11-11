@@ -8,11 +8,13 @@
     <base href="/" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="icon" type="image/svg+xml" href="@Assets["favicon.svg"]" />
+    @* The only script: the hall map's gestures (wizard step 3); it does nothing on pages without a map. *@
+    <script src="@Assets["seatmap.js"]" defer></script>
     <HeadOutlet />
 </head>
 
 <body>
-    @* Static server-side rendering only: plain HTML forms and links, no JavaScript. *@
+    @* Static server-side rendering: plain HTML forms and links; every page works without JavaScript. *@
     <Routes />
 </body>
 

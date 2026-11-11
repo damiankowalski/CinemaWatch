@@ -59,6 +59,11 @@ jobs:
       - name: Test (shared logic)
         run: dotnet run --project tests/CinemaWatch.Tests -c Release
 
+      # The hall map's script mirrors the Core selection rules: the same case file as the C# tests (no packages;
+      # Node comes with the runner image).
+      - name: Test hall map script
+        run: node --test tests/web
+
       - name: Test probe
         run: dotnet run --project tests/CinemaWatch.Probe.Tests -c Release
 
