@@ -310,12 +310,9 @@ Remove-Item Env:CINEMAWATCH_TEST_DB
 ```
 
 The hall map's script against the case file shared with the C# tests (Node.js; on the development PC the zip in
-`C:\DEV\CINEMAWATCH
-ode`, not on PATH; CI uses the runner's Node):
+`C:\DEV\CINEMAWATCH\node`, not on PATH; CI uses the runner's Node):
 ```powershell
-& C:\DEV\CINEMAWATCH
-ode
-ode.exe --test tests\web
+& C:\DEV\CINEMAWATCH\node\node.exe --test tests\web
 ```
 
 ### A new migration (after changing the data model)
