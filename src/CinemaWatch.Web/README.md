@@ -9,8 +9,8 @@ request statistics, events, a pause switch, poller settings) and a heartbeat for
 
 | Project | Contents |
 | --- | --- |
-| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `UpstreamBlocks`, `CheckService`, `PollerSettings`, the development fake), the wizard's Cinema City data on demand (`Wizard/`: `WizardJobs`, `CinemaCityCache`, `LoadingTokens`; no pages yet), the operator's panel and the heartbeat (`Operations/`) |
-| `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms, no JavaScript); hosts the background services in MVP 0 |
+| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `UpstreamBlocks`, `CheckService`, `PollerSettings`, the development fake), the wizard's Cinema City data on demand (`Wizard/`: `WizardJobs`, `CinemaCityCache`, `LoadingTokens`; the wizard's state and step 2's lists: `WizardState`, `ScreeningChoices`), the operator's panel and the heartbeat (`Operations/`) |
+| `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms, no JavaScript); hosts the background services in MVP 0; the wizard's pages in `Components/Pages/Wizard*.razor` and `Components/Wizard/` |
 | `tests/CinemaWatch.Saas.Tests` | Logic tests, database tests and the whole web flow (real app in memory, e-mails recorded) |
 
 How it works:
@@ -52,6 +52,17 @@ How it works:
 - Several profiles can be open at once. The header of a profile is a link that opens or closes it; the open profiles
   live in the address (`?profile=…` for the one in focus, `?open=…` for the others), so the page's own reloads,
   "Check now", enable, disable and delete keep them open until you close them.
+- **New profile (wizard, SaaS 0.7.0, being built):** the button on the home page opens `/wizard`, the desktop app's
+  steps (step bar at the top: the steps reached so far and the next one are buttons). Step 1: the city (one IMAX
+  cinema each, or all six) and a date or a range ("To" empty = one day; 31 days, 14 for all cities; the desktop's
+  messages). *Next* opens step 2 at once when the shared cache holds the whole repertoire; otherwise a loading starts
+  in the background and `/wizard/loading/<id>` shows its progress, reloads itself every 2 s and then opens step 2. A
+  refused loading (the owner's pause, a block, a used-up budget or limit) says on step 1 when to try again. Step 2
+  (`/wizard/2`): the films with IMAX screenings without dubbing that have not started, the chosen film's screenings
+  by day and cinema with check boxes, "select all / clear all", "Show screenings" after choosing another film (no
+  JavaScript); missing days can be loaded again. Steps 3-4 (hall map, saving) follow in 6.4.4-6.4.5; *Next* on step 2
+  only checks the selection for now. All of it posts to `/wizard/go`; the state (`city`, `from`, `to`, `film`, `s`,
+  `max`) travels in hidden fields and in the address of the page the answer redirects to - nothing in the database.
 - Profile limit: 5 per account (enabled, disabled and ended alike). The owner sets another limit per account (1-50)
   in the **Users** list; an empty field means the default. Lowering a limit deletes nothing.
 

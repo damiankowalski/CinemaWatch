@@ -634,6 +634,83 @@ TestRunner.Add("Wizard requests: cinemas from the IMAX list, from Polish today, 
         WizardJobs.Items(new RepertoireRequest(["1060", "1064"], today, today.AddDays(1))).Select(i => i.Key));
 });
 
+TestRunner.Add("Wizard state: read from a form or an address with broken values dropped, written back the same; the desktop's date checks and messages; the selection's limits", () =>
+{
+    using var _ = Localizer.Use(AppLanguage.Polish);
+    var today = new DateOnly(2026, 11, 11);
+    var values = new Dictionary<string, string?[]>
+    {
+        ["city"] = ["1064"], ["from"] = ["2026-11-12"], ["to"] = ["2026-11-14"], ["film"] = ["8105s2r"],
+        ["s"] = ["a1,b2", "b2", "bad id", null, "c3"], ["max"] = ["2"],
+    };
+    var state = WizardState.Read(name => values.GetValueOrDefault(name) ?? []);
+    Assert.Equal(("1064", new DateOnly(2026, 11, 12), (DateOnly?)new DateOnly(2026, 11, 14), (string?)"8105s2r", 2),
+        (state.City, state.From!.Value, state.To, state.FilmId, state.Furthest));
+    Assert.SequenceEqual(["a1", "b2", "c3"], state.ScreeningIds);
+    Assert.Equal("city=1064&from=2026-11-12&to=2026-11-14&film=8105s2r&s=a1%2Cb2%2Cc3&max=2", state.Query());
+    var fields = state.Fields().ToDictionary(f => f.Key, f => f.Value);
+    Assert.Equal(state.Query(), WizardState.Read(name => fields.TryGetValue(name, out var value) ? [value] : []).Query());
+    Assert.Equal("city=1064&from=2026-11-12&to=2026-11-14&film=8105s2r&max=2", string.Join("&", state.Fields(withScreenings: false).Select(f => $"{f.Key}={f.Value}")));
+    Assert.SequenceEqual([new DateOnly(2026, 11, 12), new DateOnly(2026, 11, 13), new DateOnly(2026, 11, 14)], state.Dates);
+    Assert.Equal(null, state.DatesProblem(today));
+    var request = state.Repertoire();
+    Assert.Equal(("1064", 3), (request.CinemaIds.Single(), request.Days));
+
+    // Unknown city → Sadyba; a date not in yyyy-MM-dd → missing; a broken film id → none; the step is clamped.
+    var broken = WizardState.Read(name => name switch { "city" => ["9999"], "from" => ["12.11.2026"], "film" => ["x y"], "max" => ["7"], _ => [] });
+    Assert.Equal(("1060", (DateOnly?)null, (string?)null, 4), (broken.City, broken.From, broken.FilmId, broken.Furthest));
+    Assert.Equal("Wybierz datę seansu.", broken.DatesProblem(today));
+    Assert.Equal(0, broken.Dates.Count);
+    // "To" equal to "From" is one day.
+    Assert.Equal(null, WizardState.Read(name => name switch { "from" or "to" => ["2026-11-12"], _ => [] }).To);
+    Assert.Equal(("1060", today), (WizardState.New(today).City, WizardState.New(today).From!.Value));
+
+    Assert.Equal("Data nie może być z przeszłości.", (state with { From = today.AddDays(-1) }).DatesProblem(today));
+    Assert.Equal("Data końcowa nie może być wcześniejsza niż początkowa.", (state with { To = new DateOnly(2026, 11, 11) }).DatesProblem(today));
+    Assert.Equal(null, (state with { From = today, To = today.AddDays(30) }).DatesProblem(today));
+    Assert.Equal("Zakres może obejmować maksymalnie 31 dni.", (state with { From = today, To = today.AddDays(31) }).DatesProblem(today));
+    var all = state with { City = WizardState.AllCities, From = today, To = today.AddDays(13) };
+    Assert.Equal((6, (string?)null), (all.CinemaIds.Count, all.DatesProblem(today)));
+    Assert.Equal("Dla wszystkich miast zakres może obejmować maksymalnie 14 dni.", (all with { To = today.AddDays(14) }).DatesProblem(today));
+
+    Assert.Equal("Zaznacz co najmniej jeden seans.", (state with { ScreeningIds = [] }).SelectionProblem(2));
+    Assert.Equal("Profil może pilnować najwyżej 2 seansów (zaznaczone: 3).", state.SelectionProblem(2));
+    Assert.Equal(null, state.SelectionProblem(3));
+});
+
+TestRunner.Add("Wizard step 2: films with IMAX screenings without dubbing that have not started, by name; the chosen film's screenings by day, cinemas in city order", () =>
+{
+    using var _ = Localizer.Use(AppLanguage.Polish);
+    var now = new DateTime(2026, 11, 12, 15, 0, 0);
+    static Screening S(string id, string film, string cinema, int day, int hour, params string[] attributes) =>
+        new(id, film, cinema, new DateTime(2026, 11, day, hour, 0, 0), "IMAX", attributes, ["en"], ["pl"], [], false, 0.5, "https://tickets.cinema-city.pl/api/order/" + id);
+    Film[] films = [new("f1", "Zz film", 120, null), new("f2", "Avatar", 180, null)];
+    var days = new List<DayRepertoire>
+    {
+        new(new DateOnly(2026, 11, 12), films,
+            [S("1", "f1", "1060", 12, 14, "imax"), S("2", "f1", "1060", 12, 18, "imax"), S("3", "f1", "1060", 12, 20, "imax", "dubbed"), S("4", "f2", "1060", 12, 21, "imax"), S("5", "f2", "1060", 12, 22)]),
+        new(new DateOnly(2026, 11, 12), films, [S("6", "f1", "1065", 12, 19, "imax")]),
+        new(new DateOnly(2026, 11, 13), films, [S("7", "f1", "1060", 13, 17, "imax")]),
+    };
+
+    var choices = ScreeningChoices.Build(days, ScreeningFilter.ImaxWithoutDubbing, now, null);
+    Assert.SequenceEqual([("f2", "Avatar", 1), ("f1", "Zz film", 3)], choices.Films.Select(f => (f.FilmId, f.Name, f.ScreeningCount)));
+    Assert.Equal("f2", choices.Film!.FilmId); // the first by name
+    choices = ScreeningChoices.Build(days, ScreeningFilter.ImaxWithoutDubbing, now, "f1");
+    // 14:00 has started, 20:00 is dubbed; on the 12th Katowice comes before Warszawa (city order of the IMAX list).
+    Assert.SequenceEqual(["6", "2", "7"], choices.Screenings.Select(s => s.Id));
+    Assert.SequenceEqual([2, 1], choices.Days.Select(d => d.Cinemas.Count));
+    Assert.Equal(("Katowice", true), (choices.Days[0].Cinemas[0].Cinema!.City, choices.ShowCinemas));
+    Assert.Equal("f2", ScreeningChoices.Build(days, ScreeningFilter.ImaxWithoutDubbing, now, "gone").Film!.FilmId);
+
+    var one = ScreeningChoices.Build([days[0], days[2]], ScreeningFilter.ImaxWithoutDubbing, now, "f1");
+    Assert.Equal((false, 2), (one.ShowCinemas, one.Screenings.Count()));
+    var none = ScreeningChoices.Build([], ScreeningFilter.ImaxWithoutDubbing, now, "f1");
+    Assert.Equal((0, (FilmChoice?)null, 0), (none.Films.Count, none.Film, none.Days.Count));
+    Assert.Equal("Czwartek, 12 listopada 2026", ScreeningText.DayHeader(new DateOnly(2026, 11, 12)));
+    Assert.Equal(("EN · napisy PL", "50% miejsc wolnych"), (ScreeningText.Languages(days[0].Screenings[1]), ScreeningText.Availability(days[0].Screenings[1])));
+});
+
 TestRunner.Add("Fake Cinema City: the repertoire of any cinema and day is the captured Sadyba day moved there, with ids made from the cinema, the day and the position", async () =>
 {
     var folder = Path.Combine(Path.GetTempPath(), "cinemawatch-fake-" + Guid.NewGuid().ToString("N")[..8]);
@@ -2420,5 +2497,112 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         Assert.True(page.Contains("Zapisano: budżet kreatora (na godzinę) 120 → 60, odstęp kreatora (s) 1 → 2."));
         Assert.Equal((60, 2.0), (settings.Poller.Wizard.RequestsPerHour, settings.Poller.Wizard.GapSeconds));
         Assert.True((await EventsAsync(ServiceEventKind.SettingsChanged)).Single().Message.EndsWith("WizardRequestsPerHour 120 → 60; WizardGapSeconds 1 → 2"));
+    });
+
+    // -----------------------------------------------------------------------------------------------------------
+    // Wizard pages, steps 1-2 (docs/SAAS.md §5.2, stage 6.4.3)
+    // -----------------------------------------------------------------------------------------------------------
+
+    // Step 2's form as the browser sends it: the hidden fields, the film, the ticked screenings, the pressed button.
+    static Dictionary<string, string> StepForm(string page, string go, IEnumerable<string>? ticked = null)
+    {
+        var form = new Dictionary<string, string> { ["go"] = go };
+        foreach (Match hidden in Regex.Matches(page, "<input type=\"hidden\" name=\"([a-z]+)\" value=\"([^\"]*)\""))
+            form[hidden.Groups[1].Value] = WebUtility.HtmlDecode(hidden.Groups[2].Value);
+        var films = page.IndexOf("<select id=\"film\"", StringComparison.Ordinal);
+        if (films >= 0 && Regex.Match(page[films..], "<option value=\"([^\"]+)\" selected") is { Success: true } film)
+            form["film"] = film.Groups[1].Value;
+        if (ticked is not null)
+            form["s"] = string.Join(",", ticked);
+        return form;
+    }
+
+    TestRunner.Add("Wizard pages: step 1 checks the dates as the desktop app; a loading's progress page reloads itself and opens step 2; films and screenings from the cache; back is instant, forward again costs nothing; the state rides in the form and the address", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("wizard-pages@example.test", AppLanguage.Polish);
+        var today = Today();
+        string Day(int days) => WizardState.Text(today.AddDays(days));
+
+        Assert.True((await browser.PageAsync("/")).Contains("href=\"wizard\""));
+        var page = await browser.PageAsync("/wizard");
+        Assert.True(page.Contains("Kino i termin") && page.Contains($"name=\"from\" value=\"{Day(0)}\"") && Regex.IsMatch(page, "<option value=\"1060\" selected"));
+
+        // The desktop's checks, nothing sent.
+        var mark = app.Network.Requests.Count;
+        var response = await browser.PostFormAsync("/wizard/go", page, null, new() { ["step"] = "1", ["go"] = "2", ["city"] = "1078", ["from"] = Day(-1) });
+        Assert.Equal($"/wizard?city=1078&from={Day(-1)}&max=1", Location(response));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(StatusText(page).Contains("Data nie może być z przeszłości.") && Regex.IsMatch(page, "<option value=\"1078\" selected"));
+        response = await browser.PostFormAsync("/wizard/go", page, null, new() { ["step"] = "1", ["go"] = "2", ["city"] = "all", ["from"] = Day(1), ["to"] = Day(15) });
+        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Dla wszystkich miast zakres może obejmować maksymalnie 14 dni."));
+        Assert.Equal(mark, app.Network.Requests.Count);
+
+        // A loading in the background: its page shows the progress and reloads itself; another account sees nothing.
+        var release = app.WizardPacer.Hold();
+        response = await browser.PostFormAsync("/wizard/go", page, null, new() { ["step"] = "1", ["go"] = "2", ["city"] = "1078", ["from"] = Day(1), ["to"] = Day(2), ["s"] = "bad id" });
+        var loading = Location(response);
+        Assert.True(loading.StartsWith("/wizard/loading/") && loading.EndsWith($"?city=1078&from={Day(1)}&to={Day(2)}&max=2"));
+        var jobId = Guid.Parse(loading["/wizard/loading/".Length..loading.IndexOf('?')]);
+        var userId = await UserIdAsync("wizard-pages@example.test");
+        await WaitUntilAsync(() => Wizard().Find(jobId, userId)!.Done == 1);
+        page = await browser.PageAsync(loading);
+        Assert.True(page.Contains("Wczytano 1 z 2") && page.Contains($"<meta http-equiv=\"refresh\" content=\"2; url={loading}\""));
+        var other = await SignedInAsync("wizard-pages-other@example.test", AppLanguage.Polish);
+        Assert.True((await other.PageAsync(loading)).Contains("Tego wczytywania już nie ma"));
+        // One loading per account: a second search goes to the running one with a message.
+        response = await browser.PostFormAsync("/wizard/go", page, null, new() { ["step"] = "1", ["go"] = "2", ["city"] = "1060", ["from"] = Day(3) });
+        Assert.True(Location(response).StartsWith($"/wizard/loading/{jobId}?city=1060"));
+        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Twoje poprzednie ładowanie jeszcze trwa."));
+        release();
+        await Wizard().WhenEndedAsync(jobId);
+        Assert.Equal(mark + 2, app.Network.Requests.Count);
+        response = await browser.GetAsync(loading);
+        Assert.Equal($"/wizard/2?city=1078&from={Day(1)}&to={Day(2)}&max=2", Location(response));
+
+        // Step 2 from the cache: the fake has four IMAX screenings of one film a day.
+        page = await browser.PageAsync(Location(response));
+        List<string> ids = [.. new[] { 1, 2 }.SelectMany(d => new[] { 6, 13, 19, 24 }.Select(p => FakeCinemaCityHandler.FakeScreeningId("1078", today.AddDays(d), p)))];
+        Assert.True(page.Contains("Film i seanse") && page.Contains("Zaznaczono 0 z 8") && page.Contains("Poznań, "));
+        Assert.True(ids.All(id => page.Contains($"name=\"s\" value=\"{id}\"")) && page.Contains(ScreeningText.DayHeader(today.AddDays(1))));
+        Assert.True(page.Contains("<button type=\"submit\" name=\"go\" value=\"1\" class=\"step\"")); // step 1 is a button of the form
+        Assert.Equal(mark + 2, app.Network.Requests.Count);
+
+        response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "all"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(Location(response).Contains($"&s={string.Join("%2C", ids)}&") && page.Contains("Zaznaczono 8 z 8"));
+
+        // Next checks the selection; a screening that is not listed is dropped; step 3 is not built yet.
+        response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "3", []));
+        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Zaznacz co najmniej jeden seans."));
+        response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "3", [ids[0], ids[5], "999999"]));
+        Assert.True(Location(response).Contains($"&s={ids[0]}%2C{ids[5]}&"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(StatusText(page).Contains("Krok 3 (mapa sali) jest jeszcze w budowie.") && page.Contains("Zaznaczono 2 z 8"));
+
+        // Back is instant and keeps the ticks; forward again opens step 2 from the cache, nothing sent.
+        response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "1", [ids[0], ids[5]]));
+        Assert.True(Location(response).StartsWith("/wizard?city=1078"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains($"name=\"s\" value=\"{ids[0]},{ids[5]}\"") && page.Contains("<button type=\"submit\" name=\"go\" value=\"2\" class=\"step\""));
+        var stepOne = StepForm(page, "2");
+        Assert.True(Regex.IsMatch(page, "<option value=\"1078\" selected") && page.Contains($"name=\"from\" value=\"{Day(1)}\"") && page.Contains($"name=\"to\" value=\"{Day(2)}\""));
+        (stepOne["city"], stepOne["from"], stepOne["to"]) = ("1078", Day(1), Day(2)); // the visible fields, as the page shows them
+        response = await browser.PostFormAsync("/wizard/go", page, null, stepOne);
+        Assert.True(Location(response).StartsWith("/wizard/2?city=1078"));
+        Assert.True((await browser.PageAsync(Location(response))).Contains("Zaznaczono 2 z 8"));
+        Assert.Equal(mark + 2, app.Network.Requests.Count);
+
+        // A refused loading says why on step 1; an expired repertoire asks to load again; no form without a token.
+        await WithService(async services => await services.GetRequiredService<OperatorService>().PauseAsync());
+        response = await browser.PostFormAsync("/wizard/go", page, null, new() { ["step"] = "1", ["go"] = "2", ["city"] = "1080", ["from"] = Day(1) });
+        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("wstrzymane przez właściciela serwisu"));
+        await WithService(async services => await services.GetRequiredService<OperatorService>().ResumeAsync());
+        app.Services.GetRequiredService<CinemaCityCache>().Clear();
+        page = await browser.PageAsync($"/wizard/2?city=1078&from={Day(1)}&to={Day(2)}&max=2");
+        Assert.True(page.Contains("Repertuaru dla tego wyszukiwania nie ma już w pamięci serwera") && page.Contains("value=\"reload\""));
+        Assert.Equal($"/wizard?city=1060&max=2", Location(await browser.GetAsync("/wizard/2?city=1060&max=2")));
+        Assert.Equal(HttpStatusCode.BadRequest, (await browser.PostAsync("/wizard/go", new FormUrlEncodedContent(new Dictionary<string, string> { ["go"] = "2" }))).StatusCode);
+        Assert.Equal(mark + 2, app.Network.Requests.Count);
     });
 }

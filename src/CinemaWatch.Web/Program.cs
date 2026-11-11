@@ -141,6 +141,7 @@ app.MapRobots();
 app.MapRazorComponents<App>();
 app.MapAccountEndpoints();
 app.MapProfileEndpoints();
+app.MapWizardEndpoints();
 app.MapOperatorEndpoints();
 app.MapLanguageEndpoint();
 

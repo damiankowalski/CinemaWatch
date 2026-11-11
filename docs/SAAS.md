@@ -597,6 +597,10 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         poller, migration `AddWizard` (`check_log.source`, four wizard overrides in `poller_settings`); merged after the
         `web-v0.6.0` tag (13 Nov), no tag of its own: the first `web-v0.7.0-beta.1` follows the pages (6.4.6).
   - [ ] 6.4.3 Steps 1-2: city & dates, film & screenings, the progress page, clickable steps, state in the form.
+        **Built 11 Nov 2026** on `feature/saas-wizard` (decisions in §9): `/wizard`, `/wizard/2`,
+        `/wizard/loading/<id>`, the form endpoint `/wizard/go`; `WizardState` and `ScreeningChoices` in
+        `Server/Wizard/`; the screening texts moved to `CinemaWatch.Core` (`ScreeningText`). *Next* on step 2 only checks
+        the selection until 6.4.4. Owner's check in the browser still to do.
   - [ ] 6.4.4 Step 3, the hall map: geometry as in the desktop map, row labels, copying between screenings with the
         same layout, `seatmap.js` with the rules of 6.4.1 (once merged) and its `node --test` step in CI.
   - [ ] 6.4.5 Step 4, saving and editing: the import's validation and limits, the notification state kept for
@@ -823,6 +827,11 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | No account in `check_log`: wizard rows carry only the source and the loading (`wizard-xxxxxxxx`); each account's limit is counted in memory only | No new personal data, the privacy notice stays as it is; the limit only needs the last hour |
 | Nov 2026 | The account limit applies to the owner too (no exception); the panel can raise it for everybody | One rule, one code path; the owner changes the number, not the rule |
 | Nov 2026 | A wizard loading reserves its estimated requests from the wizard's budget and the account's limit at the start and gives back the rest at the end; a failed item (HTTP 5xx, timeout) is reported and the loading goes on; a block, the owner's pause or a used-up budget during a loading stops it, keeping the items done; loadings and the cache live in memory (a restart forgets them) | A loading that started also finishes, whatever others do; the same partial results as the desktop app; nothing to migrate or back up |
+| Nov 2026 | 6.4.3 on the same branch as 6.4.2 (`feature/saas-wizard`); both squash-merged together, without a tag of their own | One review of the wizard's data and its first pages; the first beta comes with the pages anyway (6.4.6) |
+| Nov 2026 | The wizard's pages post one form to `/wizard/go`, which answers with a redirect; the state (`city`, `from`, `to`, `film`, `s`, `max`) travels in hidden fields and in the address of the page it redirects to; a loading's page is `/wizard/loading/<id>` and reloads itself every 2 s, then opens step 2 | A reload never posts again (as on the profile page); the progress page needs a GET that keeps the state; the server checks the state at every step |
+| Nov 2026 | Step 1 has an optional "To" field (empty = one day) instead of the desktop's range check box; step 2 changes the film with a "Show screenings" button; the filter stays IMAX without dubbing; Enter in a field presses *Next* (the step bar is last in the form, drawn first) | No JavaScript on these pages; the same choices as the desktop app |
+| Nov 2026 | Step 2 shows only what the shared cache holds and never loads by itself: missing or expired days (a restart, a long pause) are named, with a "Load again" button; *Next* from step 1 skips the loading when the cache holds every day | Nothing reaches Cinema City without a click; a reload of step 2 costs nothing |
+| Nov 2026 | The screening texts (day header, languages, availability) moved from `CinemaWatch.ViewModels` to `CinemaWatch.Core` (`ScreeningText`); the desktop's `Formatting` calls them | The site does not use the view models (§9, 8 Nov), but both clients must show the same texts |
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 
 ---
