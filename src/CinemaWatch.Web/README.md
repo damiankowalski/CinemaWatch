@@ -60,9 +60,15 @@ How it works:
   refused loading (the owner's pause, a block, a used-up budget or limit) says on step 1 when to try again. Step 2
   (`/wizard/2`): the films with IMAX screenings without dubbing that have not started, the chosen film's screenings
   by day and cinema with check boxes, "select all / clear all", "Show screenings" after choosing another film (no
-  JavaScript); missing days can be loaded again. Steps 3-4 (hall map, saving) follow in 6.4.4-6.4.5; *Next* on step 2
-  only checks the selection for now. All of it posts to `/wizard/go`; the state (`city`, `from`, `to`, `film`, `s`,
-  `max`) travels in hidden fields and in the address of the page the answer redirects to - nothing in the database.
+  JavaScript); missing days can be loaded again. *Next* loads the hall maps (details, the layout from `seat_plans`,
+  free seats) the same way, unless everything is known. Step 3 (`/wizard/3`): one hall map per tab, drawn from the
+  geometry the desktop map uses (`CinemaWatch.Core` `HallLayout`): every seat a check box drawn as a circle (free
+  green, taken grey, watched ringed), row numbers that toggle the row, the minimum of adjacent seats, "Copy to
+  screenings in the same hall", "Clear", "Refresh the occupancy" when it is older than 10 minutes. Step 4 (saving)
+  follows in 6.4.5; *Next* on step 3 only checks that a seat is selected for now. All of it posts to `/wizard/go`;
+  the state (`city`, `from`, `to`, `film`, `s`, `max`, `m` - each screening's seats as one bit per seat of its
+  layout, Base64Url (`SeatCode`) -, `tab`, `adj`) travels in hidden fields and in the address of the page the
+  answer redirects to - nothing in the database.
 - Profile limit: 5 per account (enabled, disabled and ended alike). The owner sets another limit per account (1-50)
   in the **Users** list; an empty field means the default. Lowering a limit deletes nothing.
 

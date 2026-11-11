@@ -600,9 +600,12 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         **Built 11 Nov 2026** on `feature/saas-wizard` (decisions in §9): `/wizard`, `/wizard/2`,
         `/wizard/loading/<id>`, the form endpoint `/wizard/go`; `WizardState` and `ScreeningChoices` in
         `Server/Wizard/`; the screening texts moved to `CinemaWatch.Core` (`ScreeningText`). *Next* on step 2 only checks
-        the selection until 6.4.4. Owner's check in the browser still to do.
+        the selection until 6.4.4. Checked by the owner in the browser (11 Nov 2026).
   - [ ] 6.4.4 Step 3, the hall map: geometry as in the desktop map, row labels, copying between screenings with the
         same layout, `seatmap.js` with the rules of 6.4.1 (once merged) and its `node --test` step in CI.
+        **Step 3 without JavaScript built 12 Nov 2026** (decisions in §9): the geometry moved to `CinemaWatch.Core`
+        (`HallLayout`, used by the desktop map too), `SeatCode`, `SeatsStep.razor`, the hall maps' loading through the
+        progress page, `WizardJobs.PeekScreeningsAsync`. `seatmap.js` and its CI step follow.
   - [ ] 6.4.5 Step 4, saving and editing: the import's validation and limits, the notification state kept for
         unchanged screenings, a test that a profile made on the site reads in the desktop app's `WatchProfile`.
   - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's and testers' checks, stable `web-v0.7.0`; documents
@@ -832,6 +835,11 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Step 1 has an optional "To" field (empty = one day) instead of the desktop's range check box; step 2 changes the film with a "Show screenings" button; the filter stays IMAX without dubbing; Enter in a field presses *Next* (the step bar is last in the form, drawn first) | No JavaScript on these pages; the same choices as the desktop app |
 | Nov 2026 | Step 2 shows only what the shared cache holds and never loads by itself: missing or expired days (a restart, a long pause) are named, with a "Load again" button; *Next* from step 1 skips the loading when the cache holds every day | Nothing reaches Cinema City without a click; a reload of step 2 costs nothing |
 | Nov 2026 | The screening texts (day header, languages, availability) moved from `CinemaWatch.ViewModels` to `CinemaWatch.Core` (`ScreeningText`); the desktop's `Formatting` calls them | The site does not use the view models (§9, 8 Nov), but both clients must show the same texts |
+| Nov 2026 | Step 3's selection travels as one bit per seat of the layout, Base64Url (`SeatCode`, Sadyba's 385 seats = 66 characters a screening), per screening in `m`; a code of another length reads as nothing selected | The seat keys of a whole hall are about 3 KB a screening - too long for the address the answers redirect to; the server checks everything when saving |
+| Nov 2026 | Step 3 shows one hall map at a time (tabs as form buttons, as in the desktop app); a row number is a form button without JavaScript; occupancy older than 10 minutes is not shown, "Refresh the occupancy" loads only the free seats | The same steps as the desktop; nothing reaches Cinema City without a click |
+| Nov 2026 | The hall map's geometry moved from `HallMapViewModel` to `CinemaWatch.Core` (`HallLayout`); the desktop map and the site use it | Both maps must look the same; the desktop's tests guard it |
+| Nov 2026 | Node.js 26 LTS (zip, `C:\DEV\CINEMAWATCH
+ode`, outside PATH) on the owner's PC for `seatmap.js`'s tests; CI runs them on its Ubuntu runner | Quick feedback for the script that mirrors the Core rules, without waiting for CI; remove = delete the folder |
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 
 ---

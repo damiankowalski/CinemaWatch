@@ -590,3 +590,108 @@ tr.quiet td { color: var(--muted); }
 
 .loading progress { width: 100%; max-width: 26rem; height: 0.75rem; accent-color: var(--free); }
 .loading p { margin: 0.35rem 0 1rem; }
+
+/* Step 3: the hall map. Seats are check boxes drawn as circles where the shared geometry (Core HallLayout) puts them,
+   in % of the map; sizes follow the map's width (container units), so the whole hall scales like the desktop's
+   Viewbox. Free seats green, taken ones grey, watched ones ringed in the accent colour. */
+
+.hall-tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0 0 1rem; }
+
+.hall-tab {
+    display: grid;
+    gap: 0.1rem;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.hall-tab .hint { font-size: 0.8rem; }
+.hall-tab.current { border-color: var(--free); box-shadow: inset 0 -3px 0 var(--free); cursor: default; }
+button.hall-tab:hover { border-color: var(--ink); }
+
+.hall {
+    position: relative;
+    width: 100%;
+    max-width: 60rem;
+    margin: 0.5rem 0;
+    container-type: inline-size;
+    user-select: none;
+    touch-action: pan-y;
+}
+
+.hall .screen {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    border-radius: 3px;
+    background: var(--seat);
+    color: var(--muted);
+    font-size: calc(var(--seat-size) * 0.32);
+    letter-spacing: 0.2em;
+}
+
+.hall .seat, .hall .row-label {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    width: var(--seat-size);
+    height: var(--seat-size);
+    margin: 0;
+    padding: 0;
+    border-radius: 50%;
+    font: inherit;
+    font-size: calc(var(--seat-size) * 0.4);
+    line-height: 1;
+}
+
+.hall .seat {
+    background: var(--seat);
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.hall .seat.free { background: var(--free); color: var(--on-free); }
+.hall .seat.taken { background: var(--seat); color: var(--muted); }
+
+.hall .seat input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+/* Watched: a ring in the ink colour and a darker fill, so it reads on free and taken seats alike. */
+.hall .seat:has(input:checked) { box-shadow: 0 0 0 calc(var(--seat-size) * 0.12) var(--ink); }
+.hall .seat:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.hall .row-label {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.hall .row-label:hover { border-color: var(--ink); color: var(--ink); }
+.hall .row-label.partial { border-color: var(--free); color: var(--ink); }
+.hall .row-label.full { border-color: var(--free); background: var(--free); color: var(--on-free); }
+
+/* The rectangle of a drag from the background (seatmap.js). */
+.hall .selection-rectangle {
+    position: absolute;
+    border: 1px dashed var(--ink);
+    background: color-mix(in srgb, var(--free) 15%, transparent);
+    pointer-events: none;
+}
+
+.selection-text { margin: 0.25rem 0 1rem; font-weight: 600; }
+
+.seat-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0 0 0.75rem; }
+.seat-tools select { width: auto; }

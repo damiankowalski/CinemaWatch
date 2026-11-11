@@ -15,15 +15,9 @@ namespace CinemaWatch.ViewModels;
 /// </summary>
 public sealed class HallMapViewModel : ObservableObject
 {
-    private const double Margin = 24;
-    private const double ScreenBarUnits = 18;
-    private const double ScreenBlockHeight = 64;
-    private const double ScreenGap = 40;
-
     private readonly Dictionary<(string Section, string RowKey), List<SeatViewModel>> _rows = [];
     private readonly Dictionary<(string Section, string RowKey), List<RowLabelViewModel>> _rowLabels = [];
-    private readonly double _offsetX;
-    private readonly double _offsetY;
+    private readonly HallLayout _layout;
     private HashSet<string> _watched = new(StringComparer.Ordinal);
     private bool _suppressChanges;
     private SeatSelectionGesture? _gesture;
@@ -31,51 +25,25 @@ public sealed class HallMapViewModel : ObservableObject
     public HallMapViewModel(ScreeningSeats seats, IEnumerable<string>? watchedKeys = null)
     {
         Seats = seats;
-        var plan = seats.Plan;
-        var radius = plan.SeatRadius;
-        SeatSize = radius * 2;
+        // The geometry is shared with the site's map (CinemaWatch.Core HallLayout).
+        var layout = HallLayout.Of(seats.Plan);
+        _layout = layout;
+        SeatSize = layout.SeatSize;
+        Width = layout.Width;
+        Height = layout.Height;
+        ScreenLeft = layout.ScreenLeft;
+        ScreenTop = layout.ScreenTop;
+        ScreenWidth = layout.ScreenWidth;
         var initial = new HashSet<string>(watchedKeys ?? [], StringComparer.Ordinal);
 
-        // Row numbers stand in two straight columns at the left and right edge of the hall, like on the
-        // Cinema City website. (The plan's own label anchors hug each row, which looks ragged in halls with
-        // rows of different widths - e.g. Wrocław, where the last row is a single wheelchair space.)
-        var leftColumn = plan.Seats.Min(s => s.X) - SeatSize;
-        var rightColumn = plan.Seats.Max(s => s.X) + SeatSize;
-        var rowInfos = plan.Seats
-            .GroupBy(s => (s.Section, s.RowKey))
-            .Select(g =>
-            {
-                var y = g.Average(s => s.Y);
-                return (Key: g.Key, Label: g.First().Row, Left: new PlanPoint(leftColumn, y), Right: new PlanPoint(rightColumn, y));
-            })
-            .ToList();
-
-        // Bounds of everything drawn on the map.
-        var xs = plan.Seats.Select(s => s.X).Concat(rowInfos.SelectMany(r => new[] { r.Left.X, r.Right.X })).ToList();
-        var ys = plan.Seats.Select(s => s.Y).Concat(rowInfos.SelectMany(r => new[] { r.Left.Y, r.Right.Y })).ToList();
-        var minX = xs.Min() - radius - Margin;
-        var maxX = xs.Max() + radius + Margin;
-        var minY = ys.Min() - radius - Margin - ScreenGap - ScreenBlockHeight;
-        var maxY = ys.Max() + radius + Margin;
-
-        Width = maxX - minX;
-        Height = maxY - minY;
-        _offsetX = minX;
-        _offsetY = minY;
-
-        var seatMinX = plan.Seats.Min(s => s.X);
-        var seatMaxX = plan.Seats.Max(s => s.X);
-        ScreenWidth = Math.Max(SeatSize * 6, (seatMaxX - seatMinX) * 0.7);
-        ScreenLeft = (seatMinX + seatMaxX) / 2 - minX - ScreenWidth / 2;
-        ScreenTop = Margin;
-
-        var seatViews = new List<SeatViewModel>(plan.Seats.Count);
-        foreach (var seat in plan.Seats)
+        var seatViews = new List<SeatViewModel>(layout.Seats.Count);
+        foreach (var placed in layout.Seats)
         {
+            var seat = placed.Seat;
             var view = new SeatViewModel(
                 seat,
-                left: seat.X - radius - minX,
-                top: seat.Y - radius - minY,
+                left: placed.Left,
+                top: placed.Top,
                 size: SeatSize,
                 isFree: seats.IsFree(seat),
                 isWatched: initial.Contains(seat.Key),
@@ -89,18 +57,18 @@ public sealed class HallMapViewModel : ObservableObject
         }
         SeatViews = seatViews;
 
-        var labels = new List<RowLabelViewModel>(rowInfos.Count * 2);
-        foreach (var row in rowInfos)
+        var labels = new List<RowLabelViewModel>(layout.RowLabels.Count);
+        var commands = new Dictionary<(string Section, string RowKey), RelayCommand>();
+        foreach (var row in layout.RowLabels)
         {
-            var key = row.Key;
-            var command = new RelayCommand(() => ToggleRow(key));
-            var pair = new List<RowLabelViewModel>
-            {
-                new(row.Label, row.Left.X - radius - minX, row.Left.Y - radius - minY, SeatSize, command),
-                new(row.Label, row.Right.X - radius - minX, row.Right.Y - radius - minY, SeatSize, command),
-            };
-            _rowLabels[key] = pair;
-            labels.AddRange(pair);
+            var key = (row.Section, row.RowKey);
+            if (!commands.TryGetValue(key, out var command))
+                commands[key] = command = new RelayCommand(() => ToggleRow(key));
+            var label = new RowLabelViewModel(row.Label, row.Left, row.Top, SeatSize, command);
+            if (!_rowLabels.TryGetValue(key, out var pair))
+                _rowLabels[key] = pair = [];
+            pair.Add(label);
+            labels.Add(label);
         }
         RowLabels = labels;
 
@@ -118,7 +86,7 @@ public sealed class HallMapViewModel : ObservableObject
     public double ScreenLeft { get; }
     public double ScreenTop { get; }
     public double ScreenWidth { get; }
-    public double ScreenBarHeight => ScreenBarUnits;
+    public double ScreenBarHeight => HallLayout.ScreenBarHeight;
 
     public IReadOnlyList<SeatViewModel> SeatViews { get; }
     public IReadOnlyList<RowLabelViewModel> RowLabels { get; }
@@ -149,8 +117,8 @@ public sealed class HallMapViewModel : ObservableObject
 
     /// <summary>The rectangle of a gesture that started on the background, in map units.</summary>
     public bool IsRectangleVisible => _gesture?.Kind == SeatSelectionGestureKind.Rectangle;
-    public double RectangleLeft => _gesture is null ? 0 : Math.Min(_gesture.Start.X, _gesture.Current.X) - _offsetX;
-    public double RectangleTop => _gesture is null ? 0 : Math.Min(_gesture.Start.Y, _gesture.Current.Y) - _offsetY;
+    public double RectangleLeft => _gesture is null ? 0 : Math.Min(_gesture.Start.X, _gesture.Current.X) - _layout.OffsetX;
+    public double RectangleTop => _gesture is null ? 0 : Math.Min(_gesture.Start.Y, _gesture.Current.Y) - _layout.OffsetY;
     public double RectangleWidth => _gesture is null ? 0 : Math.Abs(_gesture.Current.X - _gesture.Start.X);
     public double RectangleHeight => _gesture is null ? 0 : Math.Abs(_gesture.Current.Y - _gesture.Start.Y);
 
@@ -192,7 +160,7 @@ public sealed class HallMapViewModel : ObservableObject
         RaiseGestureProperties();
     }
 
-    private PlanPoint ToPlan(double x, double y) => new(x + _offsetX, y + _offsetY);
+    private PlanPoint ToPlan(double x, double y) => _layout.ToPlan(x, y);
 
     private void ApplyLive(IReadOnlySet<string> keys)
     {

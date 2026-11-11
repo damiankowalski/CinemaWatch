@@ -12,7 +12,7 @@ namespace Microsoft.AspNetCore.Routing;
 
 /// <summary>
 /// The wizard's one form endpoint (docs/SAAS.md §5.2). Every page of the wizard posts its whole form here with the
-/// button that was pressed ("go"): a step number from the step bar or the Back/Next buttons, or an action of step 2.
+/// button that was pressed ("go"): a step number from the step bar or the Back/Next buttons, or an action of a step.
 /// Backwards is immediate; forwards runs the same checks and loading as the desktop app's "Next" and stops at the
 /// first step that needs the user. The answer is always a redirect to a page that carries the state in its address,
 /// so a reload never posts again.
@@ -32,13 +32,20 @@ internal static class WizardEndpoints
 
             var form = await context.Request.ReadFormAsync();
             var state = WizardState.Read(name => form[name]);
-            var step = form["step"] == "2" ? 2 : 1;
+            var step = form["step"].ToString() switch { "2" => 2, "3" => 3, _ => 1 };
             var go = form["go"].ToString();
             var now = time.GetUtcNow();
             var today = CinemaCityCache.PolishToday(now);
+            var maxScreenings = settings.Limits.MaxScreeningsPerProfile;
 
             if (step == 2)
                 state = ApplyChoices(state, go, cache, PolishTime.FromUtc(now.UtcDateTime));
+            IReadOnlyList<ScreeningResult> maps = [];
+            if (step == 3)
+            {
+                maps = await jobs.PeekScreeningsAsync(state.ScreeningIds, context.RequestAborted);
+                state = ApplySeats(state, form, maps);
+            }
 
             switch (go)
             {
@@ -46,21 +53,34 @@ internal static class WizardEndpoints
                     return Results.LocalRedirect(WizardTexts.StepUrl(1, state));
                 case "film" or "all" or "none":
                     return Results.LocalRedirect(WizardTexts.StepUrl(2, state));
-                case "2" when step == 2:
+                case "2" when step >= 2:
                     return Results.LocalRedirect(WizardTexts.StepUrl(2, state));
-                case "2" or "reload":
-                    return await LoadRepertoireAsync(context, jobs, cache, userId, state, today);
+                case "2" or "reload" when step <= 2:
                 case "3" or "4" when step == 1:
-                    // Like pressing "Next" repeatedly: step 2 needs the user's choice, so the way stops there.
+                    // From step 1 the way stops at step 2: it needs the user's choice.
                     return await LoadRepertoireAsync(context, jobs, cache, userId, state, today);
-                case "3" or "4":
-                    if (state.SelectionProblem(settings.Limits.MaxScreeningsPerProfile) is { } problem)
+                case "3" or "4" when step == 2:
+                    if (state.SelectionProblem(maxScreenings) is { } problem)
                         return Refuse(context, 2, state, problem);
-                    // Step 3 (the hall map) follows in stage 6.4.4.
+                    return await LoadMapsAsync(context, jobs, userId, state, 2, onlyWhenMissing: true);
+                case "reload":
+                    return await LoadMapsAsync(context, jobs, userId, state, 3, onlyWhenMissing: false);
+                case "copy":
+                    return CopyToSameLayout(context, state, maps);
+                case "clear" when state.CurrentTab is { } tab:
+                    return Results.LocalRedirect(WizardTexts.StepUrl(3, state.WithSeats(tab, "")));
+                case "4":
+                    if (state.Seats.Count == 0)
+                        return Refuse(context, 3, state, T("Zaznacz co najmniej jeden rząd albo jedno miejsce.", "Select at least one row or seat."));
+                    // Step 4 (summary and saving) follows in stage 6.4.5.
                     IdentityRedirectManager.SetStatus(context, StatusMessageKind.Success,
-                        T("Wybór seansów jest w porządku. Krok 3 (mapa sali) jest jeszcze w budowie.", "The selection is fine. Step 3 (the hall map) is still being built."));
-                    return Results.LocalRedirect(WizardTexts.StepUrl(2, state));
+                        T("Zaznaczenie jest w porządku. Krok 4 (podsumowanie i zapis) jest jeszcze w budowie.", "The selection is fine. Step 4 (summary and saving) is still being built."));
+                    return Results.LocalRedirect(WizardTexts.StepUrl(3, state));
                 default:
+                    if (step == 3 && go.StartsWith("tab:", StringComparison.Ordinal) && state.ScreeningIds.Contains(go[4..]))
+                        return Results.LocalRedirect(WizardTexts.StepUrl(3, state with { Tab = go[4..] }));
+                    if (step == 3 && go.StartsWith("row:", StringComparison.Ordinal))
+                        return Results.LocalRedirect(WizardTexts.StepUrl(3, ToggleRow(state, go[4..], maps)));
                     return Results.LocalRedirect(WizardTexts.StepUrl(step, state));
             }
         });
@@ -68,7 +88,7 @@ internal static class WizardEndpoints
 
     /// <summary>
     /// Step 2's form: the film from the list, the ticked screenings - only those of that film that are listed (a film
-    /// change clears the ticks, as in the desktop app) - or all/none of them.
+    /// change clears the ticks, as in the desktop app) - or all/none of them. Seats of screenings no longer ticked go.
     /// </summary>
     private static WizardState ApplyChoices(WizardState state, string go, CinemaCityCache cache, DateTime polishNow)
     {
@@ -85,7 +105,68 @@ internal static class WizardEndpoints
             "none" => [],
             _ => state.ScreeningIds.Where(listed.Contains).ToList(),
         };
-        return state with { FilmId = choices.Film?.FilmId, ScreeningIds = ids };
+        return state with
+        {
+            FilmId = choices.Film?.FilmId,
+            ScreeningIds = ids,
+            Seats = state.Seats.Where(s => ids.Contains(s.Key)).ToDictionary(StringComparer.Ordinal),
+            Tab = state.Tab is { } tab && ids.Contains(tab) ? tab : null,
+        };
+    }
+
+    /// <summary>
+    /// Step 3's form: the shown map's check boxes ("seat", only keys of its layout) replace that screening's
+    /// selection - only when the form really showed that map ("shown"), so a map that could not be drawn keeps its seats.
+    /// </summary>
+    private static WizardState ApplySeats(WizardState state, IFormCollection form, IReadOnlyList<ScreeningResult> maps)
+    {
+        var shown = form["shown"].ToString();
+        if (shown.Length == 0 || shown != state.CurrentTab || maps.FirstOrDefault(m => m.ScreeningId == shown)?.Plan is not { } plan)
+            return state;
+        var keys = form["seat"].Where(k => k is not null).Select(k => k!).ToHashSet(StringComparer.Ordinal);
+        return state.WithSeats(shown, SeatCode.Encode(plan, keys));
+    }
+
+    /// <summary>A row number without JavaScript: all regular seats of the row on, or off when all were on (Core rules).</summary>
+    private static WizardState ToggleRow(WizardState state, string row, IReadOnlyList<ScreeningResult> maps)
+    {
+        var separator = row.IndexOf('|');
+        if (separator <= 0 || state.CurrentTab is not { } tab || maps.FirstOrDefault(m => m.ScreeningId == tab)?.Plan is not { } plan)
+            return state;
+        var (section, rowKey) = (row[..separator], row[(separator + 1)..]);
+        if (!plan.Seats.Any(s => s.Section == section && s.RowKey == rowKey))
+            return state;
+        var before = SeatCode.Decode(plan, state.Seats.GetValueOrDefault(tab));
+        return state.WithSeats(tab, SeatCode.Encode(plan, SeatSelection.ToggleRow(before, plan, section, rowKey)));
+    }
+
+    /// <summary>The desktop's "Apply to all": the shown selection goes to every other screening in the same hall layout.</summary>
+    private static IResult CopyToSameLayout(HttpContext context, WizardState state, IReadOnlyList<ScreeningResult> maps)
+    {
+        if (state.CurrentTab is not { } tab || maps.FirstOrDefault(m => m.ScreeningId == tab) is not { Details: { } source, Plan: not null })
+            return Results.LocalRedirect(WizardTexts.StepUrl(3, state));
+        var code = state.Seats.GetValueOrDefault(tab) ?? "";
+        var copied = 0;
+        var skipped = 0;
+        foreach (var map in maps.Where(m => m.ScreeningId != tab))
+        {
+            if (map.Details is { } details && map.Plan is not null && (details.VenueId, details.SeatplanId) == (source.VenueId, source.SeatplanId))
+            {
+                state = state.WithSeats(map.ScreeningId, code);
+                copied++;
+            }
+            else
+                skipped++;
+        }
+        var message = copied == 0
+            ? T("Brak innych seansów z tą samą salą.", "No other screenings in the same hall.")
+            : T($"Skopiowano zaznaczenie do {copied} {Plural(copied, "seansu", "seansów", "seansów", "", "")}",
+                $"Selection copied to {Count(copied, "", "", "", "screening", "screenings")}")
+              + (skipped > 0
+                  ? T($" (pominięto {skipped}: inna sala lub błąd pobierania).", $" ({skipped} skipped: different hall or loading error).")
+                  : ".");
+        IdentityRedirectManager.SetStatus(context, StatusMessageKind.Success, message);
+        return Results.LocalRedirect(WizardTexts.StepUrl(3, state));
     }
 
     /// <summary>
@@ -101,7 +182,29 @@ internal static class WizardEndpoints
         var next = state with { Furthest = Math.Max(state.Furthest, 2) };
         if (CachedRepertoire.Read(cache, request).Complete)
             return Results.LocalRedirect(WizardTexts.StepUrl(2, next));
+        return await StartAsync(context, jobs, userId, request, state, next, 1);
+    }
 
+    /// <summary>
+    /// Step 2 → 3 (or "Refresh occupancy" on step 3): the hall maps' data. When everything is known (details, layout,
+    /// free seats young enough) and only missing data is wanted, step 3 opens at once; otherwise a loading starts.
+    /// </summary>
+    private static async Task<IResult> LoadMapsAsync(HttpContext context, WizardJobs jobs, string userId, WizardState state, int from, bool onlyWhenMissing)
+    {
+        if (state.ScreeningIds.Count == 0)
+            return Results.LocalRedirect(WizardTexts.StepUrl(2, state));
+        var next = state with { Furthest = Math.Max(state.Furthest, 3) };
+        if (onlyWhenMissing)
+        {
+            var maps = await jobs.PeekScreeningsAsync(state.ScreeningIds, context.RequestAborted);
+            if (maps.All(m => m.Error is null && m.FreeSeatKeys is not null))
+                return Results.LocalRedirect(WizardTexts.StepUrl(3, next));
+        }
+        return await StartAsync(context, jobs, userId, new ScreeningsRequest(state.ScreeningIds), state, next, from);
+    }
+
+    private static async Task<IResult> StartAsync(HttpContext context, WizardJobs jobs, string userId, WizardRequest request, WizardState state, WizardState next, int from)
+    {
         var start = await jobs.StartAsync(userId, request, context.RequestAborted);
         switch (start.Outcome)
         {
@@ -113,9 +216,9 @@ internal static class WizardEndpoints
                       "Your previous loading is still running. When it is done, you can try again."));
                 return Results.LocalRedirect(WizardTexts.LoadingUrl(start.Job!.Id, state));
             case WizardStartOutcome.Invalid:
-                return Refuse(context, 1, state, WizardTexts.Problem(start.Problem!.Value));
+                return Refuse(context, from, state, WizardTexts.Problem(start.Problem!.Value));
             default:
-                return Refuse(context, 1, state, WizardTexts.StopReason(start.Reason!.Value, start.RetryAt));
+                return Refuse(context, from, state, WizardTexts.StopReason(start.Reason!.Value, start.RetryAt));
         }
     }
 

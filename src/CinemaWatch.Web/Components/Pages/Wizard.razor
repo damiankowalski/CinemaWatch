@@ -25,7 +25,7 @@
 
     @if (current == 1)
     {
-        @foreach (var field in state.Fields().Where(f => f.Key is "film" or "s" or "max"))
+        @foreach (var field in state.Fields().Where(f => f.Key is not ("city" or "from" or "to")))
         {
             <input type="hidden" name="@field.Key" value="@field.Value" />
         }
@@ -55,7 +55,7 @@
             <a class="button" href="/">@T("Anuluj", "Cancel")</a>
         </div>
     }
-    else
+    else if (current == 2)
     {
         @foreach (var field in state.Fields(withScreenings: false).Where(f => f.Key is not "film"))
         {
@@ -145,6 +145,11 @@
         }
     }
 
+    else
+    {
+        <SeatsStep State="state" />
+    }
+
     @* After the content in the page's order, so Enter in a field presses "Next"; shown first (CSS order). *@
     <WizardSteps Current="current" Furthest="state.Furthest" />
 </form>
@@ -171,9 +176,17 @@
         today = CinemaCityCache.PolishToday(now);
         var query = HttpContext.Request.Query;
         state = query.ContainsKey("city") ? WizardState.Read(name => query[name]) : WizardState.New(today);
-        current = Step == 2 ? 2 : 1;
+        current = Step switch { 2 => 2, 3 => 3, _ => 1 };
         if (current == 1)
             return;
+        if (current == 3)
+        {
+            // Step 3 needs ticked screenings (an address changed by hand goes back to step 2).
+            if (state.ScreeningIds.Count == 0)
+                RedirectManager.RedirectTo(WizardTexts.StepUrl(2, state));
+            state = state with { Furthest = Math.Max(state.Furthest, 3) };
+            return;
+        }
 
         // Step 2 needs the dates of step 1 (an address changed by hand starts again there).
         if (state.Dates.Count == 0)

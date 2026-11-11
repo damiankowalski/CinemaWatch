@@ -711,6 +711,41 @@ TestRunner.Add("Wizard step 2: films with IMAX screenings without dubbing that h
     Assert.Equal(("EN · napisy PL", "50% miejsc wolnych"), (ScreeningText.Languages(days[0].Screenings[1]), ScreeningText.Availability(days[0].Screenings[1])));
 });
 
+TestRunner.Add("Wizard step 3: a selection as one bit per seat (Base64Url), nothing for another layout or a broken code; seats, tab and adjacency in the state", () =>
+{
+    var plan = CinemaCityParser.ParseSeatPlan(FakePlanJson());
+    Assert.Equal(385, plan.Seats.Count);
+    var keys = new HashSet<string>(["1_18_4", "1_19_4", plan.Seats[^1].Key], StringComparer.Ordinal);
+    var code = SeatCode.Encode(plan, keys);
+    Assert.Equal((49 * 4 + 2) / 3, code.Length); // 385 bits = 49 bytes, no padding
+    Assert.True(SeatCode.IsWellFormed(code) && SeatCode.Decode(plan, code).SetEquals(keys));
+    Assert.Equal("", SeatCode.Encode(plan, new HashSet<string>(["not-a-seat"])));
+    Assert.Equal(0, SeatCode.Decode(plan, code[..^4]).Count); // another layout's length
+    Assert.Equal(0, SeatCode.Decode(plan, code[..^1] + "*").Count);
+    Assert.Equal(0, SeatCode.Decode(plan, null).Count);
+
+    var values = new Dictionary<string, string?[]>
+    {
+        ["city"] = ["1060"], ["from"] = ["2026-12-16"], ["s"] = ["a1,b2"], ["m"] = [$"a1.{code},zz.{code},b2.bad*code,b2"],
+        ["tab"] = ["b2"], ["adj"] = ["9"], ["max"] = ["3"],
+    };
+    var state = WizardState.Read(name => values.GetValueOrDefault(name) ?? []);
+    Assert.SequenceEqual(["a1"], state.Seats.Keys);
+    Assert.Equal(("b2", "b2", 6), (state.Tab, state.CurrentTab, state.MinAdjacent));
+    Assert.Equal($"city=1060&from=2026-12-16&s=a1%2Cb2&max=3&m=a1.{code}&tab=b2&adj=6", state.Query());
+    Assert.Equal("a1", (state with { Tab = null }).CurrentTab);
+    Assert.Equal(0, state.WithSeats("a1", "").Seats.Count);
+    Assert.Equal(null, WizardState.Read(name => name == "tab" ? ["zz"] : []).Tab); // only a ticked screening
+
+    // The shared geometry: row numbers in two columns outside the seats, the screen above them, all inside the map.
+    var layout = HallLayout.Of(plan);
+    Assert.Equal((385, 2 * plan.Seats.Select(s => (s.Section, s.RowKey)).Distinct().Count()), (layout.Seats.Count, layout.RowLabels.Count));
+    Assert.True(layout.Seats.All(s => s.Left >= 0 && s.Top > layout.ScreenTop + HallLayout.ScreenBarHeight && s.Left + layout.SeatSize <= layout.Width && s.Top + layout.SeatSize <= layout.Height));
+    Assert.True(layout.RowLabels.Select(r => r.Left).Distinct().Count() == 2 && layout.RowLabels.Min(r => r.Left) < layout.Seats.Min(s => s.Left));
+    var first = layout.Seats[0];
+    Assert.Equal((first.Seat.X, first.Seat.Y), (layout.ToPlan(first.Left + plan.SeatRadius, first.Top + plan.SeatRadius).X, layout.ToPlan(first.Left + plan.SeatRadius, first.Top + plan.SeatRadius).Y));
+});
+
 TestRunner.Add("Fake Cinema City: the repertoire of any cinema and day is the captured Sadyba day moved there, with ids made from the cinema, the day and the position", async () =>
 {
     var folder = Path.Combine(Path.GetTempPath(), "cinemawatch-fake-" + Guid.NewGuid().ToString("N")[..8]);
@@ -2572,13 +2607,16 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         page = await browser.PageAsync(Location(response));
         Assert.True(Location(response).Contains($"&s={string.Join("%2C", ids)}&") && page.Contains("Zaznaczono 8 z 8"));
 
-        // Next checks the selection; a screening that is not listed is dropped; step 3 is not built yet.
+        // Next checks the selection; a screening that is not listed is dropped; then the hall maps load (step 3).
         response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "3", []));
         Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Zaznacz co najmniej jeden seans."));
         response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "3", [ids[0], ids[5], "999999"]));
-        Assert.True(Location(response).Contains($"&s={ids[0]}%2C{ids[5]}&"));
-        page = await browser.PageAsync(Location(response));
-        Assert.True(StatusText(page).Contains("Krok 3 (mapa sali) jest jeszcze w budowie.") && page.Contains("Zaznaczono 2 z 8"));
+        var maps = Location(response);
+        Assert.True(maps.StartsWith("/wizard/loading/") && maps.Contains($"&s={ids[0]}%2C{ids[5]}&"));
+        await Wizard().WhenEndedAsync(Guid.Parse(maps["/wizard/loading/".Length..maps.IndexOf('?')]));
+        mark = app.Network.Requests.Count;
+        page = await browser.PageAsync("/wizard/2?" + maps[(maps.IndexOf('?') + 1)..]);
+        Assert.True(page.Contains("Zaznaczono 2 z 8"));
 
         // Back is instant and keeps the ticks; forward again opens step 2 from the cache, nothing sent.
         response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "1", [ids[0], ids[5]]));
@@ -2591,7 +2629,7 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         response = await browser.PostFormAsync("/wizard/go", page, null, stepOne);
         Assert.True(Location(response).StartsWith("/wizard/2?city=1078"));
         Assert.True((await browser.PageAsync(Location(response))).Contains("Zaznaczono 2 z 8"));
-        Assert.Equal(mark + 2, app.Network.Requests.Count);
+        Assert.Equal(mark, app.Network.Requests.Count);
 
         // A refused loading says why on step 1; an expired repertoire asks to load again; no form without a token.
         await WithService(async services => await services.GetRequiredService<OperatorService>().PauseAsync());
@@ -2603,6 +2641,112 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         Assert.True(page.Contains("Repertuaru dla tego wyszukiwania nie ma już w pamięci serwera") && page.Contains("value=\"reload\""));
         Assert.Equal($"/wizard?city=1060&max=2", Location(await browser.GetAsync("/wizard/2?city=1060&max=2")));
         Assert.Equal(HttpStatusCode.BadRequest, (await browser.PostAsync("/wizard/go", new FormUrlEncodedContent(new Dictionary<string, string> { ["go"] = "2" }))).StatusCode);
-        Assert.Equal(mark + 2, app.Network.Requests.Count);
+        Assert.Equal(mark, app.Network.Requests.Count);
+    });
+
+    // Step 3's form: the hidden fields, the adjacency list, the shown map's ticked seats, the pressed button.
+    static List<KeyValuePair<string, string>> MapForm(string page, string go, IEnumerable<string>? seats = null)
+    {
+        var form = new List<KeyValuePair<string, string>> { new("go", go) };
+        foreach (Match hidden in Regex.Matches(page, "<input type=\"hidden\" name=\"([a-z]+)\" value=\"([^\"]*)\""))
+            form.Add(new(hidden.Groups[1].Value, WebUtility.HtmlDecode(hidden.Groups[2].Value)));
+        var adjacency = page.IndexOf("<select id=\"adj\"", StringComparison.Ordinal);
+        if (adjacency >= 0 && Regex.Match(page[adjacency..], "<option value=\"(\\d)\" selected") is { Success: true } adj)
+            form.Add(new("adj", adj.Groups[1].Value));
+        seats ??= Regex.Matches(page, "name=\"seat\" value=\"([^\"]+)\" checked").Select(m => m.Groups[1].Value);
+        form.AddRange(seats.Select(key => new KeyValuePair<string, string>("seat", key)));
+        return form;
+    }
+
+    async Task<HttpResponseMessage> PostMapAsync(HttpClient browser, string page, List<KeyValuePair<string, string>> form)
+    {
+        var token = Regex.Match(page, "name=\"__RequestVerificationToken\" type=\"hidden\" value=\"([^\"]+)\"|<input[^>]*name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"");
+        form.Add(new("__RequestVerificationToken", WebUtility.HtmlDecode(token.Groups[1].Success ? token.Groups[1].Value : token.Groups[2].Value)));
+        return await browser.PostAsync("/wizard/go", new FormUrlEncodedContent(form));
+    }
+
+    TestRunner.Add("Wizard pages, step 3: the hall maps load in the background, then one map per tab - check boxes where the shared geometry puts them, free and taken seats; row numbers, tabs, copying to the same hall, adjacency and clearing through the form; the selection rides as one bit per seat", async () =>
+    {
+        await ResetPollerAsync();
+        var browser = await SignedInAsync("wizard-map-pages@example.test", AppLanguage.Polish);
+        var today = Today();
+        var (first, second) = (FakeCinemaCityHandler.FakeScreeningId("1080", today.AddDays(1), 6), FakeCinemaCityHandler.FakeScreeningId("1080", today.AddDays(1), 13));
+        app.Fake($"free-{first}.txt", "1_18_4 1_19_4 1_20_4");
+        var day = WizardState.Text(today.AddDays(1));
+        var page = await browser.PageAsync("/wizard");
+        var response = await browser.PostFormAsync("/wizard/go", page, null, new() { ["step"] = "1", ["go"] = "2", ["city"] = "1080", ["from"] = day });
+        await Wizard().WhenEndedAsync(Guid.Parse(Location(response)["/wizard/loading/".Length..Location(response).IndexOf('?')]));
+        page = await browser.PageAsync($"/wizard/2?city=1080&from={day}&max=2");
+
+        // Step 2 → 3: details, the layout once (stored in seat_plans), free seats - a loading with its progress page.
+        var mark = app.Network.Requests.Count;
+        response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "3", [first, second]));
+        var loading = Location(response);
+        Assert.True(loading.StartsWith("/wizard/loading/") && loading.Contains($"s={first}%2C{second}") && loading.EndsWith("&max=3"));
+        await Wizard().WhenEndedAsync(Guid.Parse(loading["/wizard/loading/".Length..loading.IndexOf('?')]));
+        Assert.SequenceEqual(["presentation", "seatplan", "seats-status", "presentation", "seats-status"], EndpointsSince(mark));
+        response = await browser.GetAsync(loading);
+        var stepThree = Location(response);
+        Assert.True(stepThree.StartsWith("/wizard/3?") && stepThree.EndsWith("&max=3"));
+
+        page = await browser.PageAsync(stepThree);
+        Assert.Equal(385, Regex.Matches(page, "name=\"seat\" value=").Count);
+        Assert.True(page.Contains("<label class=\"seat free\"") && page.Contains("title=\"Rząd 4, miejsce 19 · wolne\"") && page.Contains("Monitorowane: 0 · Wolne: 3 z "));
+        Assert.True(page.Contains("value=\"row:1|4\"") && page.Contains("Nic nie zaznaczono") && page.Contains("data-seatmap"));
+        Assert.True(page.Contains($"value=\"tab:{second}\"") && page.Contains("Brak wolnych miejsc")); // the second tab: sold out
+        Assert.True(page.Contains("<button type=\"submit\" name=\"go\" value=\"2\" class=\"step\""));
+
+        // Next without a seat: the desktop's message.
+        response = await PostMapAsync(browser, page, MapForm(page, "4"));
+        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Zaznacz co najmniej jeden rząd albo jedno miejsce."));
+
+        // Seats ticked on the map; a key of another hall is dropped; the row number toggles the whole row.
+        response = await PostMapAsync(browser, page, MapForm(page, "3", ["1_18_4", "1_19_4", "9_9_9"]));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains("Monitorujesz 2 miejsca · teraz wolnych: 2") && Regex.Matches(page, "name=\"seat\" value=\"[^\"]+\" checked").Count == 2);
+        response = await PostMapAsync(browser, page, MapForm(page, "row:1|4"));
+        page = await browser.PageAsync(Location(response));
+        var rowFour = Regex.Matches(page, "name=\"seat\" value=\"(1_\\d+_4)\"").Count;
+        Assert.True(rowFour > 2 && Regex.Matches(page, "name=\"seat\" value=\"1_\\d+_4\" checked").Count == rowFour && page.Contains("class=\"row-label full\""));
+        response = await PostMapAsync(browser, page, MapForm(page, "row:1|4"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains("Nic nie zaznaczono"));
+
+        // Adjacency and a selection; the other tab keeps it while it is shown; copying to the same hall.
+        response = await PostMapAsync(browser, page, MapForm(page, "3", ["1_18_4", "1_19_4", "1_20_4"]).Where(f => f.Key != "adj").Append(new("adj", "3")).ToList());
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains("Monitorujesz 3 miejsca · teraz wolnych (min. 3 obok siebie): 3") && Location(response).Contains("&adj=3"));
+        response = await PostMapAsync(browser, page, MapForm(page, $"tab:{second}"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(Location(response).Contains($"&m={first}.") && page.Contains("Nic nie zaznaczono") && page.Contains("Monitorowane: 3 · Wolne: 3 z "));
+        response = await PostMapAsync(browser, page, MapForm(page, $"tab:{first}"));
+        page = await browser.PageAsync(Location(response));
+        response = await PostMapAsync(browser, page, MapForm(page, "copy"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(StatusText(page).Contains("Skopiowano zaznaczenie do 1 seansu.") && page.Contains("Monitorowane: 3 · Brak wolnych miejsc"));
+
+        // Next with seats: step 4 is not built yet. Back to step 2 and forward again: everything known, nothing sent.
+        response = await PostMapAsync(browser, page, MapForm(page, "4"));
+        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Krok 4 (podsumowanie i zapis) jest jeszcze w budowie."));
+        mark = app.Network.Requests.Count;
+        response = await PostMapAsync(browser, page, MapForm(page, "2"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(Location(response).StartsWith("/wizard/2?") && page.Contains("Zaznaczono 2 z 4"));
+        response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "3", [first, second]));
+        Assert.True(Location(response).StartsWith("/wizard/3?") && Location(response).Contains($"&m={first}.") && Location(response).Contains($"%2C{second}."));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains("Monitorujesz 3 miejsca"));
+        // Unticking a screening on step 2 drops its seats.
+        response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(await browser.PageAsync($"/wizard/2?city=1080&from={day}&s={first}%2C{second}&max=3&m={TestApp.QueryValue(Location(response), "m")}"), "2", [second]));
+        Assert.True(!Location(response).Contains(first));
+        Assert.Equal(mark, app.Network.Requests.Count);
+
+        // Ten minutes later the occupancy is unknown: the map stays, "Refresh the occupancy" loads only the free seats.
+        app.Time.Advance(TimeSpan.FromMinutes(11));
+        page = await browser.PageAsync(stepThree);
+        Assert.True(page.Contains("Zajętość miejsc tego seansu jest starsza niż 10 minut") && page.Contains("<label class=\"seat\""));
+        response = await PostMapAsync(browser, page, MapForm(page, "reload"));
+        await Wizard().WhenEndedAsync(Guid.Parse(Location(response)["/wizard/loading/".Length..Location(response).IndexOf('?')]));
+        Assert.SequenceEqual(["seats-status", "seats-status"], EndpointsSince(mark));
     });
 }

@@ -21,7 +21,7 @@
 <div class="page-head">
     <h1>@T("Nowy profil", "New profile")</h1>
 </div>
-<WizardSteps Current="2" Furthest="state.Furthest" InForm="false" />
+<WizardSteps Current="target" Furthest="state.Furthest" InForm="false" />
 <StatusMessage />
 
 @if (job is null)
@@ -30,12 +30,12 @@
         @T("Tego wczytywania już nie ma (minęło sporo czasu albo serwer był restartowany).", "This loading is gone (a while has passed or the server was restarted).")
     </p>
     <div class="actions">
-        <a class="button primary" href="@WizardTexts.StepUrl(1, state)">@T("Wróć do wyboru terminu", "Back to the dates")</a>
+        <a class="button primary" href="@WizardTexts.StepUrl(target - 1, state)">@BackText</a>
     </div>
 }
 else
 {
-    <p class="lead">@T("Repertuar: ", "Repertoire: ")@WizardTexts.Search(state)</p>
+    <p class="lead">@(target == 3 ? T($"Mapy sal: {Count(job.Total, "seans", "seanse", "seansów", "screening", "screenings")}", $"Hall maps: {Count(job.Total, "seans", "seanse", "seansów", "screening", "screenings")}") : T("Repertuar: ", "Repertoire: ") + WizardTexts.Search(state))</p>
     <div class="loading" role="status">
         <progress max="@job.Total" value="@job.Done">@job.Done / @job.Total</progress>
         <p>
@@ -56,20 +56,23 @@ else
         <div class="actions">
             @if (job.Done > job.Failed)
             {
-                <a class="button primary" href="@WizardTexts.StepUrl(2, state)">@T("Pokaż to, co się wczytało", "Show what was loaded")</a>
+                <a class="button primary" href="@WizardTexts.StepUrl(target, state)">@T("Pokaż to, co się wczytało", "Show what was loaded")</a>
             }
-            <a class="button" href="@WizardTexts.StepUrl(1, state)">@T("Wróć do wyboru terminu", "Back to the dates")</a>
+            <a class="button" href="@WizardTexts.StepUrl(target - 1, state)">@BackText</a>
         </div>
     }
     else
     {
         @* Finished with every item failed (otherwise the page has already moved on to step 2). *@
         <p class="status error" role="alert">
-            @T("Nie udało się wczytać repertuaru: Cinema City nie odpowiedziało poprawnie. Spróbuj ponownie za chwilę.",
-               "Could not load the repertoire: Cinema City did not answer properly. Try again in a moment.")
+            @(target == 3
+                ? T("Nie udało się wczytać map sal: Cinema City nie odpowiedziało poprawnie. Spróbuj ponownie za chwilę.",
+                    "Could not load the hall maps: Cinema City did not answer properly. Try again in a moment.")
+                : T("Nie udało się wczytać repertuaru: Cinema City nie odpowiedziało poprawnie. Spróbuj ponownie za chwilę.",
+                    "Could not load the repertoire: Cinema City did not answer properly. Try again in a moment."))
         </p>
         <div class="actions">
-            <a class="button primary" href="@WizardTexts.StepUrl(1, state)">@T("Wróć do wyboru terminu", "Back to the dates")</a>
+            <a class="button primary" href="@WizardTexts.StepUrl(target - 1, state)">@BackText</a>
         </div>
     }
 }
@@ -79,6 +82,11 @@ else
     private const int RefreshSeconds = 2;
 
     private WizardJobView? job;
+
+    /// <summary>The step the loading leads to: 2 after the repertoire, 3 after the hall maps.</summary>
+    private int target = 2;
+
+    private string BackText => target == 3 ? T("Wróć do wyboru seansów", "Back to the screenings") : T("Wróć do wyboru terminu", "Back to the dates");
     private WizardState state = new();
 
     [CascadingParameter]
@@ -91,10 +99,11 @@ else
     {
         var query = HttpContext.Request.Query;
         state = WizardState.Read(name => query[name]);
-        state = state with { Furthest = Math.Max(state.Furthest, 2) };
         // Another account's loading looks exactly like a missing one.
         job = Jobs.Find(Id, UserManager.GetUserId(HttpContext.User)!);
+        target = job?.Request is ScreeningsRequest || (job is null && state.Furthest >= 3) ? 3 : 2;
+        state = state with { Furthest = Math.Max(state.Furthest, target) };
         if (job is { State: WizardJobState.Finished } finished && finished.Done > finished.Failed)
-            RedirectManager.RedirectTo(WizardTexts.StepUrl(2, state));
+            RedirectManager.RedirectTo(WizardTexts.StepUrl(target, state));
     }
 }

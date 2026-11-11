@@ -1,0 +1,221 @@
+@using System.Globalization
+@using CinemaWatch.Server.Wizard
+@inject WizardJobs Jobs
+@inject CinemaCityCache Cache
+@inject TimeProvider Time
+
+@*
+    Step 3 of the wizard (docs/SAAS.md §5.2): one hall map per ticked screening, one shown at a time (tabs, as in the
+    desktop app). The map is a form: every seat is a check box drawn as a circle where the shared geometry
+    (Core HallLayout) puts it, every row number a button that toggles the row. Without JavaScript everything works
+    through the form; wwwroot/seatmap.js adds painting, the rectangle and live counts. Nothing here sends a request to
+    Cinema City: the data comes from the shared cache, the poller's stored results and seat_plans.
+*@
+
+@* "adj" comes from its list below when the map is drawn. *@
+@foreach (var field in State.Fields(withSeats: false).Where(f => f.Key is not "tab" && (f.Key is not "adj" || current?.Layout is null)))
+{
+    <input type="hidden" name="@field.Key" value="@field.Value" />
+}
+@* The other screenings' selections ride along; the shown one comes from its check boxes. *@
+<input type="hidden" name="m" value="@OtherSeats" />
+@if (current is { } shown)
+{
+    <input type="hidden" name="tab" value="@shown.Result.ScreeningId" />
+}
+
+<div class="hall-tabs" role="tablist" aria-label="@T("Seanse", "Screenings")">
+    @foreach (var map in maps)
+    {
+        var selected = map == current;
+        @if (selected)
+        {
+            <span class="hall-tab current" role="tab" aria-selected="true">
+                <strong>@map.Title</strong>
+                <span class="hint">@map.TabStatus</span>
+            </span>
+        }
+        else
+        {
+            <button type="submit" name="go" value="tab:@map.Result.ScreeningId" class="hall-tab" role="tab" aria-selected="false">
+                <strong>@map.Title</strong>
+                <span class="hint">@map.TabStatus</span>
+            </button>
+        }
+    }
+</div>
+
+@if (current is null)
+{
+    <p class="status error" role="alert">@T("Nie ma tu żadnego seansu. Wróć do wyboru seansów.", "There is no screening here. Go back to the screenings.")</p>
+}
+else if (current.Layout is not { } layout)
+{
+    <div class="status error" role="alert">
+        <p>@T("Mapy tej sali nie ma w pamięci serwera albo nie udało się jej pobrać.", "This hall's map is not in the server's memory or could not be loaded.")</p>
+        <button type="submit" name="go" value="reload" class="link">@T("Wczytaj ponownie", "Load again")</button>
+    </div>
+}
+else
+{
+    <input type="hidden" name="shown" value="@current.Result.ScreeningId" />
+    <p class="hint">
+        @T("Kliknij numer rzędu, aby zaznaczyć cały rząd. Kliknij miejsce, aby je dodać lub usunąć - także zajęte. Przeciągnij od miejsca, aby malować; od pustego pola, aby zaznaczyć ramką. Esc anuluje.",
+           "Click a row number to select the whole row. Click a seat to add or remove it - taken seats too. Drag from a seat to paint, from an empty spot to draw a rectangle. Esc cancels.")
+    </p>
+    @if (current.Result.FreeSeatKeys is null)
+    {
+        <div class="status error" role="alert">
+            <p>@T("Zajętość miejsc tego seansu jest starsza niż 10 minut, więc mapa jej nie pokazuje.", "This screening's seat occupancy is older than 10 minutes, so the map does not show it.")</p>
+            <button type="submit" name="go" value="reload" class="link">@T("Odśwież zajętość", "Refresh the occupancy")</button>
+        </div>
+    }
+
+    <div class="hall" data-seatmap style="aspect-ratio: @N(layout.Width) / @N(layout.Height); --seat-size: @(N(layout.SeatSize / layout.Width * 100))cqw"
+         data-radius="@N(layout.SeatSize / 2)" data-width="@N(layout.Width)" data-height="@N(layout.Height)" data-offset-x="@N(layout.OffsetX)" data-offset-y="@N(layout.OffsetY)">
+        <div class="screen" style="left: @X(layout, layout.ScreenLeft); top: @Y(layout, layout.ScreenTop); width: @X(layout, layout.ScreenWidth); height: @Y(layout, HallLayout.ScreenBarHeight)">
+            <span>@T("EKRAN", "SCREEN")</span>
+        </div>
+        @foreach (var row in layout.RowLabels)
+        {
+            <button type="submit" name="go" value="row:@row.Section|@row.RowKey" class="row-label @RowState(row)"
+                    style="left: @X(layout, row.Left); top: @Y(layout, row.Top)" data-section="@row.Section" data-row="@row.RowKey"
+                    title="@T($"Rząd {row.Label}: kliknij, aby zaznaczyć lub odznaczyć cały rząd", $"Row {row.Label}: click to select or clear the whole row")">@row.Label</button>
+        }
+        @foreach (var placed in layout.Seats)
+        {
+            var seat = placed.Seat;
+            var free = current.Result.FreeSeatKeys?.Contains(seat.Key);
+            <label class="@SeatClass(seat, free)"
+                   style="left: @X(layout, placed.Left); top: @Y(layout, placed.Top)" title="@SeatTitle(seat, free)">
+                <input type="checkbox" name="seat" value="@seat.Key" checked="@current.Selection.Contains(seat.Key)"
+                       data-x="@N(seat.X)" data-y="@N(seat.Y)" data-section="@seat.Section" data-row="@seat.RowKey" data-wheelchair="@(seat.IsWheelchair ? "1" : null)" />
+                <span aria-hidden="true">@(seat.IsWheelchair ? "♿" : seat.Label)</span>
+            </label>
+        }
+    </div>
+
+    <p class="selection-text" data-seatmap-summary>@current.SelectionText(State.MinAdjacent)</p>
+
+    <div class="seat-tools">
+        <label for="adj">@T("Powiadom, gdy wolnych obok siebie jest co najmniej", "Notify when at least this many are free next to each other")</label>
+        <select id="adj" name="adj">
+            @for (var n = 1; n <= WizardState.MaxAdjacent; n++)
+            {
+                <option value="@n" selected="@(n == State.MinAdjacent)">@n</option>
+            }
+        </select>
+        <button type="submit" name="go" value="3" class="button">@T("Zastosuj", "Apply")</button>
+    </div>
+    <div class="actions">
+        <button type="submit" name="go" value="copy" class="button">@T("Kopiuj do seansów z tą samą salą", "Copy to screenings in the same hall")</button>
+        <button type="submit" name="go" value="clear" class="button">@T("Wyczyść", "Clear")</button>
+    </div>
+}
+
+<div class="actions wizard-buttons">
+    <button type="submit" name="go" value="4" class="button primary">@T("Dalej", "Next")</button>
+    <button type="submit" name="go" value="2" class="button">@T("Wstecz", "Back")</button>
+</div>
+
+@code {
+    private List<HallMap> maps = [];
+    private HallMap? current;
+
+    [Parameter, EditorRequired]
+    public WizardState State { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var results = await Jobs.PeekScreeningsAsync(State.ScreeningIds);
+        // Titles from the repertoire step 2 showed (when still in the cache).
+        var listed = State.Dates.Count == 0 ? new Dictionary<string, Screening>()
+            : CachedRepertoire.Read(Cache, State.Repertoire()).Days.SelectMany(d => d.Screenings)
+                .GroupBy(s => s.Id, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        maps = results.Select(r => new HallMap(r, listed.GetValueOrDefault(r.ScreeningId), State.IsAllCities,
+            r.Plan is { } plan ? SeatCode.Decode(plan, State.Seats.GetValueOrDefault(r.ScreeningId)) : new HashSet<string>())).ToList();
+        current = maps.FirstOrDefault(m => m.Result.ScreeningId == State.CurrentTab) ?? maps.FirstOrDefault();
+    }
+
+    /// <summary>"id.code,…" of every screening except the shown one (its check boxes say what it has).</summary>
+    private string OtherSeats => string.Join(",", State.ScreeningIds
+        .Where(id => id != current?.Result.ScreeningId && State.Seats.ContainsKey(id))
+        .Select(id => $"{id}.{State.Seats[id]}"));
+
+    private string RowState(PlacedRowLabel row)
+    {
+        var regular = current!.Result.Plan!.Seats.Where(s => s.Section == row.Section && s.RowKey == row.RowKey && !s.IsWheelchair).ToList();
+        var watched = regular.Count(s => current.Selection.Contains(s.Key));
+        return watched == 0 ? "" : watched == regular.Count ? "full" : "partial";
+    }
+
+    private static string SeatClass(Seat seat, bool? free) =>
+        "seat" + (free switch { true => " free", false => " taken", _ => "" }) + (seat.IsWheelchair ? " wheelchair" : "");
+
+    private static string SeatTitle(Seat seat, bool? free) =>
+        T($"Rząd {seat.Row}, miejsce {seat.Label}", $"Row {seat.Row}, seat {seat.Label}")
+        + (free switch { true => T(" · wolne", " · free"), false => T(" · zajęte", " · taken"), _ => "" })
+        + (seat.IsWheelchair ? T(" · dla osoby na wózku", " · wheelchair space") : "");
+
+    private static string N(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    private static string X(HallLayout layout, double value) => N(value / layout.Width * 100) + "%";
+
+    private static string Y(HallLayout layout, double value) => N(value / layout.Height * 100) + "%";
+
+    /// <summary>One screening on step 3: its data, the shared geometry and its selection.</summary>
+    private sealed class HallMap(ScreeningResult result, Screening? screening, bool showCity, IReadOnlySet<string> selection)
+    {
+        public ScreeningResult Result { get; } = result;
+
+        public HallLayout? Layout { get; } = result.Plan is { Seats.Count: > 0 } plan ? HallLayout.Of(plan) : null;
+
+        public IReadOnlySet<string> Selection { get; } = selection;
+
+        /// <summary>"pt 12.12, 16:00 · Poznań · IMAX" (the id when the repertoire is gone).</summary>
+        public string Title
+        {
+            get
+            {
+                if (screening is null)
+                    return T($"Seans {Result.ScreeningId}", $"Screening {Result.ScreeningId}");
+                var parts = new List<string> { screening.StartsAt.ToString(T("ddd d.MM, HH:mm", "ddd d MMM, HH:mm"), Culture) };
+                if (showCity && Locations.FindCinema(screening.CinemaId) is { } cinema)
+                    parts.Add(cinema.DisplayCity);
+                if (screening.Auditorium.Length > 0)
+                    parts.Add(screening.Auditorium);
+                return string.Join(" · ", parts);
+            }
+        }
+
+        /// <summary>"Monitorowane: 4 · Wolne: 3 z 385", as on the desktop's tabs.</summary>
+        public string TabStatus
+        {
+            get
+            {
+                var watched = $"{T("Monitorowane", "Watched")}: {Selection.Count}";
+                if (Result.Error is not null || Result.Plan is null)
+                    return watched + T(" · brak mapy", " · no map");
+                if (Seats is not { } seats)
+                    return watched;
+                return watched + " · " + (seats.FreeCount == 0 ? T("Brak wolnych miejsc", "No free seats") : T($"Wolne: {seats.FreeCount} z {seats.TotalCount}", $"Free: {seats.FreeCount} of {seats.TotalCount}"));
+            }
+        }
+
+        private ScreeningSeats? Seats => Result is { Details: { } details, Plan: { } plan, FreeSeatKeys: { } free } ? new ScreeningSeats(details, plan, free) : null;
+
+        /// <summary>"Monitorujesz 37 miejsc · teraz wolnych: 5", as on the desktop.</summary>
+        public string SelectionText(int minAdjacent)
+        {
+            if (Selection.Count == 0)
+                return T("Nic nie zaznaczono", "Nothing selected");
+            var watched = Count(Selection.Count, "miejsce", "miejsca", "miejsc", "seat", "seats");
+            if (Seats is not { } seats)
+                return T($"Monitorujesz {watched}", $"Watching {watched}");
+            var available = SeatMatcher.FindAvailable(seats, Selection, minAdjacent).Count;
+            return minAdjacent > 1
+                ? T($"Monitorujesz {watched} · teraz wolnych (min. {minAdjacent} obok siebie): {available}", $"Watching {watched} · free now ({minAdjacent}+ together): {available}")
+                : T($"Monitorujesz {watched} · teraz wolnych: {available}", $"Watching {watched} · free now: {available}");
+        }
+    }
+}

@@ -150,6 +150,41 @@ public sealed class WizardJobs(
     /// <summary>This account's running loading, if any.</summary>
     public WizardJobView? Running(string userId) => RunningJob(userId)?.Snapshot();
 
+    /// <summary>
+    /// What the hall map of these screenings can show without a request (step 3 of the site's wizard): the details
+    /// from the cache or the poller's stored row, the layout from <c>seat_plans</c>, the free seats from the cache or
+    /// the poller's result while young enough (otherwise null: occupancy unknown). A screening without details or
+    /// layout carries the error "missing" (it needs a loading).
+    /// </summary>
+    public async Task<IReadOnlyList<ScreeningResult>> PeekScreeningsAsync(IReadOnlyList<string> screeningIds, CancellationToken cancellationToken = default)
+    {
+        var options = settings.Poller.Wizard;
+        var now = time.GetUtcNow();
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var rows = await db.WatchedScreenings.AsNoTracking().Where(r => screeningIds.Contains(r.Id))
+            .ToDictionaryAsync(r => r.Id, StringComparer.Ordinal, cancellationToken).ConfigureAwait(false);
+        var plans = new Dictionary<(int, int), SeatPlan?>();
+        var results = new List<ScreeningResult>(screeningIds.Count);
+        foreach (var id in screeningIds)
+        {
+            var row = rows.GetValueOrDefault(id);
+            var details = cache.TryPeek<Presentation>(CinemaCityCache.DetailsKey(id), out var cached) ? cached : RowDetails(row, now, options);
+            SeatPlan? plan = null;
+            if (details is not null)
+            {
+                var layout = (details.VenueId, details.SeatplanId);
+                if (!plans.TryGetValue(layout, out plan))
+                    plans[layout] = plan = (await SeatPlans.FindAsync(db, details.VenueId, details.SeatplanId, cancellationToken).ConfigureAwait(false))?.Plan;
+            }
+            var free = cache.TryPeek<FreeSeats>(CinemaCityCache.FreeSeatsKey(id), out var fresh) ? fresh : RowFreeSeats(row, now, options);
+            results.Add(details is null || plan is null
+                ? new ScreeningResult(id, details, plan, null, null, "missing")
+                : new ScreeningResult(id, details, plan, free?.Keys, free?.At, null));
+        }
+        return results;
+    }
+
     /// <summary>Waits until the loading has ended (tests; the page polls <see cref="Find"/> instead).</summary>
     public Task WhenEndedAsync(Guid id)
     {

@@ -39,6 +39,17 @@ public sealed record WizardState
     /// <summary>The furthest step reached: the step bar lets the user jump back to any step up to it.</summary>
     public int Furthest { get; init; } = FirstStep;
 
+    /// <summary>Step 3: the watched seats of each ticked screening as a <see cref="SeatCode"/> (empty ones left out).</summary>
+    public IReadOnlyDictionary<string, string> Seats { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>Step 3: the screening whose hall map is shown (null = the first).</summary>
+    public string? Tab { get; init; }
+
+    /// <summary>Step 3: notify only when at least this many watched seats are free next to each other (desktop: 1-6).</summary>
+    public int MinAdjacent { get; init; } = 1;
+
+    public const int MaxAdjacent = 6;
+
     public bool IsAllCities => City == AllCities;
 
     public IReadOnlyList<string> CinemaIds => IsAllCities ? Locations.ImaxCinemas.Select(c => c.Id).ToList() : [City];
@@ -69,6 +80,19 @@ public sealed record WizardState
             .Take(MaxCarriedScreenings)
             .ToList();
         var furthest = int.TryParse(One("max"), NumberStyles.None, CultureInfo.InvariantCulture, out var max) ? max : FirstStep;
+        var adjacent = int.TryParse(One("adj"), NumberStyles.None, CultureInfo.InvariantCulture, out var adj) ? adj : 1;
+        // "m": "id.code,id.code" - only for ticked screenings.
+        var seats = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var part in values("m").SelectMany(v => (v ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)))
+        {
+            var dot = part.IndexOf('.');
+            if (dot <= 0)
+                continue;
+            var (id, code) = (part[..dot], part[(dot + 1)..]);
+            if (ids.Contains(id, StringComparer.Ordinal) && SeatCode.IsWellFormed(code))
+                seats[id] = code;
+        }
+        var tab = One("tab");
         return new WizardState
         {
             City = city == AllCities || Locations.FindCinema(city) is not null ? city! : Locations.Sadyba.Id,
@@ -77,11 +101,14 @@ public sealed record WizardState
             FilmId = ProfileImport.IsValidId(film) ? film : null,
             ScreeningIds = ids,
             Furthest = Math.Clamp(furthest, FirstStep, LastStep),
+            Seats = seats,
+            Tab = tab is not null && ids.Contains(tab, StringComparer.Ordinal) ? tab : null,
+            MinAdjacent = Math.Clamp(adjacent, 1, MaxAdjacent),
         };
     }
 
     /// <summary>The state as name/value pairs (hidden fields, the address); empty values are left out.</summary>
-    public IEnumerable<KeyValuePair<string, string>> Fields(bool withScreenings = true)
+    public IEnumerable<KeyValuePair<string, string>> Fields(bool withScreenings = true, bool withSeats = true)
     {
         yield return new("city", City);
         if (From is { } from)
@@ -93,6 +120,26 @@ public sealed record WizardState
         if (withScreenings && ScreeningIds.Count > 0)
             yield return new("s", string.Join(",", ScreeningIds));
         yield return new("max", Furthest.ToString(CultureInfo.InvariantCulture));
+        if (withSeats && Seats.Count > 0)
+            yield return new("m", string.Join(",", ScreeningIds.Where(Seats.ContainsKey).Select(id => $"{id}.{Seats[id]}")));
+        if (Tab is { } tab)
+            yield return new("tab", tab);
+        if (MinAdjacent > 1)
+            yield return new("adj", MinAdjacent.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>The screening whose map step 3 shows: the chosen tab, else the first ticked screening.</summary>
+    public string? CurrentTab => Tab ?? ScreeningIds.FirstOrDefault();
+
+    /// <summary>The same state with this screening's selection replaced (an empty one is left out).</summary>
+    public WizardState WithSeats(string screeningId, string code)
+    {
+        var seats = new Dictionary<string, string>(Seats, StringComparer.Ordinal);
+        if (code.Length == 0)
+            seats.Remove(screeningId);
+        else
+            seats[screeningId] = code;
+        return this with { Seats = seats };
     }
 
     /// <summary>"city=1060&amp;from=2026-11-12&amp;max=2" for an address.</summary>
