@@ -607,7 +607,7 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         (`HallLayout`, used by the desktop map too), `SeatCode`, `SeatsStep.razor`, the hall maps' loading through the
         progress page, `WizardJobs.PeekScreeningsAsync`. **`seatmap.js` built 12 Nov 2026**: painting, the
         rectangle, Esc, row numbers without a reload, live counts; `tests/web/seatmap.test.js` (`node --test`, the
-        shared case file) and its step in the Linux CI job. Owner's check in the browser still to do.
+        shared case file) and its step in the Linux CI job. Checked by the owner in the browser (12 Nov 2026).
   - [ ] 6.4.5 Step 4, saving and editing: the import's validation and limits, the notification state kept for
         unchanged screenings, a test that a profile made on the site reads in the desktop app's `WatchProfile`.
   - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's and testers' checks, stable `web-v0.7.0`; documents

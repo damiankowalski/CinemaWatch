@@ -1,5 +1,5 @@
 // The hall map's script (src/CinemaWatch.Web/wwwroot/seatmap.js) against the case file shared with the C# tests
-// (tests/Fixtures/seat-selection-cases.json, run there by tests/CinemaWatch.Tests). Run: node --test tests/web
+// (tests/Fixtures/seat-selection-cases.json, run there by tests/CinemaWatch.Tests). Run: node --test tests/web/seatmap.test.js
 'use strict';
 
 const test = require('node:test');
