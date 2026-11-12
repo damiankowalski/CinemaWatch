@@ -1,3 +1,0 @@
-// Managed by infra/ansible (docs/SAAS_INFRA.md §4.12): refresh the package lists and install updates daily.
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";

@@ -3,18 +3,29 @@
 > Companion to [`SAAS.md`](SAAS.md) (plan and decisions) and [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md). This file
 > records what actually exists, how it was set up and why, how to verify it and how to undo it.
 > The provider panels (OVHcloud, Cloudflare) are the source of truth for live settings; update this file with every
-> change: the state (§1), the work log (§3) and, if needed, the runbooks (§4) and the glossary (§6).
+> change: the state (§1), the work log (§3) and, if needed, the runbooks (§4). The infrastructure glossary is in
+> [VPS-1 SERVER.md] §6.
 > **No secrets here** - no passwords, recovery codes, API keys or tokens; they live in the owner's password manager.
 > **No server addresses either** - the server's IPv4 / IPv6 and host name stay out of this public repository (behind
 > Cloudflare Tunnel the origin must stay unknown); runbooks write `<server-ip>`, the real value is in the password
 > manager and the OVHcloud panel. Everything below is public anyway (DNS data is public; SSH key fingerprints are
 > public by design).
 >
-> Last updated: 8 November 2026 - stage 4 done (4.6 skipped on purpose): CinemaWatch runs on the VPS behind Cloudflare
-> Tunnel and Access since 6 Nov 2026, now 0.5.2; encrypted daily database backup to Backblaze B2 (EU Central), restore
-> tested (§1.8). Stage 5 started: testers added to the Access policy and invited in the app (§3, §4.22); the two-week
-> test runs since 7 Nov 2026 (§4.27); SaaS 0.6.0-beta.1 deployed 7-8 Nov. Access keeps guarding the whole host: the
-> switch to model A is postponed ([`SAAS.md`](SAAS.md) §9, §11; ready runbook §4.28).
+> **Since 12 Nov 2026 (stage 7b) the shared server has its own documentation**: the domain, DNS and DNSSEC, the
+> accounts, the server itself (SSH, firewall, updates, swap, Docker), the Ansible playbook and the backup platform are
+> in the private repository `damiankowalski/VPS-1` ([VPS-1 SERVER.md]), which keeps this file's section numbers
+> (decision [`SAAS.md`](SAAS.md) §9, 12 Nov 2026). This file keeps what belongs to CinemaWatch: its containers,
+> tunnel, Access, e-mail sender, heartbeat, backup, the probe, and their runbooks. Moved sections are left as
+> pointers so that existing `§` references still lead somewhere.
+>
+> Last updated: 12 November 2026 - stage 7b: the server's configuration (`infra/ansible`) and documentation moved to
+> VPS-1. Before: 8 November 2026 - stage 4 done (4.6 skipped on purpose): CinemaWatch runs on the VPS behind
+> Cloudflare Tunnel and Access since 6 Nov 2026, now 0.5.2; encrypted daily database backup to Backblaze B2 (EU
+> Central), restore tested (§1.8). Stage 5 started: testers added to the Access policy and invited in the app (§3,
+> §4.22); the two-week test runs since 7 Nov 2026 (§4.27); SaaS 0.6.0-beta.1 deployed 7-8 Nov. Access keeps guarding
+> the whole host: the switch to model A is postponed ([`SAAS.md`](SAAS.md) §9, §11; ready runbook §4.28).
+
+[VPS-1 SERVER.md]: https://github.com/damiankowalski/VPS-1/blob/main/docs/SERVER.md
 
 ---
 
@@ -22,89 +33,31 @@
 
 | Item | Value |
 | --- | --- |
-| Domain | `damiankowalski.pl` - umbrella domain for all future products, one subdomain per product and environment |
-| Registry | NASK (operator of `.pl`) |
-| Registrar | OVHcloud; holder: the owner as a private person (the `.pl` registry does not publish private persons' data in WHOIS) |
-| Registered / expires | 30 Oct 2026 / 30 Oct 2027; automatic renewal every year |
-| Transfer protection | On (OVHcloud default) |
-| Declined at order | Hosting plan, OVHcloud DNSSEC option, Zimbra Starter mailbox |
-| Nameservers | `faye.ns.cloudflare.com`, `tosana.ns.cloudflare.com` (Cloudflare); previously `dns103.ovh.net`, `ns103.ovh.net` |
-| DNS provider | Cloudflare, Free plan; zone active since 31 Oct 2026 |
-| DNS records | Six (6 Nov 2026): apex `TXT "v=spf1 -all"` (the apex sends no e-mail); `TXT _dmarc "v=DMARC1; p=reject;"`; e-mail through Resend for `mail.` - `TXT resend._domainkey.mail` (DKIM), `CNAME rsend.mail` and `CNAME send.mail` (both DNS only); `CNAME staging-cinemawatch` to the tunnel (Proxied). Details §1.5, §1.6 |
-| DNSSEC | On since 31 Oct 2026: Cloudflare signs the zone; DS at the registry with key tag 2371, algorithm 13, digest type 2 |
-| Cloudflare zone extras | AI crawler policy at defaults (allow); Bot Preference Sync on (robots.txt) - irrelevant until a site exists |
-| Server | OVHcloud VPS-1 in Warsaw since 1 Nov 2026; reinstalled on 6 Nov 2026 and configured by `infra/ansible` (§1.3); runs the app's containers since 6 Nov 2026 |
+| Platform | Domain `damiankowalski.pl`, registrar, DNS and DNSSEC (Cloudflare), the server (OVHcloud VPS-1, Warsaw) and its configuration: [VPS-1 SERVER.md] §1 |
 | Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch since 6 Nov 2026 (0.6.0-beta.1 since 7-8 Nov), behind Cloudflare Access (§1.6) and the app's own sign-in |
 | E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
 | Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1`, `0.5.2` (deployed), with `sha-<commit>` tags |
 | Heartbeat monitor | Healthchecks.io, checks `cinemawatch-staging` (§1.7; the alarm by e-mail tested on 7 Nov 2026) and `cinemawatch-backup` (§1.8) |
 | Backups | Daily at 02:30 UTC: `pg_dump`, encrypted with `age`, to Backblaze B2 bucket `cinemawatch-backup` (EU Central), the newest 7 also on the server; restore from B2 tested on 7 Nov 2026 (§1.8) |
-| Costs | Domain 16.69 PLN net (20.53 PLN gross) for the first year, then 58.99 PLN net (72.56 PLN gross) per year; Cloudflare Free 0; VPS about 19.20 PLN net (23.62 PLN gross) per month (cart price on 1 Nov 2026 - confirm on the first invoice); Cloudflare Zero Trust Free 0 (a payment card on file is required); Resend Free 0; Healthchecks.io Hobbyist 0 |
+| Costs | Shared with the other applications on the server: [VPS-1 SERVER.md] §1 |
 
 ### 1.1 Accounts
 
-| Account | Used for | Sign-in | Second factor |
-| --- | --- | --- | --- |
-| GitHub | Repository, CI; later container images (GHCR) | Password | Yes |
-| Google | Sign-in to Cloudflare | Password | Yes |
-| Cloudflare | DNS, DNSSEC; Zero Trust (tunnel, Access) since 6 Nov 2026, plan Zero Trust Free with a payment card on file | "Sign in with Google" only, no Cloudflare password | No own 2FA - accepted risk (§1.2) |
-| OVHcloud | Registrar; VPS and its KVM console (since 1 Nov 2026) | Password | Yes |
-| Server user `ubuntu` | Administering the VPS | SSH key only (§1.3); its password works only on the KVM console | The key file plus its passphrase |
-| Resend | E-mail provider (SMTP) since 6 Nov 2026 | Password | Yes (TOTP; recovery code in the password manager) |
-| Healthchecks.io | Heartbeat monitor ("dead man's switch") since 6 Nov 2026 | Password | Yes |
-| Backblaze | B2 storage for the backups (region EU Central) since 7 Nov 2026 | Password | Yes (authenticator app; backup codes in the password manager) |
-
-Passwords and recovery codes are in the owner's password manager. The accounts use the owner's existing e-mail
-address, not an address on the new domain: losing the domain must not lock the owner out of the accounts that manage it.
+Moved to [VPS-1 SERVER.md] §1.1 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 1.2 Accepted risks
 
-- **Cloudflare via Google only.** Whoever takes over the Google account controls the DNS of the domain (and, with
-  DNSSEC on, can sign forged records validly). Mitigation: 2FA on the Google account. Setting a Cloudflare password
-  via "forgot password" did not work. Cloudflare needs a password for its own 2FA and for API tokens; MVP 0 should not
-  need a token (the tunnel token comes from the dashboard, deployment goes over SSH). If one is ever needed: Cloudflare
-  support.
-- **Personal name in the domain.** Visible in URLs and e-mail senders. Fine for learning; a product that becomes real
-  gets its own domain.
-- **Passwordless sudo for `ubuntu`.** Whoever gets an SSH session as `ubuntu` is root. Mitigation: key-only login and
-  a passphrase on the key. A sudo password would be one more secret to manage.
-- **One SSH key on one PC.** If the PC or the key file is lost, access goes through the KVM console (§4.9). The
-  encrypted key file is backed up in the password manager.
-- **SSH port 22 open to the internet.** Key-only login, so bots have nothing to guess; rate limiting or fail2ban is
-  in the backlog ([`SAAS.md`](SAAS.md) §11).
-- **Resend keeps account data in the US.** The EU region (Ireland) only decides where e-mails leave from; recipients'
-  addresses, logs and metadata are stored in the US. The privacy notice names Resend and the transfer
-  ([`SAAS.md`](SAAS.md) §9). Moving to an EU provider is configuration only (SMTP).
-- **The backup key lives only in the password manager.** The `age` private key (`AGE-SECRET-KEY-1…`) is nowhere
-  else - on purpose, so the server and Backblaze hold only ciphertext. Losing it makes every backup unreadable.
-- **A payment card on file at Cloudflare.** Zero Trust Free requires one; nothing is charged unless a paid plan or
-  add-on is switched on deliberately. Check *Billing* if an invoice e-mail ever arrives.
+Moved to [VPS-1 SERVER.md] §1.2 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 1.3 Server (VPS)
 
+The server itself (model, system, SSH, firewall, updates, swap, Docker, the playbook) moved to [VPS-1 SERVER.md]
+§1.3. CinemaWatch's parts on it:
+
 | Item | Value |
 | --- | --- |
-| Provider / model | OVHcloud, range "VPS 2027", model VPS-1: 2 vCores, 4 GB RAM, 40 GB NVMe (38 GB usable) |
-| Location | Warsaw (WAW), Poland; OpenStack region `os-waw2` |
-| Ordered / billing | 1 Nov 2026; monthly, no commitment |
-| Provider backup | Automated Backup Standard (daily, last 24 h), in the order as a promotion - check the invoice; `qemu-guest-agent` active (OVHcloud recommends it for consistent backups) |
-| Addresses | One IPv4, one IPv6 - **not recorded here** (password manager, OVHcloud panel) |
-| System | Ubuntu 26.04.1 LTS, reinstalled 6 Nov 2026 (image with kernel 7.0.0-28); kernel 7.0.0-43 after the playbook's update and a reboot; `sudo` is sudo-rs (Ubuntu 26.04 default) |
-| Configuration | `infra/ansible/site.yml` run on the server itself from the clone `~/CinemaWatch` (§4.13); a second run gives `changed=0` |
-| Time | Time zone `Etc/UTC` (decision: stays UTC); clock synchronised |
-| Host key (server identity) | ED25519 `SHA256:cf/CvkJV0J6LJnarxF3ZJdMQDfz8pjZT40hTLv+Y/vk` since the reinstall on 6 Nov 2026 (before: `SHA256:87XQpd1k…`) - compare on the first connection from any device |
-| Login | User `ubuntu`, SSH key only; password login off; root login off (§4.10) |
-| Owner's SSH key | ed25519 with a passphrase on the development PC, `SHA256:OSzKjZeroCXb1qjlUzWLZBaUcrzAB0t2PnirmonCrew`; the encrypted key file is backed up in the password manager |
-| `ubuntu` password | In the password manager (new since the reinstall: OVHcloud's start password had to be changed at the first login); used only on the KVM console |
-| sudo | Passwordless for `ubuntu`, granted by the cloud image (a sudoers drop-in), not by the `sudo` group |
-| SSH settings | Drop-in `/etc/ssh/sshd_config.d/00-hardening.conf` (§2.2, §4.10) |
-| Firewall | `ufw` active: incoming denied except 22/tcp (IPv4 + IPv6), outgoing allowed, logging low (§4.11). Routed: `deny` since Docker switched on packet forwarding; Docker's own rules come first, so containers still reach the internet; they publish no ports |
-| Updates | `unattended-upgrades` installs security updates daily, Docker's packages included; `/etc/apt/apt.conf.d/52unattended-upgrades-local` reboots at 03:30 UTC when needed (§4.12) |
-| Swap | `/swapfile`, 2 GB, in `/etc/fstab`; `vm.swappiness=10` (`/etc/sysctl.d/60-cinemawatch.conf`) |
-| Docker | Docker Engine 29.9.3 and Compose v5.7.0 from Docker's repository (`/etc/apt/sources.list.d/docker.sources`, key `/etc/apt/keyrings/docker.asc`, fingerprint checked by the playbook); `/etc/docker/daemon.json`: logs 3 × 10 MB, `live-restore`; `ubuntu` is not in the `docker` group (that equals root) - use `sudo docker` |
 | App folder | `/opt/cinemawatch` (root, `0750`): `compose.yaml` (copied from the deployed tag), `.env` (root, `600`; §4.23), `backups/` (root, `0700`; a `pg_dump` before every deployment, the newest 10; `daily/` the newest 7 encrypted daily backups) |
-| Backup job | `/usr/local/sbin/cinemawatch-backup` (from `infra/backup/backup.sh`), `cinemawatch-backup.service` + `.timer` (02:30 UTC, up to 5 min random delay, `Persistent`); config `/etc/cinemawatch/backup.env` (root, `600`); log: `journalctl -u cinemawatch-backup.service` (§1.8, §4.25) |
-| Emergency access | KVM console in the OVHcloud panel - tested 1 Nov 2026 (§4.9); after the reinstall with the new password - test it once |
+| Backup job | `/usr/local/sbin/cinemawatch-backup` (from `infra/backup/backup.sh` in the clone `~/CinemaWatch`, installed by VPS-1's playbook), `cinemawatch-backup.service` + `.timer` (02:30 UTC, up to 5 min random delay, `Persistent`); config `/etc/cinemawatch/backup.env` (root, `600`); log: `journalctl -u cinemawatch-backup.service` (§1.8, §4.25) |
 | Our services | Since 6 Nov 2026 the containers of `infra/compose/compose.yaml`, project `cinemawatch`: `postgres` (18), `web` (0.6.0-beta.1 since 7-8 Nov), `cloudflared` (2026.10.3); deployed with `deploy.sh` (§4.24). Memory on 7 Nov: web 222 MiB, postgres 38 MiB, cloudflared 16 MiB. `CinemaWatch.Probe` ran 2-6 Nov 2026 and went with the reinstall (§1.4) |
 
 ### 1.4 CinemaWatch.Probe (stage 2, risk test R1)
@@ -175,79 +128,16 @@ address, not an address on the new domain: losing the domain must not lock the o
 
 ## 2. How the pieces fit together
 
-- **Registry (NASK)** runs `.pl`. For each domain it publishes who answers for it (NS records) and the fingerprint
-  of the domain's signing key (DS record).
-- **Registrar (OVHcloud)** is the shop and the owner's interface to the registry: payment, renewal, holder data,
-  nameservers, DS records. Changes made there are forwarded to the registry.
-- **DNS provider (Cloudflare)** holds the zone (the records) and answers questions about the domain, signing the
-  answers. Records are edited only in Cloudflare; the OVHcloud *DNS zone* tab is no longer used.
-- **Resolver** (the internet provider's, 1.1.1.1, 8.8.8.8) looks names up on behalf of devices and caches the
-  answers for their TTL.
-
-```
-Device --> resolver (e.g. 1.1.1.1; caches answers for the TTL)
-             |-- 1. root (.)        "for .pl ask NASK"                  + DS of .pl, signed with the root key
-             |-- 2. .pl (NASK)      "for damiankowalski.pl ask faye /   + DS of damiankowalski.pl (set via OVHcloud)
-             |                       tosana.ns.cloudflare.com"
-             '-- 3. Cloudflare      the answer, e.g. the TXT record     + RRSIG: signature made with the zone's key
-```
+Domain and DNS, DNSSEC and SSH access: [VPS-1 SERVER.md] §2. CinemaWatch's parts: §2.3 (the probe), §2.4 (the way
+in to the app).
 
 ### 2.1 DNSSEC in short
 
-- **Problem.** Plain DNS has no proof that an answer is genuine; a resolver accepts the first matching answer. An
-  attacker can slip in a forged one (e.g. on public Wi-Fi or by cache poisoning) and send people or e-mail elsewhere.
-- **Mechanism.** Cloudflare signs every answer of the zone (RRSIG) with the zone's key (DNSKEY). The `.pl` zone
-  publishes a fingerprint of that key (DS), and `.pl` itself is signed by the root, whose key resolvers know in
-  advance. This chain of trust works like a certificate chain in HTTPS, but for DNS answers. A validating resolver
-  rejects an answer whose chain does not check out (SERVFAIL) instead of returning a possibly forged one.
-- **Value here.** Integrity of every record: server addresses, future tunnel records and the e-mail records of
-  stage 4 (SPF, DKIM, DMARC). Certificate authorities that validate DNSSEC (e.g. Let's Encrypt) cannot be tricked by
-  forged DNS into issuing a certificate for the domain. For the website it is defence in depth - HTTPS already stops
-  a fake server from showing a valid certificate. Cost: zero; Cloudflare manages the keys.
-- **Not covered.** DNSSEC does not encrypt DNS queries (that is DoH / DoT), does not protect the content of a site
-  (that is HTTPS) and does not help if the Cloudflare account is taken over.
-- **Impact on subdomains.** None to manage: every record added in Cloudflare, including
-  `cinemawatch.damiankowalski.pl` and `staging-cinemawatch.damiankowalski.pl`, is signed automatically. Users notice
-  nothing.
-- **Obligation.** Before disabling DNSSEC or moving the nameservers away from Cloudflare, remove the DS at the
-  registrar first and wait (§4.3). The reverse order makes the domain unreachable for validating resolvers.
+Moved to [VPS-1 SERVER.md] §2.1 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 2.2 The server and SSH access
 
-```
-Development PC (Windows)                              VPS (Warsaw)
-  .ssh\id_ed25519   private key (passphrase)
-  .ssh\known_hosts  server's host key  --- SSH, port 22 --->  ufw: only 22/tcp in, all out
-                                                              sshd: key only, no root, no passwords
-                                                              ~ubuntu/.ssh/authorized_keys: public key
-OVHcloud panel --> KVM console (user ubuntu + password) --->  local login; bypasses SSH and ufw
-```
-
-- **Key pair.** The private key (`id_ed25519`) is like a seal: only it can make a signature. It stays on the PC,
-  locked by the passphrase. The public key (`id_ed25519.pub`) is like the seal's pattern: anyone may have it, it
-  checks signatures but cannot make them. The pattern sits on the server in `authorized_keys`.
-- **Login.** (1) The server shows its host key; the PC compares it with `known_hosts` - this proves it is the right
-  server. (2) The server sends a random challenge. (3) The PC unlocks the private key with the passphrase and signs
-  the challenge locally. (4) The server checks the signature against `authorized_keys`. Neither the private key nor
-  the passphrase ever leaves the PC.
-- **First connection (TOFU).** `ssh` cannot know the host key yet and asks; compare the fingerprint with §1.3, then
-  it is stored in `known_hosts` and checked automatically. A later `REMOTE HOST IDENTIFICATION HAS CHANGED` means
-  stop, unless the server was reinstalled.
-- **Where the SSH settings live.** `sshd` reads `/etc/ssh/sshd_config` and the drop-ins in
-  `/etc/ssh/sshd_config.d/` in alphabetical order, and **the first value found wins**. The cloud image ships its own
-  drop-ins (which allowed passwords); our `00-hardening.conf` is read first, so it wins, and deleting it undoes the
-  change. The same pattern is used for APT (`52unattended-upgrades-local`): never edit the package's own files.
-- **Which window am I in?** `PS C:\…>` is Windows (PowerShell), `ubuntu@vps-…:~$` is the server (bash). A PowerShell
-  command pasted into the SSH session runs on the server and fails (stage 2 step 3).
-
-If files in `C:\Users\<user>\.ssh` are lost:
-
-| File | What it is | If lost |
-| --- | --- | --- |
-| `id_ed25519.pub` | Public key | Nothing: recreate it with `ssh-keygen -y -f id_ed25519` |
-| `known_hosts` | Host keys of known servers | Nothing: the next connection asks again; compare with §1.3 |
-| `id_ed25519` | **Private key** | No SSH access (passwords are off): restore it from the password manager, or use the KVM console and add a new key (§4.8) |
-| `id_ed25519` stolen | - | The thief also needs the passphrase. Rotate anyway: new key in, old line out of `authorized_keys` (§4.8) |
+Moved to [VPS-1 SERVER.md] §2.2 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 2.3 The probe on the server (2-6 Nov 2026)
 
@@ -529,329 +419,84 @@ Browser --HTTPS--> Cloudflare (WAW)
    host, testers are still added as in §4.22. While preparing it: the rate limiting rules of the Free plan may only use
    the *URI Path* field (host, method and functions such as `lower()` need higher plans); §4.28 step 2 corrected.
 
+### Stage 7b - the server's configuration moves to VPS-1 (11-12 Nov 2026)
+
+The server is shared with a second application (Finanse), so its configuration and documentation moved out of this
+repository into the private repository `damiankowalski/VPS-1` ([`SAAS.md`](SAAS.md) §9, 12 Nov 2026). The work log of
+the move is in [VPS-1 SERVER.md] §3 (stage 7b).
+
+1. **Move**: `infra/ansible` at commit `28f6347` → VPS-1 `ansible/`, the same behaviour; the domain, DNS, server and
+   platform parts of this file → VPS-1 `docs/SERVER.md` with the same section numbers.
+2. **Switch on the server** (11 Nov 2026): the playbook runs from the clone `~/VPS-1`; the second run `changed=0`.
+   CinemaWatch's containers kept running. VPS-1's playbook still installs `infra/backup/backup.sh` from the clone
+   `~/CinemaWatch`, so that file stays here.
+3. **Clean-up here** (12 Nov 2026): `infra/ansible` and the CI job `ansible` removed; the moved sections of this file
+   replaced by pointers. Nothing changed in `infra/compose`, `infra/backup` or on the server.
+
 ---
 
 ## 4. Runbooks
 
-Runbooks 4.1-4.6 (domain and DNS) run on **Windows (PowerShell)**. Server runbooks (4.7-4.14) mark every block as
-**Windows (PowerShell)** or **server (bash, over SSH)**. `<server-ip>` = the server's IPv4 from the password manager
+Runbooks 4.1-4.14 and 4.20 (domain, DNS, the server itself) moved to [VPS-1 SERVER.md] §4. The runbooks below mark
+every block as **Windows (PowerShell)** or **server (bash, over SSH)**. `<server-ip>` = the server's IPv4 from the password manager
 or the OVHcloud panel - never write it into the repository. Before a change to SSH or the firewall, keep one SSH
 session open and test in a second window.
 
 ### 4.1 Check the nameservers
 
-```powershell
-Resolve-DnsName -Name damiankowalski.pl -Type NS -Server 1.1.1.1
-```
-
-Expected: two `NS` rows with `NameHost` `faye.ns.cloudflare.com` and `tosana.ns.cloudflare.com`. Resolvers cache NS
-records for up to 24 hours (TTL 86400), so right after a change the old values may still appear.
+Moved to [VPS-1 SERVER.md] §4.1 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.2 Check DNSSEC
 
-```powershell
-Resolve-DnsName -Name damiankowalski.pl -Type DS -Server 1.1.1.1
-```
-
-Expected: one `DS` row with `KeyTag` 2371, `Algorithm` 13, `DigestType` 2. Only a `SOA` row means there is no DS at
-the registry. PowerShell prints the digest as decimal bytes; to compare it with the hex *Digest* shown in Cloudflare:
-
-```powershell
-((Resolve-DnsName -Name damiankowalski.pl -Type DS -Server 1.1.1.1 | Where-Object Type -eq 'DS').Digest | ForEach-Object { $_.ToString('X2') }) -join ''
-```
-
-Expected: the same hex string as Cloudflare's *Digest* (it starts with `8D982CF7`). Also: Cloudflare *DNS → Settings
-→ DNSSEC* shows "Success"; https://dnsviz.net shows the chain from `.pl` to `damiankowalski.pl` without errors.
+Moved to [VPS-1 SERVER.md] §4.2 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.3 Disable DNSSEC safely (also before changing the DNS provider)
 
-The order matters; the reverse order breaks the domain for validating resolvers.
-
-1. OVHcloud → domain → *DS records* → delete the entry (key tag 2371).
-2. Wait until §4.2 shows no `DS` row, then at least one more day (the DS TTL is 86400 s = 24 h; resolvers may still
-   hold the old DS).
-3. Only then: Cloudflare → *DNS → Settings → Disable DNSSEC*, or move the nameservers (§4.4).
+Moved to [VPS-1 SERVER.md] §4.3 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.4 Move the nameservers back to OVHcloud (undo of stage 1 step 5)
 
-1. DNSSEC first: §4.3.
-2. Recreate the needed records in the OVHcloud *DNS zone* (today only `TXT "v=spf1 -all"`).
-3. OVHcloud → domain → *DNS servers* → *Edit DNS* → *Use OVHcloud default DNS*.
-4. Check with §4.1 (expected: `*.ovh.net`).
+Moved to [VPS-1 SERVER.md] §4.4 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.5 Add a DNS record (later stages)
 
-Records are edited only in Cloudflare: *DNS → Records → Add record*. Every new record is signed automatically; nothing
-to do for DNSSEC. *Proxied* (orange cloud) sends web traffic through Cloudflare; *DNS only* (grey cloud) only answers
-with the address. Keep subdomains first-level (`staging-cinemawatch`, not `staging.cinemawatch`), because Cloudflare's
-free certificate covers the domain and its first-level subdomains only. Record every change in §1 and §3.
+Moved to [VPS-1 SERVER.md] §4.5 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.6 Domain renewal
 
-Automatic every year at OVHcloud (next: before 30 Oct 2027). Keep a valid payment method in OVHcloud and watch its
-renewal e-mails. An expired domain stops working (DNS, e-mail, sites), and after the registry's grace period someone
-else can register it.
+Moved to [VPS-1 SERVER.md] §4.6 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.7 Connect to the server
 
-Windows (PowerShell):
-
-```powershell
-ssh ubuntu@<server-ip>
-```
-
-Tip: keep the address in a variable for the session, `$vps = "<server-ip>"`, then `ssh ubuntu@$vps` - a mistyped
-address only ends in `Connection timed out` (seen on 6 Nov 2026).
-
-Expected: the passphrase prompt for `id_ed25519`, then the server prompt `ubuntu@vps-…:~$`. On the first connection
-from a device (or after `known_hosts` was lost) `ssh` asks about the host key: answer `yes` only if the fingerprint
-matches §1.3. `REMOTE HOST IDENTIFICATION HAS CHANGED` means stop - unless the server was reinstalled; then forget
-the old key with `ssh-keygen -R <server-ip>` and update §1.3.
+Moved to [VPS-1 SERVER.md] §4.7 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.8 Add, replace or remove an SSH key
 
-New key pair, Windows (PowerShell); passphrase into the password manager, the key file as an attachment too:
-
-```powershell
-ssh-keygen -t ed25519 -C "damian@$env:COMPUTERNAME" -f "$env:USERPROFILE\.ssh\id_ed25519"
-```
-
-With a working key, add another public key (Windows, PowerShell; `<other-key>` = the new key's file name):
-
-```powershell
-Get-Content "$env:USERPROFILE\.ssh\<other-key>.pub" | ssh ubuntu@<server-ip> "cat >> ~/.ssh/authorized_keys"
-```
-
-Without a working key (key lost): log in on the KVM console (§4.9) and allow passwords for a moment (server):
-
-```bash
-sudo mv /etc/ssh/sshd_config.d/00-hardening.conf /root/00-hardening.conf.off && sudo systemctl reload ssh
-```
-
-Then add the key with the server password (Windows, PowerShell):
-
-```powershell
-Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub" | ssh ubuntu@<server-ip> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
-```
-
-and switch passwords off again (server), then run the tests of §4.10:
-
-```bash
-sudo mv /root/00-hardening.conf.off /etc/ssh/sshd_config.d/00-hardening.conf && sudo sshd -t && sudo systemctl reload ssh
-```
-
-Remove an old key (server): list the keys, delete the old key's line in the editor (`Ctrl+K` deletes a line,
-`Ctrl+O` saves, `Ctrl+X` exits), list again:
-
-```bash
-ssh-keygen -lf ~/.ssh/authorized_keys
-nano ~/.ssh/authorized_keys
-ssh-keygen -lf ~/.ssh/authorized_keys
-```
-
-A leaked or stolen key is rotated (new key in, old line out), not just deleted on the PC.
+Moved to [VPS-1 SERVER.md] §4.8 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.9 Emergency access: KVM console
 
-OVHcloud panel → the VPS → KVM console. Log in as `ubuntu` with the password from the password manager (the password
-works here, not over SSH). The console is a screen and keyboard attached to the VM: `ufw` and the SSH settings do not
-apply. If a password with special characters is refused, suspect the console's keyboard layout. Last resorts: rescue
-mode, or a reinstall and rebuild (§4.13). Tested 1 Nov 2026.
+Moved to [VPS-1 SERVER.md] §4.9 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.10 SSH: key-only login, no root (apply, check, undo)
 
-Server (bash, over SSH):
-
-```bash
-sudo tee /etc/ssh/sshd_config.d/00-hardening.conf > /dev/null <<'EOF'
-# Stage 2 hardening (docs/SAAS_INFRA.md): key-only login, no root login
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PermitRootLogin no
-PubkeyAuthentication yes
-EOF
-sudo sshd -t && echo "config OK"
-sudo sshd -T | grep -E "^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication) "
-sudo systemctl reload ssh
-```
-
-Expected: `config OK`, then `permitrootlogin no`, `pubkeyauthentication yes`, `passwordauthentication no`,
-`kbdinteractiveauthentication no`. An error from `sshd -t`: do not reload, delete the file. Keep the session open and
-test in a new window, Windows (PowerShell):
-
-```powershell
-ssh ubuntu@<server-ip>
-ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password ubuntu@<server-ip>
-ssh root@<server-ip>
-```
-
-Expected: the first logs in; the other two end with `Permission denied (publickey).` without asking for a password.
-
-Undo (server): `sudo rm /etc/ssh/sshd_config.d/00-hardening.conf && sudo systemctl reload ssh` - back to the
-delivered state (passwords allowed).
+Moved to [VPS-1 SERVER.md] §4.10 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.11 Firewall (`ufw`)
 
-Server (bash, over SSH) - rules first, then enable:
-
-```bash
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow 22/tcp comment 'SSH'
-sudo ufw show added
-sudo ufw enable
-sudo ufw status verbose
-```
-
-Expected: `show added` lists `ufw allow 22/tcp comment 'SSH'` (if not, do not enable); `enable` asks
-`Proceed with operation (y|n)?` → `y`; status shows `Status: active`,
-`Default: deny (incoming), allow (outgoing), disabled (routed)` and `22/tcp ALLOW IN Anywhere # SSH` plus the same
-for `(v6)`. Test: a new SSH session (§4.7) and `sudo apt update` (outbound). Blocked attempts in the last hour:
-`sudo journalctl -k --since "1 hour ago" | grep -c "UFW BLOCK"`.
-
-Undo: `sudo ufw disable` (also works on the KVM console). Note for stage 4: ports published by Docker bypass `ufw`;
-our containers publish none.
+Moved to [VPS-1 SERVER.md] §4.11 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.12 Updates (manual and automatic)
 
-Manual, server (bash, over SSH):
-
-```bash
-sudo apt update && sudo apt full-upgrade -y
-[ -f /var/run/reboot-required ] && cat /var/run/reboot-required || echo "no reboot needed"
-```
-
-Dialogs: accept the defaults; for `/etc/ssh/sshd_config` keep the local version. `Pending kernel upgrade!` from
-`needrestart` means a reboot is needed: check `sudo -n true && echo "sudo OK"`, then `sudo reboot`, reconnect after
-1-2 minutes (§4.7) and check `uname -r; uptime`.
-
-Automatic: `unattended-upgrades` (on by default) installs security updates daily from `apt-daily-upgrade.timer`
-(early morning UTC). Our drop-in adds the reboot, server (bash, over SSH):
-
-```bash
-sudo tee /etc/apt/apt.conf.d/52unattended-upgrades-local > /dev/null <<'EOF'
-// Stage 2 hardening (docs/SAAS_INFRA.md): reboot automatically when an update requires it
-Unattended-Upgrade::Automatic-Reboot "true";
-Unattended-Upgrade::Automatic-Reboot-Time "03:30";
-EOF
-apt-config dump | grep -E "Unattended-Upgrade::Automatic-Reboot|APT::Periodic::(Update-Package-Lists|Unattended-Upgrade) "
-sudo unattended-upgrade --dry-run --debug 2>&1 | grep -E "Allowed origins|No packages|Packages that will be upgraded|ERROR|Traceback"
-```
-
-Expected: both `APT::Periodic` values `"1"`, `Automatic-Reboot "true"`, `Automatic-Reboot-Time "03:30"`; the allowed
-origins include `-security`; no `ERROR` or `Traceback`. After an update that needs it, the reboot happens at the next
-03:30 UTC. Logs: `/var/log/unattended-upgrades/`. Undo: `sudo rm /etc/apt/apt.conf.d/52unattended-upgrades-local`
-(updates continue, without the automatic reboot).
+Moved to [VPS-1 SERVER.md] §4.12 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.13 Rebuild the server from scratch (Ansible)
 
-Wipes everything on the server; about 30-45 minutes. The playbook (`infra/ansible/site.yml`,
-[README](../infra/ansible/README.md)) replaces the manual steps of §4.10-4.12; those runbooks stay as the
-explanation and as the way to fix one thing by hand.
-
-Before:
-
-1. Nothing on the server may still be needed. Today: only the probe (R1 closed). From 4.4 on: `pg_dump` and a copy of
-   `/opt/cinemawatch/.env` first (4.5).
-2. OVHcloud panel → the VPS → backups: note the latest automatic backup - the way back for about 24 hours.
-3. Windows (PowerShell) - the public key, to paste in step 1:
-
-```powershell
-Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"
-```
-
-Steps:
-
-1. OVHcloud panel → the VPS → **Reinstall** → Ubuntu 26.04 LTS. If the form has an SSH key field, paste the one line
-   `ssh-ed25519 …` from above; otherwise OVHcloud e-mails a password. The IP addresses stay the same.
-2. Windows (PowerShell) - forget the old host key, then connect (§4.7):
-
-```powershell
-ssh-keygen -R <server-ip>
-ssh ubuntu@<server-ip>
-```
-
-   `ssh` shows the new host key's fingerprint; answer `yes` (copy the `SHA256:…` line for step 3). With the password
-   variant, add the key first (§4.8, the `mkdir -p ~/.ssh …` command) and reconnect with the key.
-3. The image starts with an expired password: even after a key login, Ubuntu asks `Current password:` at once. Enter
-   OVHcloud's start password (from the reinstall e-mail), then a new one twice - generated in the password manager,
-   letters and digits only (the KVM console's keyboard layout mangles special characters), about 24 characters; it
-   replaces the old entry and is the KVM console password (§4.9). The connection then closes; reconnect, and check
-   the host key from the server side and passwordless sudo:
-
-```bash
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-sudo -n true && echo "sudo OK"
-```
-
-   The fingerprint must equal the one `ssh` showed in step 2 (record it in §1.3).
-4. Server - Ansible, the repository and a dry run (to test a branch before merging: `git clone -b <branch> …`):
-
-```bash
-sudo apt update && sudo apt install -y ansible git python3-debian
-git clone https://github.com/damiankowalski/CinemaWatch.git ~/CinemaWatch
-cd ~/CinemaWatch/infra/ansible
-ansible-playbook site.yml --check --diff
-```
-
-   Expected: `ok` / `changed` lines and `PLAY RECAP … failed=0`; the Docker installation is `skipping` (a dry run adds
-   no repository). A `fatal` line: stop and read its `msg`.
-5. Server - apply:
-
-```bash
-ansible-playbook site.yml
-```
-
-   Expected: `failed=0`; possibly the message `An update needs a reboot`. Keep this session open.
-6. Windows (PowerShell), in a **new** window - the SSH tests of §4.10 (key works; password and root refused).
-7. Server - if step 5 asked for it: `sudo reboot`, reconnect after 1-2 minutes.
-8. Server - the second run must change nothing (idempotency):
-
-```bash
-cd ~/CinemaWatch/infra/ansible && ansible-playbook site.yml
-```
-
-   Expected: `changed=0 … failed=0`.
-9. Server - check (plus §4.14):
-
-```bash
-swapon --show
-sudo docker version --format 'Docker {{.Server.Version}}'
-docker compose version
-sudo cat /etc/docker/daemon.json
-apt-config dump | grep -i "origin=Docker"
-ls -ld /opt/cinemawatch
-systemctl is-active qemu-guest-agent
-sudo docker run --rm hello-world && sudo docker image rm hello-world
-sudo docker run --rm alpine:3 wget -q -O /dev/null https://github.com && echo "containers reach the internet"; sudo docker image rm alpine:3
-```
-
-   Expected: `/swapfile` 2G; a Docker and a Compose version; the `daemon.json` of the playbook; the Docker origin line;
-   `drwxr-x--- root root /opt/cinemawatch`; `active`; "Hello from Docker!"; "containers reach the internet" (the app
-   needs it for Cinema City, Resend and the tunnel; `ufw` shows routed `deny` once Docker runs, Docker's own rules
-   come first).
-10. Update §1.3 (host key, kernel, swap, Docker) and the work log (§3).
-
-Undo: none - a reinstall is final. The way back is the OVHcloud backup (restore from the panel) within its 24 hours.
+Moved to [VPS-1 SERVER.md] §4.13 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.14 Check the server state (read only)
 
-Server (bash, over SSH):
-
-```bash
-echo "== system =="; . /etc/os-release; echo "$PRETTY_NAME"; uname -r
-echo "== user =="; whoami; id; sudo -n true 2>/dev/null && echo "sudo: no password" || echo "sudo: asks for a password"
-echo "== resources =="; nproc; free -h; df -h /
-echo "== time =="; timedatectl | grep -E "Time zone|synchronized"
-echo "== ssh =="; sudo sshd -T | grep -E "^(permitrootlogin|passwordauthentication|pubkeyauthentication|kbdinteractiveauthentication) "; ls -la ~/.ssh
-echo "== firewall =="; sudo ufw status verbose
-echo "== updates =="; apt list --upgradable 2>/dev/null | tail -n +2 | wc -l
-echo "== host key =="; ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-```
-
-Expected: the values of §1.3 - Ubuntu 26.04 LTS, `sudo: no password`, 2 CPUs, about 3.7 GiB RAM, `Etc/UTC` and
-synchronised, `permitrootlogin no` / `passwordauthentication no`, `ufw` active with 22/tcp only, the host key
-fingerprint of §1.3. The update count is only current after `sudo apt update`.
+Moved to [VPS-1 SERVER.md] §4.14 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.15 Deploy or update the probe
 
@@ -976,20 +621,7 @@ sudo rm -rf /opt/cinemawatch-probe /etc/cinemawatch-probe /var/lib/private/cinem
 
 ### 4.20 Check the e-mail DNS records
 
-Windows (PowerShell):
-
-```powershell
-Resolve-DnsName -Name resend._domainkey.mail.damiankowalski.pl -Type TXT -Server 1.1.1.1
-Resolve-DnsName -Name rsend.mail.damiankowalski.pl -Type CNAME -Server 1.1.1.1
-Resolve-DnsName -Name send.mail.damiankowalski.pl -Type CNAME -Server 1.1.1.1
-Resolve-DnsName -Name _dmarc.damiankowalski.pl -Type TXT -Server 1.1.1.1
-Resolve-DnsName -Name damiankowalski.pl -Type TXT -Server 1.1.1.1
-```
-
-Expected: the DKIM `TXT` starting `p=MIGfMA0GCSqG`; two `CNAME` rows ending in `.forge.rmta.net` (not `A` rows with
-Cloudflare addresses - that would mean *Proxied*); `v=DMARC1; p=reject;`; the apex `v=spf1 -all`. Resend's domain page
-shows every record as Verified. Delivery itself is checked with the app's test e-mail (account page): in Gmail
-*Show original* → SPF, DKIM (`mail.damiankowalski.pl`) and DMARC all PASS.
+Moved to [VPS-1 SERVER.md] §4.20 (the shared server's documentation, stage 7b, 12 Nov 2026).
 
 ### 4.21 Check the tunnel and Access from outside
 
@@ -1144,11 +776,13 @@ up (secrets; recreate it with §4.23).
    `s3.eu-central-003.backblazeb2.com` (or another `eu-central` one).
 3. Backblaze - the bucket → **Lifecycle Settings → custom rules**: file path `daily/`, hide after **30** days, delete
    after **1** day.
-4. Server (bash, over SSH) - the playbook installs `age`, `rclone`, the script and the timer:
+4. Server (bash, over SSH) - VPS-1's playbook installs `age`, `rclone`, the script (from this clone) and the timer
+   ([VPS-1 SERVER.md] §4.13):
 
 ```bash
 cd ~/CinemaWatch && git pull
-cd infra/ansible && ansible-playbook site.yml --tags backup
+cd ~/VPS-1 && git pull
+cd ~/VPS-1/ansible && ansible-playbook site.yml --tags backup
 ```
 
 5. Server - the age key pair. `age-keygen` without `-o` only prints it; nothing is written to disk:
@@ -1315,200 +949,17 @@ Stage 5 plan and order: [`SAAS.md`](SAAS.md) §7.
 
 - Stage 5 ([`SAAS.md`](SAAS.md) §7): the stable SaaS 0.6.0 on or after 13 Nov 2026 with `cloudflared` 2026.10.7,
   deployed with §4.24; the test runs until about 21 Nov (§4.27). The switch to model A (§4.28) is postponed.
-- Stage 5.8: an inventory of everything that needs updates and a runbook for it.
+- Stage 5.8 (an inventory of everything that needs updates and a runbook for it) belongs to the server now:
+  [VPS-1 SERVER.md] §5.
 - Restore test again in February 2027 (§4.26).
 - 4.6 (deployment from GitHub Actions) was skipped; it stays in the backlog ([`SAAS.md`](SAAS.md) §11).
+- `infra/backup/backup.sh` still says in its header that `infra/ansible` installs it; fix the comment together with
+  the next real change of the script (any change to it is copied to the server by VPS-1's playbook).
 
-Each step will be added to §1 and §3 of this file.
+Each CinemaWatch step will be added to §1 and §3 of this file; server steps go to [VPS-1 SERVER.md].
 
 ---
 
 ## 6. Glossary (infrastructure)
 
-### Domains
-
-| Term | Meaning |
-| --- | --- |
-| Domain name | Human-readable name such as `damiankowalski.pl`; the owner creates subdomains (`cinemawatch.damiankowalski.pl`) freely |
-| TLD | Top-level domain, the last part of the name (`.pl`, `.com`) |
-| Registry | Organisation that runs a TLD; for `.pl` it is NASK |
-| Registrar | Company that sells domains and passes changes to the registry; here OVHcloud |
-| Holder (registrant) | The legal owner of a domain |
-| WHOIS | Public lookup of registration data; for `.pl` the data of private persons is not published |
-| Transfer protection | Registrar lock: the domain cannot move to another registrar until the owner unlocks it |
-| Renewal / expiry | A domain is rented per year; an expired domain stops working and can later be registered by someone else |
-
-### DNS
-
-| Term | Meaning |
-| --- | --- |
-| DNS | Domain Name System: the internet's directory that turns names into addresses and other data |
-| Zone | All DNS records of one domain, held by its DNS provider |
-| Record | One entry in the zone: name, type, value, TTL |
-| Zone apex (`@`) | The domain itself, without a subdomain |
-| A / AAAA | Record with an IPv4 / IPv6 address |
-| CNAME | Alias: "this name is the same as that name" |
-| MX | Servers that receive e-mail for the domain |
-| TXT | Free text; used for SPF, DKIM, DMARC and ownership checks |
-| NS | Nameservers that answer for the domain |
-| SOA | Administrative record of a zone (primary server, serial number, timers) |
-| CAA | Certificate authorities allowed to issue certificates for the domain |
-| Authoritative nameserver | Server that holds the zone and gives the final answers; here Cloudflare's `faye` and `tosana` |
-| Delegation | The parent zone (`.pl`) pointing to the nameservers of a domain |
-| DNS provider | Who runs the authoritative nameservers; here Cloudflare |
-| Resolver (recursive) | Server that looks names up for devices and caches the results (internet provider, 1.1.1.1, 8.8.8.8) |
-| TTL | Time to live: how long resolvers may cache an answer (86400 s = 24 h) |
-| Propagation | Time until the registry publishes a change and old cached answers expire |
-| Proxied / DNS only | Cloudflare record modes: web traffic through Cloudflare (orange cloud) or only the DNS answer (grey cloud) |
-| Cache poisoning | Attack that slips a forged answer into a resolver's cache |
-
-### DNSSEC
-
-| Term | Meaning |
-| --- | --- |
-| DNSSEC | DNS Security Extensions: signatures on DNS answers so resolvers can detect forged answers |
-| DNSKEY | Public key of a zone, published in the zone |
-| RRSIG | Signature over a set of records |
-| KSK / ZSK | Key-signing key (flag 257) signs the zone's keys; zone-signing key (flag 256) signs the records |
-| DS | Delegation signer: fingerprint (hash) of a domain's KSK, published in the parent zone (`.pl`) |
-| Key tag | Short number that identifies a key (here 2371) |
-| Algorithm 13 | ECDSA P-256 with SHA-256, the signing algorithm Cloudflare uses |
-| Digest type 2 | SHA-256, the hash used in the DS |
-| Chain of trust | root → `.pl` → `damiankowalski.pl`: each level vouches for the next with a DS |
-| Trust anchor | The root key that validating resolvers know in advance |
-| Validating resolver | Resolver that checks signatures; on a broken chain it answers SERVFAIL instead of a possibly forged answer |
-| SERVFAIL | DNS error "server failure"; with DNSSEC it usually means the validation failed |
-| NSEC3 | Signed proof that a name or record does not exist (e.g. "no DS for this domain") |
-| CDS / CDNSKEY | Records in which a zone tells its parent which DS to publish (RFC 7344); Cloudflare publishes them |
-| DNSViz | Web tool (dnsviz.net) that draws and checks the DNSSEC chain of a domain |
-| DoH / DoT | DNS over HTTPS / TLS: encrypts DNS queries (privacy); unrelated to DNSSEC (integrity) |
-
-### E-mail authentication
-
-| Term | Meaning |
-| --- | --- |
-| SPF | TXT record listing the servers allowed to send e-mail for the domain; `v=spf1 -all` means none |
-| DKIM | Signature in every e-mail; the public key is published in DNS |
-| DMARC | Policy telling receivers what to do with e-mails that fail SPF / DKIM, plus reports to the owner |
-| DMARC policy (`p=`) | `none`: only observe; `quarantine`: to spam; `reject`: refuse. Applies to e-mails claiming the domain or a subdomain that fail both aligned SPF and aligned DKIM |
-| Alignment | DMARC passes only if the domain that passed SPF or DKIM belongs to the same organizational domain as the visible From address |
-| Return path (envelope sender, bounce address) | The address bounces go to; SPF is checked on its domain, not on the From address |
-| Transactional e-mail | E-mail sent by an application to one person because of something they did (invitation, password reset, notification), not a newsletter |
-
-### Certificates
-
-| Term | Meaning |
-| --- | --- |
-| TLS certificate | Proves a server's identity for HTTPS; issued by a certificate authority |
-| Certificate authority (CA) | Issuer of certificates, e.g. Let's Encrypt; checks control of the domain via DNS or HTTP first |
-| Universal SSL | Free certificate from Cloudflare for the domain and its first-level subdomains |
-
-### Accounts and security
-
-| Term | Meaning |
-| --- | --- |
-| 2FA | Two-factor authentication: a second proof of identity besides the password |
-| TOTP | Time-based one-time password: 6-digit codes from an authenticator app |
-| Passkey / security key | Phishing-resistant second factor based on public-key cryptography (WebAuthn) |
-| Recovery (backup) codes | One-time codes for when the second factor is lost; kept in the password manager |
-| Social login | Signing in with another account (e.g. Google); that account's security then protects this one |
-| API token | Secret key that lets scripts and tools call a provider's API; never in the repository or the chat |
-
-### Cloudflare
-
-| Term | Meaning |
-| --- | --- |
-| Cloudflare Free plan | Free DNS, DNSSEC, proxy, TLS certificates and basic protection |
-| AI crawler policy / Bot Preference Sync | Zone settings that tell AI and search bots what they may do on the owner's site, written into robots.txt |
-| robots.txt | File that tells crawlers what they may visit; a convention, not enforcement |
-| Zero Trust (Cloudflare One) | Cloudflare's products for access control (Access) and private connectivity (Tunnel); organized as one organization per account |
-| Team domain | `<team>.cloudflareaccess.com`: where Access login pages live |
-| Cloudflare Tunnel, `cloudflared` | An outbound connection from a server to Cloudflare that carries the visitors' requests in; `cloudflared` is the program (here a container) that keeps it open. A tunnel token lets anyone run it |
-| Published application (route) | A tunnel rule: public host name → local service (`http://web:8080`); creates the proxied DNS record |
-| Cloudflare Access application | A host name (and optional path) whose visitors must sign in first; policies (Allow + e-mails) decide who passes; the most specific path wins |
-| One-time PIN | Access login method: a code e-mailed to an allowed address, valid 10 minutes |
-| Seat | One person who signed in through Access; the free plan has 50 |
-| Error 1033 / HTTP 530 | Cloudflare's answer when a tunnel has no running connector |
-| Negative caching | Resolvers also remember "no such name" (NXDOMAIN), for up to the SOA's TTL - a name added right after a failed lookup can stay "missing" for a while |
-| Heartbeat ("dead man's switch") | A regular ping from the app to an outside service, which alerts when the pings stop - the only way to learn that the server or the app is down |
-
-### Servers and Linux
-
-| Term | Meaning |
-| --- | --- |
-| VPS | Virtual private server: a rented virtual machine with its own system and guaranteed CPU / RAM |
-| KVM (virtualisation) | Full hardware virtualisation: the VM has its own kernel, so Docker and firewalls work; OpenVZ / LXC "VPS" share the host's kernel |
-| Cloud image | Prepared system the provider installs; brings defaults such as the `ubuntu` user |
-| cloud-init | Tool that configures a cloud image at first boot (user, keys, network, SSH settings) |
-| LTS | Long-term support Ubuntu release: 5 years of standard updates (26.04: until 2031) |
-| Kernel | Core of the operating system; a new kernel runs only after a reboot |
-| root | Administrator account; direct login disabled here |
-| `sudo` | Runs one command as root; on Ubuntu 26.04 implemented by sudo-rs |
-| Drop-in file | Small extra configuration file in a `*.d/` folder that overrides defaults without editing the package's files |
-| `apt` | Ubuntu's package manager: `update` refreshes the lists, `full-upgrade` installs the updates |
-| `needrestart` | Reports services and kernels that need a restart after updates |
-| `unattended-upgrades` | Installs security updates automatically; here also reboots at 03:30 UTC when needed |
-| systemd, unit, timer | Ubuntu's service manager; a unit describes a service, a timer starts a unit on a schedule (used by the probe) |
-| `oneshot` service | `Type=oneshot`: each start runs the program once to the end (the probe: one check per start) |
-| `daemon-reload` | Makes systemd read new or changed unit files |
-| `enable --now` | Start a unit now and after every boot |
-| `DynamicUser` | systemd creates a temporary user without rights for each run; between runs its files show `nobody` as owner |
-| `StateDirectory` | Data folder systemd creates for a service (`/var/lib/<name>`; with `DynamicUser` a link into the root-only `/var/lib/private`) |
-| Journal, `journalctl` | systemd's log of everything the services print; `-u <unit>` shows one service, `--since today` one day |
-| Symbolic link | File-system entry that points to another path |
-| Glob (`*`) | Pattern the shell turns into file names before running a command - as the current user, so `sudo cat folder/*` fails when only root can read the folder; `sudo sh -c '…'` expands it as root |
-| `install` | Copies a file and sets its owner and permissions in one step |
-| Checksum, `sha256sum -c` | Fingerprint of a file's content; `-c` checks a copy against the recorded fingerprint |
-| `scp` | Copies files over SSH (same key, passphrase and host-key check); `-r` copies a whole folder |
-| Current directory, `getcwd` | The folder a shell stands in; deleting it from inside makes later commands complain until `cd ~` |
-| Firewall, `ufw` | Filters network connections; `ufw` ("uncomplicated firewall") is Ubuntu's simple front end, for IPv4 and IPv6 |
-| Default deny | Everything not explicitly allowed is blocked |
-| Port | Number that identifies a service on a server (SSH = 22/tcp) |
-| KVM console | Screen and keyboard of the VM in the provider's panel; works without SSH, firewall rules do not apply |
-| Rescue mode | Starts the VPS from a separate system to repair its disk |
-| Swap | Disk space used when RAM runs out; none yet, 2 GB planned in stage 4 |
-| UTC | Coordinated Universal Time, without daylight saving time; the server's time zone |
-| Anti-DDoS, blackholing | Protection against floods of traffic; blackholing drops all traffic to the attacked IP, so the server goes offline |
-
-### SSH
-
-| Term | Meaning |
-| --- | --- |
-| SSH | Secure Shell: encrypted remote login to a server's command line |
-| Key pair | Private key plus its public key, generated together with `ssh-keygen` |
-| Private key | Stays on the owner's PC (`id_ed25519`); signs the login challenge; never shared |
-| Public key | May be shared (`id_ed25519.pub`); lets a server check signatures made with the private key |
-| Passphrase | Password that encrypts the private key file on disk; never sent to the server |
-| ed25519 | Modern, short key type; the OpenSSH default |
-| `authorized_keys` | File on the server (`~/.ssh/authorized_keys`) with the public keys allowed to log in as that user |
-| Host key | The server's own key pair; proves to the client that it reached the right server |
-| `known_hosts` | File on the client with the host keys of servers seen before |
-| Fingerprint | Short hash of a key (`SHA256:…`) for comparing keys by eye; public |
-| TOFU | Trust on first use: the first connection accepts the host key after a manual check, later ones are checked automatically |
-| `sshd` | The SSH server; settings in `/etc/ssh/sshd_config` and drop-ins in `sshd_config.d/` (first value wins) |
-| `ssh-agent` | Optional service that keeps an unlocked key in memory so the passphrase is typed less often; not used |
-| `ssh-copy-id` | Linux / macOS helper that adds a public key to a server; Windows has none (§4.8 does the same) |
-
-### Backups
-
-| Term | Meaning |
-| --- | --- |
-| `pg_dump` / `pg_restore` | PostgreSQL's tools to write a database into one file and to load it back (here the "custom" format) |
-| `age` | A small encryption tool: whatever is encrypted for a public key (`age1…`) only opens with its private key (`AGE-SECRET-KEY-1…`) |
-| `rclone` | A command-line tool that copies files to and from cloud storage (here Backblaze B2) |
-| Object storage, bucket | Storage for files reached over an API; a bucket is one named container of files |
-| Application key (B2) | A key for one bucket with chosen rights; "Write Only" can add files but not read or delete them |
-| Lifecycle rule | A bucket rule that hides and then deletes files after a number of days |
-| Restore test | Loading a backup into a scratch database to prove it can be used |
-| systemd timer, `Persistent` | Starts a service on a schedule; `Persistent=true` makes up a run missed while the server was off |
-
-### Configuration as code
-
-| Term | Meaning |
-| --- | --- |
-| Infrastructure as code | Server configuration kept as versioned files instead of manual steps |
-| Ansible | Brings servers to a described state over SSH, without an agent on the server; files in YAML (planned for stage 4) |
-| Playbook, role | Ansible file (or reusable part) that describes the desired state |
-| Inventory | List of servers Ansible manages; contains addresses, so it stays out of git here |
-| Control node | Machine that runs Ansible: Linux, macOS or WSL2, not native Windows |
-| Idempotency (configuration) | Running the same playbook again changes only what differs |
+Moved to [VPS-1 SERVER.md] §6 (the shared server's documentation, stage 7b, 12 Nov 2026).

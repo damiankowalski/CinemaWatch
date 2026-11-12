@@ -6,8 +6,10 @@ this repository; the decisions and history live in the docs below, not in any ch
 ## Context
 - Owner: Damian (Warsaw). **CinemaWatch** notifies when watched seats free up for sold-out Cinema City screenings.
 - Read before work: `docs/KNOWLEDGE_BASE.md` (desktop, Cinema City API), `docs/SAAS.md` (SaaS plan §7, decision log
-  §9, open questions §10), `docs/SAAS_INFRA.md` (server, domain, runbooks). For the web app also
-  `src/CinemaWatch.Web/README.md`.
+  §9, open questions §10), `docs/SAAS_INFRA.md` (CinemaWatch on the server: containers, tunnel, Access, backup,
+  runbooks). For the web app also `src/CinemaWatch.Web/README.md`.
+- The shared server itself (domain, DNS, SSH, firewall, Docker, the Ansible playbook) lives in the private repository
+  `damiankowalski/VPS-1` (`docs/SERVER.md`) since 12 Nov 2026; changes to it are made in that repository.
 - Order of trust: repository code > KNOWLEDGE_BASE.md > SAAS.md > SAAS_INFRA.md. For live infrastructure the provider
   panels (OVHcloud, Cloudflare) are the source of truth - you cannot see them; ask.
 - Desktop 1.5.0 is stable. Tracks: **SaaS** - current focus (stage 6, MVP 1: the wizard and hall map on the site as
@@ -63,5 +65,5 @@ this repository; the decisions and history live in the docs below, not in any ch
   straight to `main` (Damian commits).
 - Every desktop release: `Directory.Build.props`, `.github/RELEASE_NOTES.md`, README if behaviour changed, the KB
   (status, version history, decision log).
-- End of every SaaS stage: `docs/SAAS.md` (§7, §9, §10) and `docs/SAAS_INFRA.md` (state, work log, runbooks,
-  glossary). Decisions agreed with Damian go into §9 the same day - the repository is the project's memory.
+- End of every SaaS stage: `docs/SAAS.md` (§7, §9, §10) and `docs/SAAS_INFRA.md` (state, work log, runbooks).
+  Decisions agreed with Damian go into §9 the same day - the repository is the project's memory.

@@ -2,8 +2,10 @@
 
 > Companion to [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md). The product, the Cinema City API, the domain rules and the
 > profile format live there and are not repeated here. This document covers the SaaS (web) track: goals, risks,
-> target architecture, the MVP, the plan and the decisions. What has actually been set up (accounts, domain, DNS,
-> the VPS), with a work log, runbooks and an infrastructure glossary, lives in [`SAAS_INFRA.md`](SAAS_INFRA.md).
+> target architecture, the MVP, the plan and the decisions. What has actually been set up for CinemaWatch (containers,
+> tunnel, Access, e-mail, backups), with a work log and runbooks, lives in [`SAAS_INFRA.md`](SAAS_INFRA.md); the
+> shared server itself (domain, DNS, the VPS, its Ansible configuration) is documented in the private repository
+> `damiankowalski/VPS-1` since 12 Nov 2026 (§9).
 > Order of trust: **repository code** > **KNOWLEDGE_BASE.md** > **this document** > chat history. For live
 > infrastructure settings the provider panels are the source of truth; `SAAS_INFRA.md` records them.
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
@@ -385,8 +387,8 @@ Goal: the result as close to the desktop app as possible (decided 8 Nov 2026, §
   publishes the probe; the `container` job builds the web image and runs `infra/compose/smoke-test.sh` (postgres + web
   from the compose file, no tunnel, no e-mail, no poller). Tags `web-vX.Y.Z` (betas `web-vX.Y.Z-beta.N`) run
   `web-image.yml`: the same build and test, then the image goes to GHCR as `cinemawatch-web:X.Y.Z` and `sha-<commit>`;
-  no GitHub release. The `ansible` job checks `infra/ansible` with the Ubuntu 26.04 packages (`ansible`,
-  `ansible-lint`): `--syntax-check` and `ansible-lint --profile production`. Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
+  no GitHub release. The server's Ansible playbook and its CI checks moved to the
+  repository `damiankowalski/VPS-1` on 12 Nov 2026 (§9). Actions: `actions/checkout@v7`, `actions/setup-dotnet@v6` (Node 24). The probe itself is not released: it has its own version in its project file and no tag.
 - Conventions from KB §7 apply: English code and docs, UI texts via `T("polski", "English")`, tests for every
   behaviour change, no secrets in the repository (configuration via environment variables and GitHub Secrets).
 
@@ -814,6 +816,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Wizard state in the form, not in the database | No migration and no restore test; the server validates everything when saving anyway |
 | Nov 2026 | Multi-select on the hall map for the desktop app (1.5.0) and the site together: painting (press on a seat and drag), a rectangle from the background with the row-label rule, no modifier keys, wheelchair spaces only by a single click; the rules once in Core, mirrored by the script, one shared case file tested in C# and in JavaScript | Fewer clicks for whole blocks of seats; the same behaviour in both clients, guarded by CI instead of by memory; cheaper to build into the new web map than to add later |
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
+| Nov 2026 | The server's configuration (`infra/ansible`) and its documentation (domain, DNS, the VPS, runbooks, glossary) move to the private repository `damiankowalski/VPS-1` (stage 7b, 11-12 Nov 2026; decision F-017 of the Finanse project); `SAAS_INFRA.md` keeps CinemaWatch's own parts and points to VPS-1 for the rest | The server is shared with a second application (Finanse): one source of truth for it, outside either application; each application keeps its image, compose file, deploy and backup scripts. The move changed nothing on the server (second Ansible run `changed=0`) |
 
 ---
 
