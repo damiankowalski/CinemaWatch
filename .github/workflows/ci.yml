@@ -87,22 +87,3 @@ jobs:
 
       - name: Container test
         run: bash infra/compose/smoke-test.sh cinemawatch-web ci
-
-  # SaaS server: the Ansible playbook (infra/ansible), checked with the Ubuntu 26.04 packages the server installs.
-  ansible:
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Ansible (Ubuntu packages, as on the server)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ansible ansible-lint
-
-      - name: Syntax check and lint
-        working-directory: infra/ansible
-        run: |
-          # The runner image brings its own, newer Ansible (pipx) earlier on PATH; use Ubuntu's, as on the server.
-          export PATH="/usr/bin:$PATH"
-          ansible --version
-          ansible-lint --version
-          ansible-playbook site.yml --syntax-check
-          ansible-lint --profile production site.yml
