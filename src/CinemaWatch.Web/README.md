@@ -52,7 +52,7 @@ How it works:
 - Several profiles can be open at once. The header of a profile is a link that opens or closes it; the open profiles
   live in the address (`?profile=…` for the one in focus, `?open=…` for the others), so the page's own reloads,
   "Check now", enable, disable and delete keep them open until you close them.
-- **New profile (wizard, SaaS 0.7.0, being built):** the button on the home page opens `/wizard`, the desktop app's
+- **New profile and editing (wizard, SaaS 0.7.0):** the button on the home page opens `/wizard`, the desktop app's
   steps (step bar at the top: the steps reached so far and the next one are buttons). Step 1: the city (one IMAX
   cinema each, or all six) and a date or a range ("To" empty = one day; 31 days, 14 for all cities; the desktop's
   messages). *Next* opens step 2 at once when the shared cache holds the whole repertoire; otherwise a loading starts
@@ -68,11 +68,20 @@ How it works:
   script, `wwwroot/seatmap.js` (no libraries, loaded on every page, active only on a map), adds painting (press on
   a seat and drag), the rectangle (press on the background and drag), Esc, row numbers without a reload and live
   counts - the rules of `CinemaWatch.Core` `SeatSelection`, tested against the same case file. With a finger a tap
-  toggles a seat and dragging scrolls; without JavaScript everything works through the form. Step 4 (saving)
-  follows in 6.4.5; *Next* on step 3 only checks that a seat is selected for now. All of it posts to `/wizard/go`;
-  the state (`city`, `from`, `to`, `film`, `s`, `max`, `m` - each screening's seats as one bit per seat of its
-  layout, Base64Url (`SeatCode`) -, `tab`, `adj`) travels in hidden fields and in the address of the page the
-  answer redirects to - nothing in the database.
+  toggles a seat and dragging scrolls; without JavaScript everything works through the form. Step 4 (`/wizard/4`):
+  the desktop's summary - the screenings with their watched seats row by row (screenings without seats are skipped),
+  the notification condition, the name (default as in the desktop: film, city, dates) and the interval (the
+  desktop's 5/10/15/30/60 minutes, none below `Saas:Limits:MinIntervalMinutes`). *Save* builds the profile as the
+  desktop app does (`Server/Wizard/WizardProfile`) and stores it through the import's checks and limits
+  (`ProfileService.SaveAsync`); a name another profile has is refused, never replaced. **Edit** on the profile list
+  (`POST /wizard/edit/<id>`) opens the wizard on a stored profile: started screenings drop out, the dates start
+  today, the seats come from the stored profile once the hall maps are known (missing ones load first, then
+  `/wizard/seed` fills them in) and it ends on step 4. Saving an edit keeps the id and the enabled state, and the
+  notification state of the screenings and seats still watched (a seat already reported free is not reported
+  again). All of it posts to `/wizard/go`; the state (`city`, `from`, `to`, `film`, `s`, `max`, `m` - each
+  screening's seats as one bit per seat of its layout, Base64Url (`SeatCode`) -, `tab`, `adj`, `name`, `int`, and
+  when editing `p` and `seed`) travels in hidden fields and in the address of the page the answer redirects to -
+  nothing in the database until *Save*.
 - Profile limit: 5 per account (enabled, disabled and ended alike). The owner sets another limit per account (1-50)
   in the **Users** list; an empty field means the default. Lowering a limit deletes nothing.
 

@@ -17,11 +17,27 @@ public static class WizardTexts
         _ => T("Podsumowanie", "Summary"),
     };
 
+    /// <summary>The wizard's heading: "Nowy profil", or "Edycja profilu" when a stored profile is edited.</summary>
+    public static string Heading(WizardState state) => state.ProfileId is null
+        ? T("Nowy profil", "New profile")
+        : T("Edycja profilu", "Editing a profile");
+
     /// <summary>"/wizard?…" (step 1) or "/wizard/2?…".</summary>
     public static string StepUrl(int step, WizardState state) =>
         (step <= 1 ? "/wizard" : $"/wizard/{step}") + "?" + state.Query();
 
-    public static string LoadingUrl(Guid id, WizardState state) => $"/wizard/loading/{id}?{state.Query()}";
+    /// <summary>A loading's progress page; <paramref name="to"/> = 4 when it was started from step 4 (and leads back there).</summary>
+    public static string LoadingUrl(Guid id, WizardState state, int? to = null) =>
+        $"/wizard/loading/{id}?{state.Query()}" + (to is { } step ? $"&to={step}" : "");
+
+    /// <summary>
+    /// Where a finished loading leads: editing with seats still waiting for their hall maps goes through /wizard/seed
+    /// (which fills them in); otherwise the step itself.
+    /// </summary>
+    public static string AfterLoadingUrl(int step, WizardState state) =>
+        state.ProfileId is not null && state.SeedIds.Count > 0 && step >= 3
+            ? $"/wizard/seed?{state.Query()}&to={step}"
+            : StepUrl(step, state);
 
     /// <summary>Why a loading did not start or stopped, and when to try again.</summary>
     public static string StopReason(WizardStopReason reason, DateTimeOffset? retryAt)

@@ -695,3 +695,11 @@ button.hall-tab:hover { border-color: var(--ink); }
 
 .seat-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0 0 0.75rem; }
 .seat-tools select { width: auto; }
+
+/* Step 4: the summary - one block per screening, its watched seats row by row (as in the desktop app). */
+.wizard h2 { margin: 1.25rem 0 0.25rem; font-size: 1.05rem; }
+.summary-list { margin: 0 0 0.75rem; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.summary-list > li { padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+.summary-list p { margin: 0.1rem 0; }
+.summary-title { display: flex; flex-wrap: wrap; gap: 0 0.75rem; align-items: baseline; }
+.summary-rows { margin: 0.1rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: 0.95rem; }

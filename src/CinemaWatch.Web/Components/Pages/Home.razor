@@ -209,6 +209,13 @@ else
                             <input type="hidden" name="open" value="@OthersOpen(profile.Id)" />
                             <button type="submit" class="button">@(profile.Enabled ? T("Wyłącz", "Disable") : T("Włącz", "Enable"))</button>
                         </form>
+                        @if (!profile.Ended)
+                        {
+                            <form action="wizard/edit/@profile.Id" method="post">
+                                <AntiforgeryToken />
+                                <button type="submit" class="button">@T("Edytuj", "Edit")</button>
+                            </form>
+                        }
                         <a class="button" href="profiles/@profile.Id/download" download>@T("Pobierz plik", "Download file")</a>
                         @if (!confirming)
                         {

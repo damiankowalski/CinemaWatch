@@ -50,6 +50,39 @@ public sealed record WizardState
 
     public const int MaxAdjacent = 6;
 
+    /// <summary>Editing: the stored profile the wizard was opened from (null = a new profile).</summary>
+    public Guid? ProfileId { get; init; }
+
+    /// <summary>Editing: screenings whose seats still have to come from the stored profile (their hall map was missing).</summary>
+    public IReadOnlyList<string> SeedIds { get; init; } = [];
+
+    /// <summary>Step 4: the profile's name as typed (null = not typed yet, the default name is offered).</summary>
+    public string? Name { get; init; }
+
+    /// <summary>Step 4: the check interval in minutes (null = the default).</summary>
+    public int? Interval { get; init; }
+
+    /// <summary>The desktop app's interval choices (minutes).</summary>
+    public static IReadOnlyList<int> IntervalChoices { get; } = [5, 10, 15, 30, 60];
+
+    public const int DefaultInterval = 10;
+
+    /// <summary>The choices an account may use: the desktop's, not below the shortest interval the site allows.</summary>
+    public static IReadOnlyList<int> IntervalsFrom(int minimum)
+    {
+        var allowed = IntervalChoices.Where(m => m >= minimum).ToList();
+        return allowed.Count > 0 ? allowed : [minimum];
+    }
+
+    /// <summary>The interval to show and save: the chosen one when allowed, else the default (or the next allowed).</summary>
+    public int IntervalOrDefault(int minimum)
+    {
+        var allowed = IntervalsFrom(minimum);
+        if (Interval is { } chosen && allowed.Contains(chosen))
+            return chosen;
+        return allowed.FirstOrDefault(m => m >= DefaultInterval, allowed[^1]);
+    }
+
     public bool IsAllCities => City == AllCities;
 
     public IReadOnlyList<string> CinemaIds => IsAllCities ? Locations.ImaxCinemas.Select(c => c.Id).ToList() : [City];
@@ -93,6 +126,15 @@ public sealed record WizardState
                 seats[id] = code;
         }
         var tab = One("tab");
+        // The name as typed, without control characters and cut to the import's limit (an empty one = the default).
+        var name = new string((values("name").FirstOrDefault(v => v is not null) ?? "").Where(c => !char.IsControl(c)).ToArray()).Trim();
+        if (name.Length > ProfileImport.MaxTextLength)
+            name = name[..ProfileImport.MaxTextLength].TrimEnd();
+        var seed = values("seed")
+            .SelectMany(v => (v ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Where(id => ids.Contains(id, StringComparer.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
         return new WizardState
         {
             City = city == AllCities || Locations.FindCinema(city) is not null ? city! : Locations.Sadyba.Id,
@@ -104,6 +146,10 @@ public sealed record WizardState
             Seats = seats,
             Tab = tab is not null && ids.Contains(tab, StringComparer.Ordinal) ? tab : null,
             MinAdjacent = Math.Clamp(adjacent, 1, MaxAdjacent),
+            ProfileId = Guid.TryParse(One("p"), out var profileId) && profileId != Guid.Empty ? profileId : null,
+            SeedIds = seed,
+            Name = string.IsNullOrEmpty(name) ? null : name,
+            Interval = int.TryParse(One("int"), NumberStyles.None, CultureInfo.InvariantCulture, out var interval) && IntervalChoices.Contains(interval) ? interval : null,
         };
     }
 
@@ -126,12 +172,23 @@ public sealed record WizardState
             yield return new("tab", tab);
         if (MinAdjacent > 1)
             yield return new("adj", MinAdjacent.ToString(CultureInfo.InvariantCulture));
+        if (ProfileId is { } profile)
+            yield return new("p", profile.ToString());
+        if (SeedIds.Where(ScreeningIds.Contains).ToList() is { Count: > 0 } seed)
+            yield return new("seed", string.Join(",", seed));
+        if (Name is { } name)
+            yield return new("name", name);
+        if (Interval is { } interval)
+            yield return new("int", interval.ToString(CultureInfo.InvariantCulture));
     }
 
     /// <summary>The screening whose map step 3 shows: the chosen tab, else the first ticked screening.</summary>
     public string? CurrentTab => Tab ?? ScreeningIds.FirstOrDefault();
 
-    /// <summary>The same state with this screening's selection replaced (an empty one is left out).</summary>
+    /// <summary>
+    /// The same state with this screening's selection replaced (an empty one is left out); it no longer waits for the
+    /// edited profile's seats.
+    /// </summary>
     public WizardState WithSeats(string screeningId, string code)
     {
         var seats = new Dictionary<string, string>(Seats, StringComparer.Ordinal);
@@ -139,7 +196,7 @@ public sealed record WizardState
             seats.Remove(screeningId);
         else
             seats[screeningId] = code;
-        return this with { Seats = seats };
+        return this with { Seats = seats, SeedIds = SeedIds.Where(id => id != screeningId).ToList() };
     }
 
     /// <summary>"city=1060&amp;from=2026-11-12&amp;max=2" for an address.</summary>

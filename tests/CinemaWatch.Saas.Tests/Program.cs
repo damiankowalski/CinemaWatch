@@ -746,6 +746,89 @@ TestRunner.Add("Wizard step 3: a selection as one bit per seat (Base64Url), noth
     Assert.Equal((first.Seat.X, first.Seat.Y), (layout.ToPlan(first.Left + plan.SeatRadius, first.Top + plan.SeatRadius).X, layout.ToPlan(first.Left + plan.SeatRadius, first.Top + plan.SeatRadius).Y));
 });
 
+TestRunner.Add("Wizard step 4: the profile built as the desktop app builds it (default name, sorted seats, skipped screenings, interval); a stored profile turns back into the state, its seats come back once the hall maps are known; the file reads in the desktop app", () =>
+{
+    using var _ = Localizer.Use(AppLanguage.Polish);
+    var plan = CinemaCityParser.ParseSeatPlan(FakePlanJson());
+    static HashSet<string> Keys(params string[] keys) => new(keys, StringComparer.Ordinal);
+    static Screening S(string id, int hour) =>
+        new(id, "f1", "1080", new DateTime(2026, 12, 16, hour, 0, 0), "Sala 1 IMAX", ["imax"], ["en"], ["pl"], [], false, 0.1, "https://www.cinema-city.pl/buy/" + id);
+    var days = new List<DayRepertoire> { new(new DateOnly(2026, 12, 16), [new Film("f1", "Diuna", 150, null)], [S("a1", 18), S("b2", 21), S("c3", 23)]) };
+    var maps = new[] { "a1", "b2", "c3" }.Select(id => new ScreeningResult(id, null, plan, null, null, null)).ToList();
+    var state = new WizardState { City = "1080", From = new DateOnly(2026, 12, 16), FilmId = "f1", ScreeningIds = ["b2", "a1", "c3"], MinAdjacent = 2 }
+        .WithSeats("a1", SeatCode.Encode(plan, Keys("1_19_4", "1_18_4")))
+        .WithSeats("b2", SeatCode.Encode(plan, Keys("1_20_4")));
+
+    var draft = WizardProfile.Build(state, maps, days, null, 10);
+    var profile = draft.Profile!;
+    Assert.Equal((null as string, 1, 2), (draft.Problem, draft.Skipped, draft.Screenings.Count)); // c3 has no seats
+    Assert.Equal($"Diuna Łódź {ScreeningText.ShortDate(new DateOnly(2026, 12, 16))}", profile.Name);
+    Assert.Equal(("1080", "Cinema City Manufaktura", "f1", "Diuna", 2, 10), (profile.CinemaId, profile.CinemaName, profile.FilmId, profile.FilmName, profile.MinAdjacent, profile.IntervalMinutes));
+    Assert.SequenceEqual(["1080"], profile.CinemaIds);
+    Assert.SequenceEqual(["a1", "b2"], profile.Screenings.Select(s => s.Id)); // by start time
+    Assert.SequenceEqual(["1_18_4", "1_19_4"], profile.Screenings[0].SeatKeys);
+    Assert.Equal(("Łódź", "Sala 1 IMAX", "https://www.cinema-city.pl/buy/a1"), (profile.Screenings[0].City, profile.Screenings[0].Auditorium, profile.Screenings[0].BookingLink));
+    Assert.True(ProfileImport.Check("x.cinemawatch.json", ProfileStore.Serialize(profile), new DateTime(2026, 12, 16, 12, 0, 0), 20).IsValid);
+
+    // The interval: the desktop's choices, never below the site's minimum; a typed name wins over the default.
+    Assert.SequenceEqual([10, 15, 30, 60], WizardState.IntervalsFrom(10));
+    Assert.SequenceEqual([90], WizardState.IntervalsFrom(90));
+    Assert.Equal((10, 30, 15), ((state with { Interval = 5 }).IntervalOrDefault(10), (state with { Interval = 30 }).IntervalOrDefault(10), state.IntervalOrDefault(15)));
+    Assert.Equal("Moja Diuna", WizardProfile.Build(state with { Name = "Moja Diuna" }, maps, days, null, 10).Profile!.Name);
+    Assert.Equal($"Profil {ScreeningText.ShortDate(new DateOnly(2026, 12, 16))}", WizardProfile.DefaultName(state with { City = WizardState.AllCities }, ""));
+
+    // What is missing stops the saving: no seats at all; the screenings' data gone from the cache (unless edited).
+    Assert.Equal("Zaznacz co najmniej jeden rząd albo jedno miejsce.", WizardProfile.Build(state with { Seats = new Dictionary<string, string>() }, maps, days, null, 10).Problem);
+    Assert.True(WizardProfile.Build(state, maps, [], null, 10).Problem!.StartsWith("Brakuje danych 2 seansów"));
+    Assert.True(WizardProfile.Build(state, maps.Take(1).ToList(), days, null, 10).Problem!.StartsWith("Brakuje danych 1 seansu"));
+    Assert.Equal(2, WizardProfile.Build(state, maps, [], profile, 10).Profile!.Screenings.Count);
+
+    // The desktop app opens what the site stores.
+    var file = Path.Combine(Path.GetTempPath(), $"cinemawatch-{Guid.NewGuid():N}.cinemawatch.json");
+    try
+    {
+        File.WriteAllText(file, ProfileStore.Serialize(profile));
+        var desktop = ProfileStore.Load(file);
+        Assert.Equal((profile.Name, profile.CinemaId, profile.FilmId, profile.DateFrom, profile.DateTo, profile.MinAdjacent, profile.IntervalMinutes),
+            (desktop.Name, desktop.CinemaId, desktop.FilmId, desktop.DateFrom, desktop.DateTo, desktop.MinAdjacent, desktop.IntervalMinutes));
+        Assert.SequenceEqual(profile.Screenings.SelectMany(s => s.SeatKeys), desktop.Screenings.SelectMany(s => s.SeatKeys));
+        Assert.True(desktop.Screenings.All(s => s.StartsAt.Kind == DateTimeKind.Unspecified) && desktop.Screenings[0].StartsAt == new DateTime(2026, 12, 16, 18, 0, 0));
+    }
+    finally
+    {
+        File.Delete(file);
+    }
+
+    // Editing: started screenings drop out, the dates start today, the seats wait for the hall maps.
+    var stored = ProfileStore.Parse(ProfileStore.Serialize(profile));
+    stored.DateFrom = new DateOnly(2026, 12, 15);
+    stored.DateTo = new DateOnly(2026, 12, 17);
+    var id = Guid.NewGuid();
+    var edit = WizardProfile.FromProfile(id, "Moja Diuna", stored, new DateTime(2026, 12, 16, 19, 0, 0), out var dropped);
+    Assert.Equal((1, "1080", new DateOnly(2026, 12, 16), (DateOnly?)new DateOnly(2026, 12, 17), (string?)"f1", 4, 2), (dropped, edit.City, edit.From!.Value, edit.To, edit.FilmId, edit.Furthest, edit.MinAdjacent));
+    Assert.Equal(((Guid?)id, (string?)"Moja Diuna", (int?)10), (edit.ProfileId, edit.Name, edit.Interval));
+    Assert.SequenceEqual(["b2"], edit.ScreeningIds);
+    Assert.SequenceEqual(["b2"], edit.SeedIds);
+    Assert.True(WizardProfile.Build(edit, maps, [], stored, 10).Problem!.StartsWith("Brakuje danych 1 seansu")); // still waiting
+    Assert.SequenceEqual(["b2"], WizardProfile.Seed(edit, stored, []).SeedIds);
+    var seeded = WizardProfile.Seed(edit, stored, maps);
+    Assert.Equal(0, seeded.SeedIds.Count);
+    Assert.True(SeatCode.Decode(plan, seeded.Seats["b2"]).SetEquals(Keys("1_20_4")));
+    Assert.Equal(0, edit.WithSeats("b2", "").SeedIds.Count); // a selection made on the map replaces the waiting one
+    stored.CinemaIds = ["1060", "1080"];
+    Assert.Equal(WizardState.AllCities, WizardProfile.FromProfile(id, "x", stored, new DateTime(2026, 12, 16, 12, 0, 0), out var none).City);
+    Assert.Equal(0, none);
+
+    // The editing rides in the form and the address; a name loses control characters and is cut to the import's limit.
+    var fields = seeded.Fields().ToDictionary(f => f.Key, f => f.Value);
+    Assert.True(fields["p"] == id.ToString() && fields["name"] == "Moja Diuna" && fields["int"] == "10" && !fields.ContainsKey("seed"));
+    Assert.Equal(edit.Query(), WizardState.Read(name => edit.Fields().Where(f => f.Key == name).Select(f => f.Value)).Query());
+    Assert.True(edit.Query().Contains("&seed=b2&"));
+    var typed = WizardState.Read(name => name switch { "name" => ["  A\u0007B" + new string('x', 300)], "int" => ["7"], "p" => ["nope"], "s" => ["a1"], "seed" => ["a1,zz"], _ => [] });
+    Assert.Equal((ProfileImport.MaxTextLength, "AB", (int?)null, (Guid?)null), (typed.Name!.Length, typed.Name[..2], typed.Interval, typed.ProfileId));
+    Assert.SequenceEqual(["a1"], typed.SeedIds);
+});
+
 TestRunner.Add("Fake Cinema City: the repertoire of any cinema and day is the captured Sadyba day moved there, with ids made from the cinema, the day and the position", async () =>
 {
     var folder = Path.Combine(Path.GetTempPath(), "cinemawatch-fake-" + Guid.NewGuid().ToString("N")[..8]);
@@ -2726,10 +2809,10 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         page = await browser.PageAsync(Location(response));
         Assert.True(StatusText(page).Contains("Skopiowano zaznaczenie do 1 seansu.") && page.Contains("Monitorowane: 3 · Brak wolnych miejsc"));
 
-        // Next with seats: step 4 is not built yet. Back to step 2 and forward again: everything known, nothing sent.
-        response = await PostMapAsync(browser, page, MapForm(page, "4"));
-        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Krok 4 (podsumowanie i zapis) jest jeszcze w budowie."));
+        // Next with seats opens step 4. Back to step 2 and forward again: everything known, nothing sent.
         mark = app.Network.Requests.Count;
+        response = await PostMapAsync(browser, page, MapForm(page, "4"));
+        Assert.True(Location(response).StartsWith("/wizard/4?") && Location(response).Contains("&max=4"));
         response = await PostMapAsync(browser, page, MapForm(page, "2"));
         page = await browser.PageAsync(Location(response));
         Assert.True(Location(response).StartsWith("/wizard/2?") && page.Contains("Zaznaczono 2 z 4"));
@@ -2749,5 +2832,140 @@ static void RegisterDatabaseTests(TestApp app, TestDatabase database)
         response = await PostMapAsync(browser, page, MapForm(page, "reload"));
         await Wizard().WhenEndedAsync(Guid.Parse(Location(response)["/wizard/loading/".Length..Location(response).IndexOf('?')]));
         Assert.SequenceEqual(["seats-status", "seats-status"], EndpointsSince(mark));
+    });
+
+    // Step 4's form: the hidden fields, the name and the interval as typed, the pressed button.
+    static List<KeyValuePair<string, string>> SummaryForm(string page, string go, string? name = null, string interval = "10")
+    {
+        var form = MapForm(page, go);
+        form.Add(new("name", name ?? NameOn(page)));
+        form.Add(new("int", interval));
+        return form;
+    }
+
+    static string NameOn(string page) => WebUtility.HtmlDecode(Regex.Match(page, "<input id=\"name\" name=\"name\" value=\"([^\"]*)\"").Groups[1].Value);
+
+    Task EndedAsync(string loading) => Wizard().WhenEndedAsync(Guid.Parse(loading["/wizard/loading/".Length..loading.IndexOf('?')]));
+
+    TestRunner.Add("Wizard pages, step 4: the summary as in the desktop app, saving through the import's checks and limits, a name is never replaced; editing from the profile list keeps the id, the enabled state and the notification state of the seats still watched; missing hall maps load first", async () =>
+    {
+        await ResetPollerAsync();
+        const string email = "wizard-save@example.test";
+        var browser = await SignedInAsync(email, AppLanguage.Polish);
+        var userId = await UserIdAsync(email);
+        var today = Today();
+        var (first, second) = (FakeCinemaCityHandler.FakeScreeningId("1080", today.AddDays(1), 6), FakeCinemaCityHandler.FakeScreeningId("1080", today.AddDays(1), 13));
+        app.Fake($"free-{first}.txt", "1_18_4 1_19_4 1_20_4");
+        var day = WizardState.Text(today.AddDays(1));
+        var page = await browser.PageAsync("/wizard");
+        var response = await browser.PostFormAsync("/wizard/go", page, null, new() { ["step"] = "1", ["go"] = "2", ["city"] = "1080", ["from"] = day });
+        await EndedAsync(Location(response));
+        page = await browser.PageAsync($"/wizard/2?city=1080&from={day}&max=2");
+        response = await browser.PostFormAsync("/wizard/go", page, null, StepForm(page, "3", [first, second]));
+        await EndedAsync(Location(response));
+        page = await browser.PageAsync(Location(await browser.GetAsync(Location(response))));
+        response = await PostMapAsync(browser, page, MapForm(page, "3", ["1_18_4", "1_19_4", "1_20_4"]));
+        page = await browser.PageAsync(Location(response));
+        response = await PostMapAsync(browser, page, MapForm(page, "copy"));
+        page = await browser.PageAsync(Location(response));
+
+        // The summary: every screening with its seats row by row, the default name, the interval from the site's minimum.
+        var mark = app.Network.Requests.Count;
+        response = await PostMapAsync(browser, page, MapForm(page, "4"));
+        var stepFour = Location(response);
+        page = await browser.PageAsync(stepFour);
+        Assert.True(page.Contains("Seanse w profilu (2)") && Regex.Matches(page, "Monitorowane: 3 miejsca").Count == 2 && page.Contains("Rząd 4: "));
+        Assert.True(page.Contains("Powiadomienie: gdy zwolni się którekolwiek z zaznaczonych miejsc.") && page.Contains("value=\"save\"") && page.Contains("Zapisz profil"));
+        Assert.True(NameOn(page).EndsWith($" Łódź {ScreeningText.ShortDate(today.AddDays(1))}") && page.Contains("<option value=\"10\" selected") && !page.Contains("<option value=\"5\""));
+
+        // Saving: a new profile, enabled, on the list with "Edit"; nothing sent to Cinema City.
+        response = await PostMapAsync(browser, page, SummaryForm(page, "save", "Moja Diuna", "15"));
+        var saved = Location(response);
+        Assert.True(saved.StartsWith("/?profile="));
+        var id = Guid.Parse(TestApp.QueryValue(saved.Split('#')[0], "profile"));
+        var list = await browser.PageAsync(saved);
+        Assert.True(StatusText(list).Contains("Zapisano profil „Moja Diuna”. Serwer zacznie go sprawdzać w ciągu minuty.") && list.Contains($"action=\"wizard/edit/{id}\""));
+        var stored = await WithService(async services => await services.GetRequiredService<AppDbContext>().Profiles.AsNoTracking().SingleAsync(p => p.Id == id));
+        var document = ProfileStore.Parse(stored.Document);
+        Assert.Equal(("Moja Diuna", true, 15, 2, "1080"), (stored.Name, stored.Enabled, document.IntervalMinutes, document.Screenings.Count, document.CinemaId));
+        Assert.True(document.Screenings.All(s => s.SeatKeys.SequenceEqual(["1_18_4", "1_19_4", "1_20_4"]) && s.BookingLink.StartsWith("https://tickets.cinema-city.pl/")));
+        Assert.Equal("Moja Diuna", ProfileStore.Parse(await browser.GetStringAsync($"/profiles/{id}/download")).Name); // the desktop's file
+        Assert.Equal(mark, app.Network.Requests.Count);
+
+        // The same name again is refused (the wizard never replaces a profile by its name); so is a profile over the limit.
+        response = await PostMapAsync(browser, page, SummaryForm(page, "save", "Moja Diuna"));
+        Assert.True(Location(response).StartsWith("/wizard/4?") && StatusText(await browser.PageAsync(Location(response))).Contains("Masz już profil o nazwie „Moja Diuna”. Wpisz inną nazwę."));
+        await WithService(async services => await services.GetRequiredService<ProfileService>().SetLimitAsync(userId, 1));
+        response = await PostMapAsync(browser, page, SummaryForm(page, "save", "Druga Diuna"));
+        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Masz już tyle profili, ile pozwala limit konta."));
+        await WithService(async services => await services.GetRequiredService<ProfileService>().SetLimitAsync(userId, null));
+
+        // Editing: the profile is disabled and has notification state; another account cannot open it.
+        await WithService(async services =>
+        {
+            await services.GetRequiredService<ProfileService>().SetEnabledAsync(userId, id, false);
+            var db = services.GetRequiredService<AppDbContext>();
+            db.NotificationStates.Add(new NotificationStateRow { ProfileId = id, ScreeningId = first, AvailableSeatKeys = ["1_18_4", "1_19_4"], UpdatedAt = app.Time.GetUtcNow() });
+            db.NotificationStates.Add(new NotificationStateRow { ProfileId = id, ScreeningId = second, AvailableSeatKeys = ["1_20_4"], UpdatedAt = app.Time.GetUtcNow() });
+            return await db.SaveChangesAsync();
+        });
+        var other = await SignedInAsync("wizard-save-other@example.test", AppLanguage.Polish);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.PostFormAsync($"/wizard/edit/{id}", await other.PageAsync("/"), null, new())).StatusCode);
+
+        // The hall maps are known (seat_plans), so the edit opens on step 4 at once, as the desktop app's replay ends.
+        list = await browser.PageAsync("/");
+        response = await browser.PostFormAsync($"/wizard/edit/{id}", list, null, new());
+        Assert.True(Location(response).StartsWith("/wizard/4?") && Location(response).Contains($"&p={id}") && !Location(response).Contains("seed="));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains("Edycja profilu") && page.Contains("Zapisz zmiany") && NameOn(page) == "Moja Diuna" && page.Contains("<option value=\"15\" selected"));
+
+        // On the map: the first screening keeps 18 and 20, the second is cleared; step 4 skips it, as the desktop app.
+        response = await PostMapAsync(browser, page, SummaryForm(page, "3", interval: "15"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains("Monitorujesz 3 miejsca"));
+        response = await PostMapAsync(browser, page, MapForm(page, $"tab:{second}", ["1_18_4", "1_20_4"]));
+        page = await browser.PageAsync(Location(response));
+        response = await PostMapAsync(browser, page, MapForm(page, "clear"));
+        page = await browser.PageAsync(Location(response));
+        response = await PostMapAsync(browser, page, MapForm(page, "4"));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains("Seanse w profilu (1)") && page.Contains("Pominięto 1 seans bez zaznaczonych miejsc.") && page.Contains("Monitorowane: 2 miejsca"));
+        response = await PostMapAsync(browser, page, SummaryForm(page, "save", interval: "15"));
+        Assert.Equal($"/?profile={id}#profile-{id}", Location(response));
+        Assert.True(StatusText(await browser.PageAsync(Location(response))).Contains("Zapisano zmiany w profilu „Moja Diuna”."));
+        var (edited, states) = await WithService(async services =>
+        {
+            var db = services.GetRequiredService<AppDbContext>();
+            return (await db.Profiles.AsNoTracking().SingleAsync(p => p.UserId == userId),
+                await db.NotificationStates.AsNoTracking().Where(s => s.ProfileId == id).ToListAsync());
+        });
+        document = ProfileStore.Parse(edited.Document);
+        Assert.Equal((id, false, 1), (edited.Id, edited.Enabled, document.Screenings.Count));
+        Assert.SequenceEqual(["1_18_4", "1_20_4"], document.Screenings.Single(s => s.Id == first).SeatKeys);
+        // The seat still watched keeps its state (no second e-mail); the removed seat and screening lose theirs.
+        Assert.Equal(first, states.Single().ScreeningId);
+        Assert.SequenceEqual(["1_18_4"], states.Single().AvailableSeatKeys);
+        Assert.Equal(mark, app.Network.Requests.Count);
+
+        // Hall maps that are not known any more load first; the stored seats follow through /wizard/seed.
+        await WithService(async services => await services.GetRequiredService<AppDbContext>().SeatPlans.ExecuteDeleteAsync());
+        app.Services.GetRequiredService<CinemaCityCache>().Clear();
+        response = await browser.PostFormAsync($"/wizard/edit/{id}", await browser.PageAsync("/"), null, new());
+        var loading = Location(response);
+        Assert.True(loading.StartsWith("/wizard/loading/") && loading.Contains($"&seed={first}") && loading.EndsWith("&to=4"));
+        await EndedAsync(loading);
+        response = await browser.GetAsync(loading);
+        Assert.True(Location(response).StartsWith("/wizard/seed?") && Location(response).EndsWith("&to=4"));
+        response = await browser.GetAsync(Location(response));
+        Assert.True(Location(response).StartsWith("/wizard/4?") && Location(response).Contains($"&m={first}.") && !Location(response).Contains("seed="));
+        page = await browser.PageAsync(Location(response));
+        Assert.True(page.Contains("Monitorowane: 2 miejsca") && page.Contains("Zapisz zmiany"));
+
+        // A profile deleted meanwhile is not saved again.
+        await WithService(async services => await services.GetRequiredService<ProfileService>().DeleteAsync(userId, id));
+        response = await PostMapAsync(browser, page, SummaryForm(page, "save"));
+        Assert.Equal("/", Location(response));
+        Assert.True(StatusText(await browser.PageAsync("/")).Contains("Tego profilu już nie ma"));
+        Assert.Equal(0, await WithService(async services => await services.GetRequiredService<AppDbContext>().Profiles.CountAsync(p => p.UserId == userId)));
     });
 }

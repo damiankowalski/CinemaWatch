@@ -35,6 +35,30 @@ public sealed record ProfileList(IReadOnlyList<ProfileView> Profiles, int Limit)
 
 public sealed record ProfileDownload(string FileName, string Json);
 
+public enum SaveOutcome
+{
+    /// <summary>A new profile was stored (enabled).</summary>
+    Added,
+
+    /// <summary>The edited profile was changed; its id and enabled state stay.</summary>
+    Updated,
+
+    /// <summary>Another profile of the account has this name (the wizard never replaces one by its name).</summary>
+    NameTaken,
+
+    /// <summary>A new profile, but the account already has as many profiles as its limit allows.</summary>
+    LimitReached,
+
+    /// <summary>The edited profile is gone (deleted meanwhile, or not the account's).</summary>
+    NotFound,
+
+    /// <summary>The import's checks refused the profile (see the errors).</summary>
+    Invalid,
+}
+
+/// <summary>What saving a profile from the wizard did; <see cref="Id"/> is the stored profile's id when it was saved.</summary>
+public sealed record SaveResult(SaveOutcome Outcome, Guid? Id, string Name, IReadOnlyList<string> Errors);
+
 public enum LimitChange
 {
     Saved,
@@ -137,6 +161,91 @@ public sealed class ProfileService(AppDbContext db, PollerSettings settings, Tim
         return results;
 
         int Count(ImportOutcome outcome) => results.Count(r => r.Outcome == outcome);
+    }
+
+    /// <summary>One of the account's profiles with its document (the wizard's editing), or null.</summary>
+    public async Task<ProfileView?> OpenAsync(string userId, Guid profileId, CancellationToken cancellationToken = default)
+    {
+        var profile = await db.Profiles.AsNoTracking().SingleOrDefaultAsync(p => p.Id == profileId && p.UserId == userId, cancellationToken);
+        return profile is null
+            ? null
+            : new ProfileView(profile.Id, profile.Name, profile.Enabled, profile.EndsAt <= time.GetUtcNow(), profile.CreatedAt, profile.UpdatedAt, ProfileStore.Parse(profile.Document));
+    }
+
+    /// <summary>
+    /// Saves a profile made in the site's wizard: the import's checks and limits (the document goes through
+    /// <see cref="ProfileImport.Check"/> exactly as an uploaded file), the account's row locked like an import. A new
+    /// profile (<paramref name="editing"/> null) is stored enabled; an edited one keeps its id and enabled state, and
+    /// its notification state stays for the screenings and seats it still watches (seats already reported free are not
+    /// reported again; seats added back later are). A name another profile of the account has is refused.
+    /// </summary>
+    public async Task<SaveResult> SaveAsync(string userId, WatchProfile profile, Guid? editing, CancellationToken cancellationToken = default)
+    {
+        var check = ProfileImport.Check(ProfileImport.FileNameFor(profile.Name), ProfileStore.Serialize(profile),
+            PolishTime.Now(time), settings.Limits.MaxScreeningsPerProfile);
+        if (!check.IsValid)
+            return new SaveResult(SaveOutcome.Invalid, null, check.Name, check.Errors);
+        var checkedProfile = check.Profile!;
+        var name = check.Name;
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var user = (await db.Users.FromSqlInterpolated($"SELECT * FROM users WHERE id = {userId} FOR UPDATE").ToListAsync(cancellationToken)).SingleOrDefault()
+            ?? throw new InvalidOperationException("The account does not exist.");
+        var stored = await db.Profiles.Where(p => p.UserId == userId).ToListAsync(cancellationToken);
+        var now = time.GetUtcNow();
+        if (stored.Any(p => p.Name == name && p.Id != editing))
+            return new SaveResult(SaveOutcome.NameTaken, null, name, []);
+
+        StoredProfile target;
+        SaveOutcome outcome;
+        if (editing is { } id)
+        {
+            if (stored.FirstOrDefault(p => p.Id == id) is not { } edited)
+                return new SaveResult(SaveOutcome.NotFound, null, name, []);
+            target = edited;
+            target.Name = name;
+            outcome = SaveOutcome.Updated;
+
+            var watched = checkedProfile.Screenings.ToDictionary(s => s.Id, s => s.SeatKeys.ToHashSet(StringComparer.Ordinal), StringComparer.Ordinal);
+            foreach (var state in await db.NotificationStates.Where(s => s.ProfileId == id).ToListAsync(cancellationToken))
+            {
+                if (!watched.TryGetValue(state.ScreeningId, out var seats))
+                {
+                    db.NotificationStates.Remove(state);
+                    continue;
+                }
+                var kept = state.AvailableSeatKeys.Where(seats.Contains).ToList();
+                if (kept.Count != state.AvailableSeatKeys.Count)
+                {
+                    state.AvailableSeatKeys = kept;
+                    state.UpdatedAt = now;
+                }
+            }
+        }
+        else
+        {
+            if (stored.Count >= LimitOf(user))
+                return new SaveResult(SaveOutcome.LimitReached, null, name, []);
+            target = new StoredProfile
+            {
+                Id = Guid.CreateVersion7(now),
+                UserId = userId,
+                Name = name,
+                Enabled = true,
+                CreatedAt = now,
+            };
+            db.Profiles.Add(target);
+            outcome = SaveOutcome.Added;
+        }
+        target.Document = ProfileStore.Serialize(checkedProfile);
+        target.EndsAt = ProfileImport.LastStartUtc(checkedProfile);
+        target.UpdatedAt = now;
+
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        logger.LogInformation("User {UserId} saved profile {ProfileId} from the wizard ({Outcome}, {Screenings} screening(s))",
+            userId, target.Id, outcome, checkedProfile.Screenings.Count);
+        return new SaveResult(outcome, target.Id, name, []);
     }
 
     /// <summary>Enables or disables a profile; the name for the message, or null when the account has no such profile.</summary>

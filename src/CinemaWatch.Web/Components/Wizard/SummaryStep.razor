@@ -1,0 +1,131 @@
+@using CinemaWatch.Server.Profiles
+@using CinemaWatch.Server.Polling
+@using CinemaWatch.Server.Wizard
+@inject WizardJobs Jobs
+@inject CinemaCityCache Cache
+@inject ProfileService Profiles
+@inject PollerSettings Settings
+@inject UserManager<AppUser> UserManager
+
+@*
+    Step 4 of the wizard (docs/SAAS.md §5.2), the desktop app's summary: the screenings the profile will watch and
+    their seats row by row, the notification condition, the name and the check interval. "Save" stores the profile
+    through the import's checks and limits (/wizard/go, go=save). Nothing here sends a request to Cinema City.
+*@
+
+@foreach (var field in State.Fields().Where(f => f.Key is not ("name" or "int")))
+{
+    <input type="hidden" name="@field.Key" value="@field.Value" />
+}
+
+<p class="lead">@(filmName.Length > 0 ? filmName + " · " : "")@WizardTexts.Search(State)</p>
+
+@if (draft.Problem is { } problem)
+{
+    <div class="status error" role="alert">
+        <p>@problem</p>
+        @if (State.SeedIds.Count > 0)
+        {
+            <button type="submit" name="go" value="reload" class="link">@T("Wczytaj mapy sal", "Load the hall maps")</button>
+        }
+    </div>
+}
+
+@if (draft.Screenings.Count > 0)
+{
+    <h2>@T("Seanse w profilu", "Screenings in the profile") (@draft.Screenings.Count)</h2>
+    <ul class="summary-list">
+        @foreach (var item in draft.Screenings)
+        {
+            var screening = item.Screening;
+            <li>
+                <p class="summary-title">
+                    <strong>@ScreeningText.DayHeader(DateOnly.FromDateTime(screening.StartsAt)), @ScreeningText.Time(screening.StartsAt)</strong>
+                    <span class="hint">@Subtitle(screening)</span>
+                </p>
+                <p>@T("Monitorowane", "Watched"): @Count(item.SeatCount, "miejsce", "miejsca", "miejsc", "seat", "seats")</p>
+                @if (Plan(screening.Id) is { } plan)
+                {
+                    <ul class="summary-rows">
+                        @foreach (var row in SeatSelectionText.Describe(plan, screening.SeatKeys.ToHashSet(StringComparer.Ordinal)))
+                        {
+                            <li>@T("Rząd", "Row") @row.Row: @row.Text</li>
+                        }
+                    </ul>
+                }
+            </li>
+        }
+    </ul>
+}
+@if (draft.Skipped > 0)
+{
+    <p class="hint">@(T("Pominięto ", "Skipped ") + Count(draft.Skipped, "seans", "seanse", "seansów", "screening", "screenings") + T(" bez zaznaczonych miejsc.", " without selected seats."))</p>
+}
+<p>@ConditionText</p>
+
+<div class="form">
+    <label for="name">@T("Nazwa profilu", "Profile name")</label>
+    <input id="name" name="name" value="@(State.Name ?? defaultName)" maxlength="@ProfileImport.MaxTextLength" required />
+
+    <label for="int">@T("Sprawdzaj co", "Check every")</label>
+    <select id="int" name="int">
+        @foreach (var minutes in WizardState.IntervalsFrom(minimumInterval))
+        {
+            <option value="@minutes" selected="@(minutes == interval)">@minutes min</option>
+        }
+    </select>
+    <p class="hint">
+        @T($"Serwer sprawdza seanse nie częściej niż co {minimumInterval} min.", $"The server checks screenings at most every {minimumInterval} min.")
+    </p>
+</div>
+
+<div class="actions wizard-buttons">
+    @if (draft.Profile is not null)
+    {
+        <button type="submit" name="go" value="save" class="button primary">@(State.ProfileId is null ? T("Zapisz profil", "Save the profile") : T("Zapisz zmiany", "Save the changes"))</button>
+    }
+    <button type="submit" name="go" value="3" class="button">@T("Wstecz", "Back")</button>
+    <a class="button" href="/">@T("Anuluj", "Cancel")</a>
+</div>
+
+@code {
+    private IReadOnlyList<ScreeningResult> maps = [];
+    private ProfileDraft draft = new(null, [], 0, null);
+    private string filmName = "";
+    private string defaultName = "";
+    private int minimumInterval;
+    private int interval;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public WizardState State { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        WatchProfile? edited = null;
+        if (State.ProfileId is { } id && UserManager.GetUserId(HttpContext.User) is { } userId)
+            edited = (await Profiles.OpenAsync(userId, id))?.Document;
+        maps = await Jobs.PeekScreeningsAsync(State.ScreeningIds);
+        var days = State.Dates.Count > 0 ? CachedRepertoire.Read(Cache, State.Repertoire()).Days : [];
+        minimumInterval = Settings.Limits.MinIntervalMinutes;
+        interval = State.IntervalOrDefault(minimumInterval);
+        draft = WizardProfile.Build(State, maps, days, edited, minimumInterval);
+        filmName = WizardProfile.FilmName(State, days, edited);
+        defaultName = WizardProfile.DefaultName(State, filmName);
+    }
+
+    private SeatPlan? Plan(string screeningId) => maps.FirstOrDefault(m => m.ScreeningId == screeningId)?.Plan;
+
+    /// <summary>"Kraków · Sala 10 IMAX" (the desktop's summary without the languages, which a profile does not keep).</summary>
+    private static string Subtitle(WatchedScreening screening) =>
+        string.Join(" · ", new[] { Locations.FindCinema(screening.CinemaId)?.DisplayCity, screening.Auditorium }.Where(s => !string.IsNullOrEmpty(s)));
+
+    /// <summary>The desktop app's notification condition.</summary>
+    private string ConditionText => State.MinAdjacent == 1
+        ? T("Powiadomienie: gdy zwolni się którekolwiek z zaznaczonych miejsc.",
+            "Notification: when any of the selected seats becomes free.")
+        : T($"Powiadomienie: gdy wśród zaznaczonych zwolni się blok co najmniej {State.MinAdjacent} sąsiednich miejsc.",
+            $"Notification: when at least {State.MinAdjacent} selected seats next to each other become free.");
+}

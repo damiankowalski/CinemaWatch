@@ -610,6 +610,11 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         shared case file) and its step in the Linux CI job. Checked by the owner in the browser (12 Nov 2026).
   - [ ] 6.4.5 Step 4, saving and editing: the import's validation and limits, the notification state kept for
         unchanged screenings, a test that a profile made on the site reads in the desktop app's `WatchProfile`.
+        **Built 12 Nov 2026** on `feature/saas-wizard` (decisions in §9): `/wizard/4` (`SummaryStep.razor`),
+        `WizardProfile` (the desktop's `BuildProfile`, the replay of a stored profile, its seats once the maps are
+        known), `ProfileService.SaveAsync` (the import's `Check`, limit and row lock; the notification state trimmed
+        to the seats still watched), *Edit* on the profile list (`/wizard/edit/<id>`, `/wizard/seed`). Owner's check in
+        the browser still to do.
   - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's and testers' checks, stable `web-v0.7.0`; documents
         (§7, §9, §10, `SAAS_INFRA.md` state and work log).
 
@@ -843,6 +848,11 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Node.js 26 LTS (zip, `C:\DEV\CINEMAWATCH\node`, outside PATH) on the owner's PC for `seatmap.js`'s tests; CI runs them on its Ubuntu runner | Quick feedback for the script that mirrors the Core rules, without waiting for CI; remove = delete the folder |
 | Nov 2026 | `seatmap.js` is loaded by every page (`App.razor`, deferred, fingerprinted) and acts only where a map is; it keeps the form's check boxes as the truth (a gesture sets them), so the form posts what the page shows | One small file, cached once; no second source of state; without the script nothing is lost |
 | Nov 2026 | The sign-in answer's padding checks the time again after waiting (a Windows timer can wake up a fraction of a millisecond early) | "Never faster than the set time" holds exactly; the test was flaky (found in 6.4.4) |
+| Nov 2026 | A profile saved from the wizard goes through the same `ProfileImport.Check` and the same limit and row lock as an uploaded file; it is built like the desktop's `BuildProfile` (default name, main cinema, sorted seat keys, screenings without seats skipped), the interval from the desktop's 5/10/15/30/60 minutes, none below the site's minimum | One set of checks for every way into the database; a profile made on the site opens in the desktop app (tested with `ProfileStore.Load`) |
+| Nov 2026 | A new profile with the name of an existing one is refused ("Masz już profil o nazwie …"); an edit may rename a profile to a free name. The file import keeps replacing by name | In the wizard it is easy to overwrite another profile by accident; the import's replacing is how an updated file from the desktop comes in |
+| Nov 2026 | Editing keeps the profile's id and enabled state; its notification state stays for the screenings still in it, trimmed to the seats still watched; removed screenings lose theirs | No second e-mail about a seat already reported; a seat added back later is reported when it frees up |
+| Nov 2026 | *Edit* replays the stored profile as the desktop app does: started screenings drop out (one line says how many), the dates start today, the wizard opens on step 4. The seats come from the stored profile once the hall maps are known (`seed` in the state; missing maps load first, then `/wizard/seed` fills them in) | The edit costs no request when the poller already holds the maps; the seats cannot ride in the address before their layout is known |
+| Nov 2026 | Step 4 takes a screening's data (time, hall, booking link) from the cached repertoire or, when editing, from the stored profile; when neither has it, saving asks to load the screenings again | No request at saving; the booking link that goes into e-mails comes from Cinema City, never from the form |
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 
 ---

@@ -3,19 +3,21 @@
 @using CinemaWatch.Server.Wizard
 @using CinemaWatch.Web.Components.Wizard
 @inject CinemaCityCache Cache
+@inject WizardJobs Jobs
 @inject TimeProvider Time
 @inject IdentityRedirectManager RedirectManager
 
 @*
-    Steps 1 and 2 of the wizard (docs/SAAS.md §5.2). The state comes from the address and goes on in the form's hidden
-    fields; the form posts to /wizard/go, which checks it, loads what is needed and redirects back here.
-    Nothing on these pages sends a request to Cinema City: step 2 shows what the shared cache holds.
+    The wizard (docs/SAAS.md §5.2): steps 1 and 2 here, step 3 in SeatsStep, step 4 in SummaryStep. The state comes
+    from the address and goes on in the form's hidden fields; the form posts to /wizard/go, which checks it, loads what
+    is needed and redirects back here. Nothing on these pages sends a request to Cinema City: they show what the shared
+    cache, the poller's results and seat_plans hold.
 *@
 
-<PageTitle>@T("Nowy profil", "New profile") – CinemaWatch</PageTitle>
+<PageTitle>@WizardTexts.Heading(state) – CinemaWatch</PageTitle>
 
 <div class="page-head">
-    <h1>@T("Nowy profil", "New profile")</h1>
+    <h1>@WizardTexts.Heading(state)</h1>
 </div>
 <StatusMessage />
 
@@ -145,9 +147,13 @@
         }
     }
 
-    else
+    else if (current == 3)
     {
         <SeatsStep State="state" />
+    }
+    else
+    {
+        <SummaryStep State="state" />
     }
 
     @* After the content in the page's order, so Enter in a field presses "Next"; shown first (CSS order). *@
@@ -170,21 +176,27 @@
     [Parameter]
     public int? Step { get; set; }
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         var now = Time.GetUtcNow();
         today = CinemaCityCache.PolishToday(now);
         var query = HttpContext.Request.Query;
         state = query.ContainsKey("city") ? WizardState.Read(name => query[name]) : WizardState.New(today);
-        current = Step switch { 2 => 2, 3 => 3, _ => 1 };
+        current = Step switch { 2 => 2, 3 => 3, 4 => 4, _ => 1 };
         if (current == 1)
             return;
-        if (current == 3)
+        if (current >= 3)
         {
-            // Step 3 needs ticked screenings (an address changed by hand goes back to step 2).
+            // Steps 3 and 4 need ticked screenings (an address changed by hand goes back to step 2), step 4 seats.
             if (state.ScreeningIds.Count == 0)
                 RedirectManager.RedirectTo(WizardTexts.StepUrl(2, state));
-            state = state with { Furthest = Math.Max(state.Furthest, 3) };
+            if (current == 4 && state.Seats.Count == 0 && state.SeedIds.Count == 0)
+                RedirectManager.RedirectTo(WizardTexts.StepUrl(3, state));
+            // Editing: a hall map that has turned up since (the poller's check) takes the stored profile's seats first.
+            if (state.ProfileId is not null && state.SeedIds.Count > 0
+                && (await Jobs.PeekScreeningsAsync(state.SeedIds)).Any(m => m.Plan is not null))
+                RedirectManager.RedirectTo(WizardTexts.AfterLoadingUrl(current, state));
+            state = state with { Furthest = Math.Max(state.Furthest, current) };
             return;
         }
 
