@@ -1309,9 +1309,61 @@ Applications* → *Add an application* → *Self-hosted* → name `CinemaWatch s
 `staging-cinemawatch.damiankowalski.pl` with no path, session 1 week, policy: the existing `Owner and testers` → save;
 §4.21 shows `302` to Access for `/` again within a minute. The rate limiting rule can stay.
 
+### 4.29 SaaS 0.7.0-beta.1: the wizard on staging (stage 6.4.6)
+
+Two days of beta ([`SAAS.md`](SAAS.md) §9, 12 Nov 2026): the owner checks first, testers follow, then the stable
+`web-v0.7.0`. **Only after** `web-v0.6.0` is tagged on `main` and deployed (§4.24), because the beta's branch takes
+`main` (with `cloudflared` 2026.10.7 in `compose.yaml`) first. The project files already say `0.7.0`; the tag adds the
+beta suffix.
+
+1. **Windows (PowerShell)**, in the repository: bring `main` into the wizard's branch, push, wait for green CI.
+
+   ```powershell
+   git switch feature/saas-wizard
+   git pull
+   git merge origin/main
+   git push
+   ```
+
+   Check: GitHub *Actions*, the run for the branch's last commit - all four jobs green. Undo before the push:
+   `git merge --abort` while a conflict is open, otherwise `git reset --hard ORIG_HEAD` (the branch as before the
+   merge; only before the push).
+2. **Windows (PowerShell)**: the beta tag on the branch's last commit; `web-image.yml` builds, tests and publishes
+   `ghcr.io/damiankowalski/cinemawatch-web:0.7.0-beta.1`.
+
+   ```powershell
+   git tag web-v0.7.0-beta.1
+   git push origin web-v0.7.0-beta.1
+   ```
+
+   Check: *Actions → Web image* green; the package lists `0.7.0-beta.1`. A tag pushed by mistake:
+   `git push origin :refs/tags/web-v0.7.0-beta.1` and `git tag -d web-v0.7.0-beta.1` (the image stays unused).
+3. **Server (bash, SSH)**: deploy (the dump comes first; the migration `AddWizard` runs at start-up).
+
+   ```bash
+   cd ~/CinemaWatch && git fetch --tags && git pull
+   sudo bash ~/CinemaWatch/infra/compose/deploy.sh 0.7.0-beta.1
+   ```
+
+   Expected end: `== Done: 0.7.0-beta.1` and three containers. Way back: §4.24 with `0.6.0` - restore the dump taken
+   by this deployment first (the migration added columns and settings that 0.6.0 does not know).
+4. **Wizard budget down for the start:** `/admin` → settings → *budżet kreatora (na godzinę)* `120 → 60` → save. The
+   panel records the change (events). Raise it again when the request log is calm.
+5. **Owner's check (day 1):** *Nowy profil* with one city and one day, two screenings, the hall map, step 4, *Zapisz
+   profil*; *Edytuj* on the list, change a seat, *Zapisz zmiany*. In `/admin`: the wizard's requests in their own
+   line (`(kreator)`), no answer other than HTTP 200, the hour within both budgets. These are real requests to
+   Cinema City, made by hand by the owner - nothing automated.
+6. **Testers (day 2):** the owner tells them that profiles can now be made on the site (the e-mail is the owner's).
+   Watch §4.27's daily check plus the wizard's line in `/admin`.
+7. **Stable:** after the two days without a problem: pull request `feature/saas-wizard` → `main`, *Squash and merge*,
+   tag `web-v0.7.0` on `main`, §4.24 with `0.7.0`; delete the branch. Docs: [`SAAS.md`](SAAS.md) §7, §9, §10; here
+   §1 (state), §3 (work log).
+
 ## 5. Next infrastructure steps
 
 Stage 5 plan and order: [`SAAS.md`](SAAS.md) §7.
+
+- Stage 6.4.6: SaaS 0.7.0-beta.1 (the wizard) on staging after 0.6.0, two days, then the stable 0.7.0 (§4.29).
 
 - Stage 5 ([`SAAS.md`](SAAS.md) §7): the stable SaaS 0.6.0 on or after 13 Nov 2026 with `cloudflared` 2026.10.7,
   deployed with §4.24; the test runs until about 21 Nov (§4.27). The switch to model A (§4.28) is postponed.

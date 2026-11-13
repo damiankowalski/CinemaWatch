@@ -613,10 +613,12 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         **Built 12 Nov 2026** on `feature/saas-wizard` (decisions in §9): `/wizard/4` (`SummaryStep.razor`),
         `WizardProfile` (the desktop's `BuildProfile`, the replay of a stored profile, its seats once the maps are
         known), `ProfileService.SaveAsync` (the import's `Check`, limit and row lock; the notification state trimmed
-        to the seats still watched), *Edit* on the profile list (`/wizard/edit/<id>`, `/wizard/seed`). Owner's check in
-        the browser still to do.
+        to the seats still watched), *Edit* on the profile list (`/wizard/edit/<id>`, `/wizard/seed`). Checked by the
+        owner in the browser (12 Nov 2026).
   - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's and testers' checks, stable `web-v0.7.0`; documents
-        (§7, §9, §10, `SAAS_INFRA.md` state and work log).
+        (§7, §9, §10, `SAAS_INFRA.md` state and work log). **Planned 12 Nov 2026** (decisions in §9): after
+        `web-v0.6.0`, `main` into the branch, the beta tag, `deploy.sh`, the wizard's budget at 60 an hour to start;
+        two days - the owner first, then the testers; runbook `SAAS_INFRA.md` §4.29.
 
 ### After the MVP (order flexible)
 Plans and limits → Stripe test mode → OIDC provider (Keycloak) → queue between poller and notifier → Kubernetes (k3s)
@@ -853,6 +855,9 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Editing keeps the profile's id and enabled state; its notification state stays for the screenings still in it, trimmed to the seats still watched; removed screenings lose theirs | No second e-mail about a seat already reported; a seat added back later is reported when it frees up |
 | Nov 2026 | *Edit* replays the stored profile as the desktop app does: started screenings drop out (one line says how many), the dates start today, the wizard opens on step 4. The seats come from the stored profile once the hall maps are known (`seed` in the state; missing maps load first, then `/wizard/seed` fills them in) | The edit costs no request when the poller already holds the maps; the seats cannot ride in the address before their layout is known |
 | Nov 2026 | Step 4 takes a screening's data (time, hall, booking link) from the cached repertoire or, when editing, from the stored profile; when neither has it, saving asks to load the screenings again | No request at saving; the booking link that goes into e-mails comes from Cinema City, never from the form |
+| 12 Nov 2026 | SaaS 0.7.0-beta.1 (the wizard) goes to staging right after `web-v0.6.0`, during the test 5.6 (not after 21 Nov); the beta lasts two days - the owner checks on the first, the testers use it on the second - then the stable `web-v0.7.0` | The request log tells the wizard's requests from the poller's (`check_log.source`), so the test's picture stays readable; a short beta because the pages were checked locally step by step |
+| 12 Nov 2026 | The wizard's budget starts at 60 requests an hour on staging (panel setting, default 120), raised when the log is calm | Together with the poller's 120 the server's traffic to Cinema City grows slowly; changed and undone in the panel without a deployment |
+| 12 Nov 2026 | The project files keep `<Version>0.7.0</Version>` during the beta; the tag `web-v0.7.0-beta.1` adds the suffix (`web-image.yml` compares the part before the dash) | As with 0.6.0-beta.1; nothing to change between the beta and the stable tag |
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 
 ---
