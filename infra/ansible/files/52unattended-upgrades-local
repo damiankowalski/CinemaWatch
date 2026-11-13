@@ -1,8 +1,0 @@
-// Managed by infra/ansible (docs/SAAS_INFRA.md §4.12).
-// Reboot automatically when an update requires it, at night.
-Unattended-Upgrade::Automatic-Reboot "true";
-Unattended-Upgrade::Automatic-Reboot-Time "03:30";
-// Docker comes from Docker's own repository: without this line its updates would never install by themselves.
-Unattended-Upgrade::Origins-Pattern {
-    "origin=Docker,label=Docker CE,codename=${distro_codename}";
-};

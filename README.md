@@ -189,8 +189,7 @@ beta and merged through a pull request.
 | `src/CinemaWatch.Server`, `src/CinemaWatch.Web` | SaaS (private web app, [details](src/CinemaWatch.Web/README.md)): accounts, profiles, the poller and e-mails; the container image (`src/CinemaWatch.Web/Dockerfile`) |
 | `tests/CinemaWatch.Saas.Tests` | SaaS tests: logic, database and the whole web flow |
 | `infra/compose` | SaaS on the server: Docker Compose file, `.env` template, container test, deployment script |
-| `infra/ansible` | SaaS server configuration: one Ansible playbook run on the server itself ([details](infra/ansible/README.md)) |
-| `infra/backup` | SaaS database backup (encrypted, off the server) and the restore test |
+| `infra/backup` | SaaS database backup (encrypted, off the server) and the restore test; installed on the server by the shared server's own configuration (private repository `damiankowalski/VPS-1` since 12 Nov 2026) |
 | `tools/CinemaWatch.Probe` | SaaS risk test: checks profiles from a server and logs every request, no notifications ([details](tools/CinemaWatch.Probe/README.md)) |
 | `tests/CinemaWatch.Probe.Tests` | Tests of the probe |
 | `scripts/CinemaWatch.ps1` | Standalone PowerShell monitor with e-mail notifications (the project's origin) |
