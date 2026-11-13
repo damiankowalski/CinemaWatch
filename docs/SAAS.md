@@ -11,6 +11,9 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
+> **13 November 2026:** sped up (§9): SaaS 0.7.0 (the wizard and hall map) goes to staging as a beta, the owner
+> checks it the same day, stable `web-v0.7.0`; then stage 7 moves the same site to `cinemawatch.damiankowalski.pl`.
+>
 > Last updated: 8 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
 > skipped on purpose (§11). CinemaWatch runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026
 > (now 0.5.2), behind Cloudflare Access; e-mail through Resend; heartbeat and backup monitored by Healthchecks.io; daily
@@ -558,11 +561,12 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
       deployed on staging and checked by the owner in the browser (by 8 Nov 2026).
 - [x] 5.4 "Request an account": **dropped** (7 Nov 2026, §9). New accounts come only from the owner's invitation by
       e-mail; there is no public form.
-- [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). Part of SaaS
-      0.6.0: the compose change is committed and the stable tag `web-v0.6.0` set on or after 13 Nov 2026 (the image built
-      then also carries the .NET patch of 10 Nov 2026); a beta before that keeps 2026.10.3. Then `deploy.sh` and the
-      connector's version in the dashboard (*Tunnels → staging-cinemawatch*).
-- [ ] 5.6 The test (**started 7 Nov 2026**, about 2 weeks to 21 Nov; runs alongside 0.6.0, which does not change the
+- [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). **Moved into
+      SaaS 0.7.0** (13 Nov 2026, §9): the compose change is committed on `feature/saas-wizard` on 13 Nov (two weeks
+      after the release); there is no separate stable `web-v0.6.0`. The 0.7.0 image also carries the .NET patch of
+      10 Nov 2026. Then `deploy.sh` and the connector's version in the dashboard (*Tunnels → staging-cinemawatch*).
+- [ ] 5.6 The test: **no longer a gate** (13 Nov 2026, §9). The testers keep using the site, but nothing waits for
+      21 Nov; errors are fixed on the live site. Original plan: (**started 7 Nov 2026**, about 2 weeks to 21 Nov; runs alongside 0.6.0, which does not change the
       poller; daily and weekly checks: `SAAS_INFRA.md` §4.27): 3-5 invited people (possibly fewer, §9), free. Watch:
       requests per hour against the budget (120), answers other than HTTP 200 (403 / 429 / `cf-mitigated` / HTML = a
       block), notification latency (the e-mail against the desktop toast at home for the same seats), spam placement per
@@ -617,10 +621,24 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         known), `ProfileService.SaveAsync` (the import's `Check`, limit and row lock; the notification state trimmed
         to the seats still watched), *Edit* on the profile list (`/wizard/edit/<id>`, `/wizard/seed`). Checked by the
         owner in the browser (12 Nov 2026).
-  - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's and testers' checks, stable `web-v0.7.0`; documents
-        (§7, §9, §10, `SAAS_INFRA.md` state and work log). **Planned 12 Nov 2026** (decisions in §9): after
-        `web-v0.6.0`, `main` into the branch, the beta tag, `deploy.sh`, the wizard's budget at 60 an hour to start;
-        two days - the owner first, then the testers; runbook `SAAS_INFRA.md` §4.29.
+  - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's check, stable `web-v0.7.0`; documents (§7, §9, §10,
+        `SAAS_INFRA.md` state and work log). **Planned 12 Nov 2026, sped up 13 Nov 2026** (§9): no `web-v0.6.0` first
+        (`main` is already in the branch, `cloudflared` 2026.10.7 comes with 0.7.0), the beta tag, `deploy.sh`, the
+        wizard's budget at 60 an hour to start; the owner checks on the same day and the stable tag follows when
+        nothing blocks; no tester days. Runbook `SAAS_INFRA.md` §4.29.
+
+### Stage 7 - The final address (`cinemawatch.damiankowalski.pl`)
+Decided 13 Nov 2026 (§9): **no new instance.** The staging site, with its database, accounts and profiles, gets
+the final address. The same server, the same containers, the same tunnel and backups; the change is in Cloudflare
+(a second route of the tunnel, Access) and one line of `.env` (`SAAS_BASE_URL`). No code change. After it there is no
+separate staging: new versions are checked locally with the fake (`Saas:Poller:Source = Fake`) and then with a beta
+tag on the live site, as with 0.7.0.
+- [ ] 7.1 Right after the stable `web-v0.7.0` (6.4.6): runbook `SAAS_INFRA.md` §4.30. Access first for the new host,
+      then the tunnel's route, then `SAAS_BASE_URL` and `deploy.sh`; the old address keeps working for a week (links
+      in old e-mails), then its route, its DNS record and its Access entries are removed. Everybody signs in again
+      once (the cookies belong to the old host name).
+- [ ] 7.2 Documents: §1 here, `SAAS_INFRA.md` §1, §1.6, §2.4, §3 and the runbooks that name the old host;
+      `infra/compose/env.example`. Access stays in front of the whole site on the final address too (§9, 13 Nov 2026).
 
 ### After the MVP (order flexible)
 Plans and limits → Stripe test mode → OIDC provider (Keycloak) → queue between poller and notifier → Kubernetes (k3s)
@@ -862,6 +880,9 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | 12 Nov 2026 | The project files keep `<Version>0.7.0</Version>` during the beta; the tag `web-v0.7.0-beta.1` adds the suffix (`web-image.yml` compares the part before the dash) | As with 0.6.0-beta.1; nothing to change between the beta and the stable tag |
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 | Nov 2026 | The server's configuration (`infra/ansible`) and its documentation (domain, DNS, the VPS, runbooks, glossary) move to the private repository `damiankowalski/VPS-1` (stage 7b, 11-12 Nov 2026; decision F-017 of the Finanse project); `SAAS_INFRA.md` keeps CinemaWatch's own parts and points to VPS-1 for the rest | The server is shared with a second application (Finanse): one source of truth for it, outside either application; each application keeps its image, compose file, deploy and backup scripts. The move changed nothing on the server (second Ansible run `changed=0`) |
+| 13 Nov 2026 | Faster to the final site: no separate stable `web-v0.6.0` (`cloudflared` 2026.10.7 goes into 0.7.0); the 0.7.0 beta is checked by the owner on the day it is deployed and the stable tag follows without tester days; the stage 5 test no longer gates anything; errors are fixed on the live site | The owner waited only for the `cloudflared` two-week rule (met on 13 Nov); a hobby project for the owner and a few friends, so a short way back (`deploy.sh` with the previous version and the dump) is enough |
+| 13 Nov 2026 | The final address `cinemawatch.damiankowalski.pl` is the staging site moved, not a new instance (stage 7): a second route of the same tunnel, the Access applications extended to the new host, `SAAS_BASE_URL` changed; the old host works for a week, then goes. No staging environment after that | One instance fits VPS-1 and the backups as they are; the accounts and profiles stay; checks of new versions run locally with the fake and as a beta on the live site |
+| 13 Nov 2026 | Cloudflare Access stays in front of the whole site on the final address (not only `/admin`); access model A stays in §11 as a later option. The privacy notice no longer calls the gate a testing measure | Owner's call: two gates for a private site of a few people is the safer default; a tester is still added in the Access policy and invited in the app (`SAAS_INFRA.md` §4.22) |
 
 ---
 
@@ -872,7 +893,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Check interval | MVP 0: the profile's interval with a server minimum of 10 minutes (decided Nov 2026); the adaptive rules (§4.3) tuned with the stage 4 data |
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
-| Wizard budget numbers (stage 6) | Proposed: 120 requests an hour, 90 saved up, 90 cache misses an hour per account (§5.2); confirm or change with the stage 5 numbers (requests per hour against 120) after 21 Nov 2026. (Reuse of `CinemaWatch.ViewModels` closed 8 Nov 2026: not on the site, §9) |
+| Wizard budget numbers (stage 6) | Proposed: 120 requests an hour, 90 saved up, 90 cache misses an hour per account (§5.2); confirm or change with the request log of the live site (requests per hour against 120); the wizard starts at 60 an hour (§9, 12 Nov 2026) and no longer waits for 21 Nov (§9, 13 Nov 2026). (Reuse of `CinemaWatch.ViewModels` closed 8 Nov 2026: not on the site, §9) |
 | Updates of every component (stage 5.8) | Some parts update themselves (Ubuntu packages and kernel with the 03:30 reboot, Docker from its repository), others only when we deploy: PostgreSQL minor versions (pulled by `deploy.sh` only), .NET and the base image (only when a tag builds a new image), NuGet packages, `cloudflared` (pinned, two-week rule), CI tools. To decide: a regular cadence (e.g. a monthly release after the .NET patch Tuesday), how to notice security fixes, checks and the way back |
 
 ---
@@ -903,7 +924,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
   `deploy.sh` (`command=` in `authorized_keys`), never the `docker` group (equals root); the key in GitHub Secrets.
 - **Private repository:** the server clones the public repository without credentials (`deploy.sh`, Ansible). If the
   repository ever becomes private, the server needs a read-only deploy key for this repository only.
-- **Access model A** (postponed 8 Nov 2026, §9): today two gates stand in front of the site - Cloudflare Access (a
+- **Access model A** (postponed 8 Nov 2026; Access kept for the final address 13 Nov 2026, §9): today two gates stand in front of the site - Cloudflare Access (a
   one-time PIN by e-mail) and the app's own password - so a tester is added in two places. Model A removes the
   Access gate for everything except the owner's `/admin`, so a tester is only invited in the app; one Cloudflare rate
   limiting rule then stops a single IP address from trying the account forms more than 10 times in 10 seconds. The

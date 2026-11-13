@@ -945,23 +945,22 @@ Applications* → *Add an application* → *Self-hosted* → name `CinemaWatch s
 
 ### 4.29 SaaS 0.7.0-beta.1: the wizard on staging (stage 6.4.6)
 
-Two days of beta ([`SAAS.md`](SAAS.md) §9, 12 Nov 2026): the owner checks first, testers follow, then the stable
-`web-v0.7.0`. **Only after** `web-v0.6.0` is tagged on `main` and deployed (§4.24), because the beta's branch takes
-`main` (with `cloudflared` 2026.10.7 in `compose.yaml`) first. The project files already say `0.7.0`; the tag adds the
-beta suffix.
+Sped up on 13 Nov 2026 ([`SAAS.md`](SAAS.md) §9): no separate `web-v0.6.0` before it (`main` is already merged into
+the branch, and `cloudflared` 2026.10.7 is in `compose.yaml` on the branch); the owner checks the beta on the day it
+is deployed and the stable `web-v0.7.0` follows when nothing blocks; no tester days. The project files already say
+`0.7.0`; the tag adds the beta suffix.
 
-1. **Windows (PowerShell)**, in the repository: bring `main` into the wizard's branch, push, wait for green CI.
+1. **Windows (PowerShell)**, in the repository: push the branch (its last commit holds the `cloudflared` bump and
+   these documents), wait for green CI.
 
    ```powershell
    git switch feature/saas-wizard
-   git pull
-   git merge origin/main
+   git status
    git push
    ```
 
-   Check: GitHub *Actions*, the run for the branch's last commit - all four jobs green. Undo before the push:
-   `git merge --abort` while a conflict is open, otherwise `git reset --hard ORIG_HEAD` (the branch as before the
-   merge; only before the push).
+   Check: `git status` says the branch is ahead of `origin` by one commit before the push; then GitHub *Actions*, the
+   run for the branch's last commit - all four jobs green.
 2. **Windows (PowerShell)**: the beta tag on the branch's last commit; `web-image.yml` builds, tests and publishes
    `ghcr.io/damiankowalski/cinemawatch-web:0.7.0-beta.1`.
 
@@ -979,28 +978,81 @@ beta suffix.
    sudo bash ~/CinemaWatch/infra/compose/deploy.sh 0.7.0-beta.1
    ```
 
-   Expected end: `== Done: 0.7.0-beta.1` and three containers. Way back: §4.24 with `0.6.0` - restore the dump taken
-   by this deployment first (the migration added columns and settings that 0.6.0 does not know).
+   Expected end: `== Done: 0.7.0-beta.1` and three containers. Way back: §4.24 with `0.6.0-beta.1` - restore the
+   dump taken by this deployment first (the migration added columns and settings that 0.6.0 does not know). Then in
+   the dashboard *Tunnels → staging-cinemawatch*: the connector reports version 2026.10.7 ([`SAAS.md`](SAAS.md) 5.5).
 4. **Wizard budget down for the start:** `/admin` → settings → *budżet kreatora (na godzinę)* `120 → 60` → save. The
    panel records the change (events). Raise it again when the request log is calm.
-5. **Owner's check (day 1):** *Nowy profil* with one city and one day, two screenings, the hall map, step 4, *Zapisz
-   profil*; *Edytuj* on the list, change a seat, *Zapisz zmiany*. In `/admin`: the wizard's requests in their own
-   line (`(kreator)`), no answer other than HTTP 200, the hour within both budgets. These are real requests to
+5. **Owner's check (same day):** *Nowy profil* with one city and one day, two screenings, the hall map, step 4,
+   *Zapisz profil*; *Edytuj* on the list, change a seat, *Zapisz zmiany*. In `/admin`: the wizard's requests in their
+   own line (`(kreator)`), no answer other than HTTP 200, the hour within both budgets. These are real requests to
    Cinema City, made by hand by the owner - nothing automated.
-6. **Testers (day 2):** the owner tells them that profiles can now be made on the site (the e-mail is the owner's).
-   Watch §4.27's daily check plus the wizard's line in `/admin`.
-7. **Stable:** after the two days without a problem: pull request `feature/saas-wizard` → `main`, *Squash and merge*,
-   tag `web-v0.7.0` on `main`, §4.24 with `0.7.0`; delete the branch. Docs: [`SAAS.md`](SAAS.md) §7, §9, §10; here
-   §1 (state), §3 (work log).
+6. **Stable** (when nothing in step 5 blocks; smaller errors are fixed later on the live site): pull request
+   `feature/saas-wizard` → `main`, *Squash and merge*, tag `web-v0.7.0` on `main`, §4.24 with `0.7.0`; delete the
+   branch. The testers may be told that profiles can now be made on the site (the e-mail is the owner's). Docs:
+   [`SAAS.md`](SAAS.md) §7, §9, §10; here §1 (state), §3 (work log). Next: §4.30.
+
+### 4.30 Move the site to `cinemawatch.damiankowalski.pl` (stage 7)
+
+The same instance gets the final address ([`SAAS.md`](SAAS.md) §7 stage 7, §9 13 Nov 2026): nothing new on the
+server, no new tunnel, database or backup. **Order matters:** Access covers the new host *before* the tunnel serves
+it, so the site is never reachable without the PIN. Do it after the stable `web-v0.7.0` (§4.29).
+
+1. **Cloudflare (browser), Access:** Zero Trust → *Access controls → Applications* → `CinemaWatch staging` (the whole
+   host) → *Edit* → add a second public hostname `cinemawatch.damiankowalski.pl` with no path → save. The same in the
+   application for `/admin`: a second hostname `cinemawatch.damiankowalski.pl`, path `admin` → save. The policies stay
+   as they are. Optionally rename the applications (e.g. `CinemaWatch`, `CinemaWatch admin`); the name is a label only.
+2. **Cloudflare (browser), tunnel:** Zero Trust → *Networks → Tunnels* → `staging-cinemawatch` → *Published
+   application routes* → *Add*: subdomain `cinemawatch`, domain `damiankowalski.pl`, service `HTTP` → `web:8080` →
+   save. Cloudflare creates the DNS record itself. Check: DNS → *Records*: `CNAME cinemawatch` →
+   `<tunnel id>.cfargotunnel.com`, Proxied, the same tunnel id as `staging-cinemawatch` (lesson of error 1033, §1.6).
+   The tunnel's name stays (renaming is cosmetic and not needed).
+3. **Windows (PowerShell), check from outside** (as §4.21, with the new host): both must redirect to the Access login.
+
+   ```powershell
+   curl.exe -sI https://cinemawatch.damiankowalski.pl/ | Select-String '^HTTP|^Location:'
+   curl.exe -sI https://cinemawatch.damiankowalski.pl/admin | Select-String '^HTTP|^Location:'
+   ```
+
+   Expected: `302` and a `Location:` at `damiankowalski.cloudflareaccess.com`. A `200` or the app's own page: stop
+   and delete the route from step 2 at once (the way back below), then check step 1.
+4. **Server (bash, SSH):** the app's public address (links in e-mails, Secure cookies) in `.env`, then a deployment
+   of the running version so `web` restarts with it (a dump comes first, as always).
+
+   ```bash
+   sudo cp /opt/cinemawatch/.env /opt/cinemawatch/.env.before-stage7
+   sudo sed -i 's|^SAAS_BASE_URL=.*|SAAS_BASE_URL=https://cinemawatch.damiankowalski.pl|' /opt/cinemawatch/.env
+   sudo grep '^SAAS_BASE_URL=' /opt/cinemawatch/.env
+   sudo bash ~/CinemaWatch/infra/compose/deploy.sh 0.7.0
+   ```
+
+   Expected: the `grep` prints the new address; `== Done: 0.7.0` and three containers.
+5. **Owner's check (browser):** open `https://cinemawatch.damiankowalski.pl`, the PIN, the app's sign-in (everybody
+   signs in again once: the cookies belonged to the old host name), the profile list, *Sprawdź teraz* on one profile,
+   `/admin`. Send yourself an invitation or the password help e-mail: its link starts with the new address.
+6. **Testers:** tell them the new address (the e-mail is the owner's). The old address keeps working for a week, so
+   links in older e-mails still open.
+7. **After a week, remove the old address** (Cloudflare, browser): the route `staging-cinemawatch.damiankowalski.pl`
+   in the tunnel (step 2's list) → delete; DNS → the `CNAME staging-cinemawatch` record, if it is still there →
+   delete; in both Access applications remove the old hostname. Check: `curl.exe -sI
+   https://staging-cinemawatch.damiankowalski.pl/` no longer reaches the app (a Cloudflare error or no DNS answer).
+8. **Docs:** here §1, §1.6, §2.4, §3 (work log) and the runbooks naming the old host (§4.21, §4.28);
+   `infra/compose/env.example` (`SAAS_BASE_URL`); [`SAAS.md`](SAAS.md) §7 stage 7, the header.
+
+**Way back** (any step before 7): step 4 undone with `sudo cp /opt/cinemawatch/.env.before-stage7
+/opt/cinemawatch/.env` and `deploy.sh 0.7.0` again; the route from step 2 deleted in the tunnel (the DNS record
+goes with it or is deleted by hand); the extra hostnames removed from the Access applications. The old address was
+never touched, so it works throughout. Delete `.env.before-stage7` once the move is done (it holds secrets).
 
 ## 5. Next infrastructure steps
 
 Stage 5 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- Stage 6.4.6: SaaS 0.7.0-beta.1 (the wizard) on staging after 0.6.0, two days, then the stable 0.7.0 (§4.29).
-
-- Stage 5 ([`SAAS.md`](SAAS.md) §7): the stable SaaS 0.6.0 on or after 13 Nov 2026 with `cloudflared` 2026.10.7,
-  deployed with §4.24; the test runs until about 21 Nov (§4.27). The switch to model A (§4.28) is postponed.
+- Stage 6.4.6: SaaS 0.7.0-beta.1 (the wizard, `cloudflared` 2026.10.7) on staging, the owner's check the same day,
+  then the stable 0.7.0 (§4.29). No separate stable 0.6.0 (13 Nov 2026).
+- Stage 7: the same site moves to `cinemawatch.damiankowalski.pl` (§4.30); the old address goes a week later.
+- Stage 5 ([`SAAS.md`](SAAS.md) §7): the testers keep using the site, but the test no longer gates anything
+  (13 Nov 2026). The switch to model A (§4.28) is postponed.
 - Stage 5.8 (an inventory of everything that needs updates and a runbook for it) belongs to the server now:
   [VPS-1 SERVER.md] §5.
 - Restore test again in February 2027 (§4.26).
