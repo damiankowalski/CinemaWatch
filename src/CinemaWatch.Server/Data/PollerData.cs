@@ -124,7 +124,8 @@ public sealed class NotificationRecord
 
 /// <summary>
 /// One request to Cinema City (table check_log): the same columns as the R1 probe's CSV, so the numbers can be
-/// compared. No personal data. Kept for a limited time.
+/// compared, and who sent it. No personal data (not even which account a wizard request was for). Kept for a limited
+/// time.
 /// </summary>
 public sealed class CheckLogEntry
 {
@@ -132,8 +133,11 @@ public sealed class CheckLogEntry
 
     public DateTimeOffset At { get; set; }
 
-    /// <summary>Poller cycle, e.g. 20261103T144400Z.</summary>
+    /// <summary>Poller cycle, e.g. 20261103T144400Z, or the wizard's loading, e.g. wizard-0f3a9c21.</summary>
     public string Cycle { get; set; } = "";
+
+    /// <summary>The poller or the wizard (rows from before SaaS 0.7.0: the poller).</summary>
+    public Polling.RequestSource Source { get; set; }
 
     public string? ScreeningId { get; set; }
 
@@ -218,6 +222,9 @@ public enum ServiceEventKind
 
     /// <summary>The daily limit of password help e-mails was reached (docs/SAAS.md §9).</summary>
     AccountMailLimited,
+
+    /// <summary>A wizard loading was refused because the wizard's budget was used up (throttled; no account named).</summary>
+    WizardBudgetExhausted,
 }
 
 /// <summary>

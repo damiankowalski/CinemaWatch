@@ -11,6 +11,10 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
+> **13-14 November 2026:** sped up (§9): SaaS 0.7.0 (the wizard and hall map) runs on staging as
+> `0.7.0-beta.1` since 14 Nov, checked by the owner; next the stable `web-v0.7.0`, then stage 7 moves the same site
+> to `cinemawatch.damiankowalski.pl`.
+>
 > Last updated: 8 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
 > skipped on purpose (§11). CinemaWatch runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026
 > (now 0.5.2), behind Cloudflare Access; e-mail through Resend; heartbeat and backup monitored by Healthchecks.io; daily
@@ -19,7 +23,8 @@
 > Access stays in front of the whole site. SaaS 0.6.0-beta.1 runs on staging since 7-8 Nov 2026 (account deletion,
 > hardened public pages); stable 0.6.0 on or after 13 Nov with `cloudflared` 2026.10.7. Next: MVP 1 (stage 6),
 > **planned and decided on 8 Nov 2026** (§5.2, §7, §9): the wizard and hall map as close to the desktop app as possible,
-> with multi-select on the map built for the desktop (1.5.0) and the site together; code starts after the 0.6.0 merge.
+> with multi-select on the map built for the desktop (1.5.0) and the site together. Desktop 1.5.0 released (6.4.1);
+> 6.4.2 (wizard data, SaaS 0.7.0) built on `feature/saas-wizard`, merged only after the `web-v0.6.0` tag (§9).
 
 ---
 
@@ -557,11 +562,12 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
       deployed on staging and checked by the owner in the browser (by 8 Nov 2026).
 - [x] 5.4 "Request an account": **dropped** (7 Nov 2026, §9). New accounts come only from the owner's invitation by
       e-mail; there is no public form.
-- [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). Part of SaaS
-      0.6.0: the compose change is committed and the stable tag `web-v0.6.0` set on or after 13 Nov 2026 (the image built
-      then also carries the .NET patch of 10 Nov 2026); a beta before that keeps 2026.10.3. Then `deploy.sh` and the
-      connector's version in the dashboard (*Tunnels → staging-cinemawatch*).
-- [ ] 5.6 The test (**started 7 Nov 2026**, about 2 weeks to 21 Nov; runs alongside 0.6.0, which does not change the
+- [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). **Moved into
+      SaaS 0.7.0** (13 Nov 2026, §9): the compose change is committed on `feature/saas-wizard` on 13 Nov (two weeks
+      after the release); there is no separate stable `web-v0.6.0`. The 0.7.0 image also carries the .NET patch of
+      10 Nov 2026. Then `deploy.sh` and the connector's version in the dashboard (*Tunnels → staging-cinemawatch*).
+- [ ] 5.6 The test: **no longer a gate** (13 Nov 2026, §9). The testers keep using the site, but nothing waits for
+      21 Nov; errors are fixed on the live site. Original plan: (**started 7 Nov 2026**, about 2 weeks to 21 Nov; runs alongside 0.6.0, which does not change the
       poller; daily and weekly checks: `SAAS_INFRA.md` §4.27): 3-5 invited people (possibly fewer, §9), free. Watch:
       requests per hour against the budget (120), answers other than HTTP 200 (403 / 429 / `cf-mitigated` / HTML = a
       block), notification latency (the e-mail against the desktop toast at home for the same seats), spam placement per
@@ -590,17 +596,52 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         tests and the shared case file; gestures in `HallMapViewModel` and the WPF map (mouse capture, the rectangle
         drawn on the map). XAML cannot be built in Claude's sandbox: the owner builds and tests the window. Beta
         (draft release) → owner's tests → `v1.5.0`; release notes, README, KB.
-  - [ ] 6.4.2 **Wizard data** (`feature/saas-wizard`, SaaS 0.7.0; does not wait for 6.4.1): cache, single flight,
+  - [x] 6.4.2 **Wizard data** (`feature/saas-wizard`, SaaS 0.7.0; does not wait for 6.4.1): cache, single flight,
         the wizard budget and the limits per account, background loading jobs, the same request guard; the request
         log and the operator's panel tell wizard requests from poller requests and show the new settings; the
-        development fake learns the repertoire (captured fixtures). No pages yet.
-  - [ ] 6.4.3 Steps 1-2: city & dates, film & screenings, the progress page, clickable steps, state in the form.
-  - [ ] 6.4.4 Step 3, the hall map: geometry as in the desktop map, row labels, copying between screenings with the
+        development fake learns the repertoire (captured fixtures). No pages yet. **Built 8 Nov 2026** on the branch
+        (decisions in §9): `Wizard/` (`WizardJobs`, `CinemaCityCache`, `LoadingTokens`), `UpstreamBlocks` shared with the
+        poller, migration `AddWizard` (`check_log.source`, four wizard overrides in `poller_settings`); merged after the
+        `web-v0.6.0` tag (13 Nov), no tag of its own: the first `web-v0.7.0-beta.1` follows the pages (6.4.6).
+  - [x] 6.4.3 Steps 1-2: city & dates, film & screenings, the progress page, clickable steps, state in the form.
+        **Built 11 Nov 2026** on `feature/saas-wizard` (decisions in §9): `/wizard`, `/wizard/2`,
+        `/wizard/loading/<id>`, the form endpoint `/wizard/go`; `WizardState` and `ScreeningChoices` in
+        `Server/Wizard/`; the screening texts moved to `CinemaWatch.Core` (`ScreeningText`). *Next* on step 2 only checks
+        the selection until 6.4.4. Checked by the owner in the browser (11 Nov 2026).
+  - [x] 6.4.4 Step 3, the hall map: geometry as in the desktop map, row labels, copying between screenings with the
         same layout, `seatmap.js` with the rules of 6.4.1 (once merged) and its `node --test` step in CI.
-  - [ ] 6.4.5 Step 4, saving and editing: the import's validation and limits, the notification state kept for
+        **Step 3 without JavaScript built 12 Nov 2026** (decisions in §9): the geometry moved to `CinemaWatch.Core`
+        (`HallLayout`, used by the desktop map too), `SeatCode`, `SeatsStep.razor`, the hall maps' loading through the
+        progress page, `WizardJobs.PeekScreeningsAsync`. **`seatmap.js` built 12 Nov 2026**: painting, the
+        rectangle, Esc, row numbers without a reload, live counts; `tests/web/seatmap.test.js` (`node --test`, the
+        shared case file) and its step in the Linux CI job. Checked by the owner in the browser (12 Nov 2026).
+  - [x] 6.4.5 Step 4, saving and editing: the import's validation and limits, the notification state kept for
         unchanged screenings, a test that a profile made on the site reads in the desktop app's `WatchProfile`.
-  - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's and testers' checks, stable `web-v0.7.0`; documents
-        (§7, §9, §10, `SAAS_INFRA.md` state and work log).
+        **Built 12 Nov 2026** on `feature/saas-wizard` (decisions in §9): `/wizard/4` (`SummaryStep.razor`),
+        `WizardProfile` (the desktop's `BuildProfile`, the replay of a stored profile, its seats once the maps are
+        known), `ProfileService.SaveAsync` (the import's `Check`, limit and row lock; the notification state trimmed
+        to the seats still watched), *Edit* on the profile list (`/wizard/edit/<id>`, `/wizard/seed`). Checked by the
+        owner in the browser (12 Nov 2026).
+  - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's check, stable `web-v0.7.0`; documents (§7, §9, §10,
+        `SAAS_INFRA.md` state and work log). **Planned 12 Nov 2026, sped up 13 Nov 2026** (§9): no `web-v0.6.0` first
+        (`main` is already in the branch, `cloudflared` 2026.10.7 comes with 0.7.0), the beta tag, `deploy.sh`, the
+        wizard's budget at 60 an hour to start; the owner checks on the same day and the stable tag follows when
+        nothing blocks; no tester days. Runbook `SAAS_INFRA.md` §4.29. **`web-v0.7.0-beta.1` deployed on staging
+        and checked by the owner (14 Nov 2026)**; CI green (three jobs). Left: the pull request, the stable tag
+        `web-v0.7.0` on `main` and its deployment (§4.29 step 6).
+
+### Stage 7 - The final address (`cinemawatch.damiankowalski.pl`)
+Decided 13 Nov 2026 (§9): **no new instance.** The staging site, with its database, accounts and profiles, gets
+the final address. The same server, the same containers, the same tunnel and backups; the change is in Cloudflare
+(a second route of the tunnel, Access) and one line of `.env` (`SAAS_BASE_URL`). No code change. After it there is no
+separate staging: new versions are checked locally with the fake (`Saas:Poller:Source = Fake`) and then with a beta
+tag on the live site, as with 0.7.0.
+- [ ] 7.1 Right after the stable `web-v0.7.0` (6.4.6): runbook `SAAS_INFRA.md` §4.30. Access first for the new host,
+      then the tunnel's route, then `SAAS_BASE_URL` and `deploy.sh`; the old address keeps working for a week (links
+      in old e-mails), then its route, its DNS record and its Access entries are removed. Everybody signs in again
+      once (the cookies belong to the old host name).
+- [ ] 7.2 Documents: §1 here, `SAAS_INFRA.md` §1, §1.6, §2.4, §3 and the runbooks that name the old host;
+      `infra/compose/env.example`. Access stays in front of the whole site on the final address too (§9, 13 Nov 2026).
 
 ### After the MVP (order flexible)
 Plans and limits → Stripe test mode → OIDC provider (Keycloak) → queue between poller and notifier → Kubernetes (k3s)
@@ -815,8 +856,36 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Static pages plus a small own script for the hall map (HTML checkboxes drawn as circles), not SVG and not interactive Blazor; `CinemaWatch.ViewModels` not reused on the site | Works without JavaScript and with a keyboard; no SignalR circuit that a deployment or the nightly reboot would cut; the view models are WPF-shaped, the logic lives in Core |
 | Nov 2026 | Wizard state in the form, not in the database | No migration and no restore test; the server validates everything when saving anyway |
 | Nov 2026 | Multi-select on the hall map for the desktop app (1.5.0) and the site together: painting (press on a seat and drag), a rectangle from the background with the row-label rule, no modifier keys, wheelchair spaces only by a single click; the rules once in Core, mirrored by the script, one shared case file tested in C# and in JavaScript | Fewer clicks for whole blocks of seats; the same behaviour in both clients, guarded by CI instead of by memory; cheaper to build into the new web map than to add later |
+| Nov 2026 | 6.4.2 stays on `feature/saas-wizard` until the `web-v0.6.0` tag (13 Nov); then squash-merged without a tag of its own (like the stage 3 increments); the first `web-v0.7.0-beta.1` comes with the pages | The 0.6.0 image must not carry the 0.7.0 migration or code; a beta without pages has nothing to test in the browser but the panel |
+| Nov 2026 | Wizard and poller share one block state: a block the wizard runs into pauses the poller too (the same doubling pause, event and owner's alert), and the first request that gets through afterwards - the wizard's or the poller's - ends it, recorded once | One server address, one block; Cloudflare does not care which part of the app asked |
+| Nov 2026 | Wizard settings in the operator's panel, stored in `poller_settings`: its budget (120 an hour, range 10-300), what can be saved up (90, 10-300), one account's limit (90 cache misses an hour, 10-300), the pause between its requests (1 s, 1-10); the cache times only in the configuration | The numbers are provisional until the stage 5 data (§10) and must be changeable without a deployment; the cache times are a code-level choice |
+| Nov 2026 | No account in `check_log`: wizard rows carry only the source and the loading (`wizard-xxxxxxxx`); each account's limit is counted in memory only | No new personal data, the privacy notice stays as it is; the limit only needs the last hour |
+| Nov 2026 | The account limit applies to the owner too (no exception); the panel can raise it for everybody | One rule, one code path; the owner changes the number, not the rule |
+| Nov 2026 | A wizard loading reserves its estimated requests from the wizard's budget and the account's limit at the start and gives back the rest at the end; a failed item (HTTP 5xx, timeout) is reported and the loading goes on; a block, the owner's pause or a used-up budget during a loading stops it, keeping the items done; loadings and the cache live in memory (a restart forgets them) | A loading that started also finishes, whatever others do; the same partial results as the desktop app; nothing to migrate or back up |
+| Nov 2026 | 6.4.3 on the same branch as 6.4.2 (`feature/saas-wizard`); both squash-merged together, without a tag of their own | One review of the wizard's data and its first pages; the first beta comes with the pages anyway (6.4.6) |
+| Nov 2026 | The wizard's pages post one form to `/wizard/go`, which answers with a redirect; the state (`city`, `from`, `to`, `film`, `s`, `max`) travels in hidden fields and in the address of the page it redirects to; a loading's page is `/wizard/loading/<id>` and reloads itself every 2 s, then opens step 2 | A reload never posts again (as on the profile page); the progress page needs a GET that keeps the state; the server checks the state at every step |
+| Nov 2026 | Step 1 has an optional "To" field (empty = one day) instead of the desktop's range check box; step 2 changes the film with a "Show screenings" button; the filter stays IMAX without dubbing; Enter in a field presses *Next* (the step bar is last in the form, drawn first) | No JavaScript on these pages; the same choices as the desktop app |
+| Nov 2026 | Step 2 shows only what the shared cache holds and never loads by itself: missing or expired days (a restart, a long pause) are named, with a "Load again" button; *Next* from step 1 skips the loading when the cache holds every day | Nothing reaches Cinema City without a click; a reload of step 2 costs nothing |
+| Nov 2026 | The screening texts (day header, languages, availability) moved from `CinemaWatch.ViewModels` to `CinemaWatch.Core` (`ScreeningText`); the desktop's `Formatting` calls them | The site does not use the view models (§9, 8 Nov), but both clients must show the same texts |
+| Nov 2026 | Step 3's selection travels as one bit per seat of the layout, Base64Url (`SeatCode`, Sadyba's 385 seats = 66 characters a screening), per screening in `m`; a code of another length reads as nothing selected | The seat keys of a whole hall are about 3 KB a screening - too long for the address the answers redirect to; the server checks everything when saving |
+| Nov 2026 | Step 3 shows one hall map at a time (tabs as form buttons, as in the desktop app); a row number is a form button without JavaScript; occupancy older than 10 minutes is not shown, "Refresh the occupancy" loads only the free seats | The same steps as the desktop; nothing reaches Cinema City without a click |
+| Nov 2026 | The hall map's geometry moved from `HallMapViewModel` to `CinemaWatch.Core` (`HallLayout`); the desktop map and the site use it | Both maps must look the same; the desktop's tests guard it |
+| Nov 2026 | Node.js 26 LTS (zip, `C:\DEV\CINEMAWATCH\node`, outside PATH) on the owner's PC for `seatmap.js`'s tests; CI runs them on its Ubuntu runner | Quick feedback for the script that mirrors the Core rules, without waiting for CI; remove = delete the folder |
+| Nov 2026 | `seatmap.js` is loaded by every page (`App.razor`, deferred, fingerprinted) and acts only where a map is; it keeps the form's check boxes as the truth (a gesture sets them), so the form posts what the page shows | One small file, cached once; no second source of state; without the script nothing is lost |
+| Nov 2026 | The sign-in answer's padding checks the time again after waiting (a Windows timer can wake up a fraction of a millisecond early) | "Never faster than the set time" holds exactly; the test was flaky (found in 6.4.4) |
+| Nov 2026 | A profile saved from the wizard goes through the same `ProfileImport.Check` and the same limit and row lock as an uploaded file; it is built like the desktop's `BuildProfile` (default name, main cinema, sorted seat keys, screenings without seats skipped), the interval from the desktop's 5/10/15/30/60 minutes, none below the site's minimum | One set of checks for every way into the database; a profile made on the site opens in the desktop app (tested with `ProfileStore.Load`) |
+| Nov 2026 | A new profile with the name of an existing one is refused ("Masz już profil o nazwie …"); an edit may rename a profile to a free name. The file import keeps replacing by name | In the wizard it is easy to overwrite another profile by accident; the import's replacing is how an updated file from the desktop comes in |
+| Nov 2026 | Editing keeps the profile's id and enabled state; its notification state stays for the screenings still in it, trimmed to the seats still watched; removed screenings lose theirs | No second e-mail about a seat already reported; a seat added back later is reported when it frees up |
+| Nov 2026 | *Edit* replays the stored profile as the desktop app does: started screenings drop out (one line says how many), the dates start today, the wizard opens on step 4. The seats come from the stored profile once the hall maps are known (`seed` in the state; missing maps load first, then `/wizard/seed` fills them in) | The edit costs no request when the poller already holds the maps; the seats cannot ride in the address before their layout is known |
+| Nov 2026 | Step 4 takes a screening's data (time, hall, booking link) from the cached repertoire or, when editing, from the stored profile; when neither has it, saving asks to load the screenings again | No request at saving; the booking link that goes into e-mails comes from Cinema City, never from the form |
+| 12 Nov 2026 | SaaS 0.7.0-beta.1 (the wizard) goes to staging right after `web-v0.6.0`, during the test 5.6 (not after 21 Nov); the beta lasts two days - the owner checks on the first, the testers use it on the second - then the stable `web-v0.7.0` | The request log tells the wizard's requests from the poller's (`check_log.source`), so the test's picture stays readable; a short beta because the pages were checked locally step by step |
+| 12 Nov 2026 | The wizard's budget starts at 60 requests an hour on staging (panel setting, default 120), raised when the log is calm | Together with the poller's 120 the server's traffic to Cinema City grows slowly; changed and undone in the panel without a deployment |
+| 12 Nov 2026 | The project files keep `<Version>0.7.0</Version>` during the beta; the tag `web-v0.7.0-beta.1` adds the suffix (`web-image.yml` compares the part before the dash) | As with 0.6.0-beta.1; nothing to change between the beta and the stable tag |
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 | Nov 2026 | The server's configuration (`infra/ansible`) and its documentation (domain, DNS, the VPS, runbooks, glossary) move to the private repository `damiankowalski/VPS-1` (stage 7b, 11-12 Nov 2026; decision F-017 of the Finanse project); `SAAS_INFRA.md` keeps CinemaWatch's own parts and points to VPS-1 for the rest | The server is shared with a second application (Finanse): one source of truth for it, outside either application; each application keeps its image, compose file, deploy and backup scripts. The move changed nothing on the server (second Ansible run `changed=0`) |
+| 13 Nov 2026 | Faster to the final site: no separate stable `web-v0.6.0` (`cloudflared` 2026.10.7 goes into 0.7.0); the 0.7.0 beta is checked by the owner on the day it is deployed and the stable tag follows without tester days; the stage 5 test no longer gates anything; errors are fixed on the live site | The owner waited only for the `cloudflared` two-week rule (met on 13 Nov); a hobby project for the owner and a few friends, so a short way back (`deploy.sh` with the previous version and the dump) is enough |
+| 13 Nov 2026 | The final address `cinemawatch.damiankowalski.pl` is the staging site moved, not a new instance (stage 7): a second route of the same tunnel, the Access applications extended to the new host, `SAAS_BASE_URL` changed; the old host works for a week, then goes. No staging environment after that | One instance fits VPS-1 and the backups as they are; the accounts and profiles stay; checks of new versions run locally with the fake and as a beta on the live site |
+| 13 Nov 2026 | Cloudflare Access stays in front of the whole site on the final address (not only `/admin`); access model A stays in §11 as a later option. The privacy notice no longer calls the gate a testing measure | Owner's call: two gates for a private site of a few people is the safer default; a tester is still added in the Access policy and invited in the app (`SAAS_INFRA.md` §4.22) |
 
 ---
 
@@ -827,7 +896,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Check interval | MVP 0: the profile's interval with a server minimum of 10 minutes (decided Nov 2026); the adaptive rules (§4.3) tuned with the stage 4 data |
 | One request per check | `ReuseScreeningDetails` (details reused for a day) halves the requests; measure in stage 4 whether `seats-status` alone passes from a fresh session before switching it on |
 | Cloudflare password | Needed only for API tokens and Cloudflare's own 2FA; "forgot password" did not work. Revisit with Cloudflare support if a token is ever needed (e.g. DNS-01 certificates for a TURN server, §4.6) |
-| Wizard budget numbers (stage 6) | Proposed: 120 requests an hour, 90 saved up, 90 cache misses an hour per account (§5.2); confirm or change with the stage 5 numbers (requests per hour against 120) after 21 Nov 2026. (Reuse of `CinemaWatch.ViewModels` closed 8 Nov 2026: not on the site, §9) |
+| Wizard budget numbers (stage 6) | Proposed: 120 requests an hour, 90 saved up, 90 cache misses an hour per account (§5.2); confirm or change with the request log of the live site (requests per hour against 120); the wizard starts at 60 an hour (§9, 12 Nov 2026) and no longer waits for 21 Nov (§9, 13 Nov 2026). (Reuse of `CinemaWatch.ViewModels` closed 8 Nov 2026: not on the site, §9) |
 | Updates of every component (stage 5.8) | Some parts update themselves (Ubuntu packages and kernel with the 03:30 reboot, Docker from its repository), others only when we deploy: PostgreSQL minor versions (pulled by `deploy.sh` only), .NET and the base image (only when a tag builds a new image), NuGet packages, `cloudflared` (pinned, two-week rule), CI tools. To decide: a regular cadence (e.g. a monthly release after the .NET patch Tuesday), how to notice security fixes, checks and the way back |
 
 ---
@@ -858,7 +927,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
   `deploy.sh` (`command=` in `authorized_keys`), never the `docker` group (equals root); the key in GitHub Secrets.
 - **Private repository:** the server clones the public repository without credentials (`deploy.sh`, Ansible). If the
   repository ever becomes private, the server needs a read-only deploy key for this repository only.
-- **Access model A** (postponed 8 Nov 2026, §9): today two gates stand in front of the site - Cloudflare Access (a
+- **Access model A** (postponed 8 Nov 2026; Access kept for the final address 13 Nov 2026, §9): today two gates stand in front of the site - Cloudflare Access (a
   one-time PIN by e-mail) and the app's own password - so a tester is added in two places. Model A removes the
   Access gate for everything except the owner's `/admin`, so a tester is only invited in the app; one Cloudflare rate
   limiting rule then stops a single IP address from trying the account forms more than 10 times in 10 seconds. The

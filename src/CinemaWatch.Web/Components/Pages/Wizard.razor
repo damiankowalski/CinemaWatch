@@ -1,0 +1,219 @@
+@page "/wizard"
+@page "/wizard/{Step:int}"
+@using CinemaWatch.Server.Wizard
+@using CinemaWatch.Web.Components.Wizard
+@inject CinemaCityCache Cache
+@inject WizardJobs Jobs
+@inject TimeProvider Time
+@inject IdentityRedirectManager RedirectManager
+
+@*
+    The wizard (docs/SAAS.md §5.2): steps 1 and 2 here, step 3 in SeatsStep, step 4 in SummaryStep. The state comes
+    from the address and goes on in the form's hidden fields; the form posts to /wizard/go, which checks it, loads what
+    is needed and redirects back here. Nothing on these pages sends a request to Cinema City: they show what the shared
+    cache, the poller's results and seat_plans hold.
+*@
+
+<PageTitle>@WizardTexts.Heading(state) – CinemaWatch</PageTitle>
+
+<div class="page-head">
+    <h1>@WizardTexts.Heading(state)</h1>
+</div>
+<StatusMessage />
+
+<form action="wizard/go" method="post" class="wizard">
+    <AntiforgeryToken />
+    <input type="hidden" name="step" value="@current" />
+
+    @if (current == 1)
+    {
+        @foreach (var field in state.Fields().Where(f => f.Key is not ("city" or "from" or "to")))
+        {
+            <input type="hidden" name="@field.Key" value="@field.Value" />
+        }
+        <div class="form">
+            <label for="city">@T("Miasto", "City")</label>
+            <select id="city" name="city">
+                @foreach (var cinema in Locations.ImaxCinemas)
+                {
+                    <option value="@cinema.Id" selected="@(state.City == cinema.Id)">@cinema.DisplayCity – @cinema.Name</option>
+                }
+                <option value="@WizardState.AllCities" selected="@state.IsAllCities">@T($"Wszystkie miasta (kina IMAX: {Locations.ImaxCinemas.Count})", $"All cities (IMAX cinemas: {Locations.ImaxCinemas.Count})")</option>
+            </select>
+
+            <label for="from">@T("Data (od)", "Date (from)")</label>
+            <input id="from" type="date" name="from" value="@DateValue(state.From)" min="@WizardState.Text(today)" required />
+
+            <label for="to">@T("Do (dla zakresu dat)", "To (for a date range)")</label>
+            <input id="to" type="date" name="to" value="@DateValue(state.To)" min="@WizardState.Text(today)" />
+            <p class="hint">
+                @T($"Puste pole „Do” oznacza jeden dzień. Zakres może obejmować maksymalnie {RepertoireRequest.MaxDaysOneCinema} dni, dla wszystkich miast {RepertoireRequest.MaxDaysSeveralCinemas}.",
+                   $"Leave \"To\" empty for one day. The range can cover at most {RepertoireRequest.MaxDaysOneCinema} days, {RepertoireRequest.MaxDaysSeveralCinemas} for all cities.")
+                @T(" Kreator pokazuje seanse IMAX bez dubbingu.", " The wizard lists IMAX screenings without dubbing.")
+            </p>
+        </div>
+        <div class="actions wizard-buttons">
+            <button type="submit" name="go" value="2" class="button primary">@T("Dalej", "Next")</button>
+            <a class="button" href="/">@T("Anuluj", "Cancel")</a>
+        </div>
+    }
+    else if (current == 2)
+    {
+        @foreach (var field in state.Fields(withScreenings: false).Where(f => f.Key is not "film"))
+        {
+            <input type="hidden" name="@field.Key" value="@field.Value" />
+        }
+        <p class="lead">@WizardTexts.Search(state)</p>
+
+        @if (repertoire.Days.Count == 0)
+        {
+            <p class="status error" role="alert">
+                @T("Repertuaru dla tego wyszukiwania nie ma już w pamięci serwera (minęło sporo czasu albo serwer był restartowany).",
+                   "The repertoire for this search is no longer in the server's memory (a while has passed or the server was restarted).")
+            </p>
+            <div class="actions wizard-buttons">
+                <button type="submit" name="go" value="reload" class="button primary">@T("Wczytaj ponownie", "Load again")</button>
+                <button type="submit" name="go" value="1" class="button">@T("Wstecz", "Back")</button>
+            </div>
+        }
+        else
+        {
+            @if (!repertoire.Complete)
+            {
+                <div class="status error" role="alert">
+                    <p>@T("Nie udało się wczytać repertuaru: ", "Could not load the repertoire: ")@WizardTexts.Items(repertoire.Missing, state.IsAllCities)</p>
+                    <button type="submit" name="go" value="reload" class="link">@T("Wczytaj brakujące", "Load the missing days")</button>
+                </div>
+            }
+
+            @if (choices.Film is null)
+            {
+                <p>@T("W wybranym terminie nie ma seansów IMAX bez dubbingu.", "There are no IMAX screenings without dubbing on the selected dates.")</p>
+            }
+            else
+            {
+                <div class="film-choice">
+                    <label for="film">@T("Film", "Film")</label>
+                    <select id="film" name="film">
+                        @foreach (var film in choices.Films)
+                        {
+                            <option value="@film.FilmId" selected="@(film.FilmId == choices.Film.FilmId)">@film.Name (@Count(film.ScreeningCount, "seans", "seanse", "seansów", "screening", "screenings"))</option>
+                        }
+                    </select>
+                    <button type="submit" name="go" value="film" class="button">@T("Pokaż seanse", "Show screenings")</button>
+                </div>
+
+                <div class="selection-bar">
+                    <span class="hint">@T($"Zaznaczono {selectedCount} z {listedCount}", $"{selectedCount} of {listedCount} selected")</span>
+                    <button type="submit" name="go" value="all" class="link">@T("Zaznacz wszystkie", "Select all")</button>
+                    <button type="submit" name="go" value="none" class="link">@T("Odznacz wszystkie", "Clear all")</button>
+                </div>
+
+                @foreach (var day in choices.Days)
+                {
+                    <section class="day">
+                        <h2>@ScreeningText.DayHeader(day.Date)</h2>
+                        @foreach (var group in day.Cinemas)
+                        {
+                            @if (choices.ShowCinemas && group.Cinema is { } cinema)
+                            {
+                                <h3>@cinema.DisplayCity · @cinema.Name</h3>
+                            }
+                            <ul class="screenings">
+                                @foreach (var screening in group.Screenings)
+                                {
+                                    <li>
+                                        <label class="screening">
+                                            <input type="checkbox" name="s" value="@screening.Id" checked="@selected.Contains(screening.Id)" />
+                                            <span class="time">@ScreeningText.Time(screening.StartsAt)</span>
+                                            <span class="detail">@ScreeningText.Languages(screening)@(screening.Auditorium.Length > 0 ? " · " + screening.Auditorium : "")</span>
+                                            <span class="availability@(ScreeningText.IsNearlySoldOut(screening) ? " sold-out" : "")">@ScreeningText.Availability(screening)</span>
+                                        </label>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </section>
+                }
+            }
+
+            <div class="actions wizard-buttons">
+                @if (choices.Film is not null)
+                {
+                    <button type="submit" name="go" value="3" class="button primary">@T("Dalej", "Next")</button>
+                }
+                <button type="submit" name="go" value="1" class="button">@T("Wstecz", "Back")</button>
+            </div>
+        }
+    }
+
+    else if (current == 3)
+    {
+        <SeatsStep State="state" />
+    }
+    else
+    {
+        <SummaryStep State="state" />
+    }
+
+    @* After the content in the page's order, so Enter in a field presses "Next"; shown first (CSS order). *@
+    <WizardSteps Current="current" Furthest="state.Furthest" />
+</form>
+
+@code {
+    private int current;
+    private DateOnly today;
+    private WizardState state = new();
+    private CachedRepertoire repertoire = new([], []);
+    private ScreeningChoices choices = new([], null, [], false);
+    private HashSet<string> selected = [];
+    private int selectedCount;
+    private int listedCount;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [Parameter]
+    public int? Step { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var now = Time.GetUtcNow();
+        today = CinemaCityCache.PolishToday(now);
+        var query = HttpContext.Request.Query;
+        state = query.ContainsKey("city") ? WizardState.Read(name => query[name]) : WizardState.New(today);
+        current = Step switch { 2 => 2, 3 => 3, 4 => 4, _ => 1 };
+        if (current == 1)
+            return;
+        if (current >= 3)
+        {
+            // Steps 3 and 4 need ticked screenings (an address changed by hand goes back to step 2), step 4 seats.
+            if (state.ScreeningIds.Count == 0)
+                RedirectManager.RedirectTo(WizardTexts.StepUrl(2, state));
+            if (current == 4 && state.Seats.Count == 0 && state.SeedIds.Count == 0)
+                RedirectManager.RedirectTo(WizardTexts.StepUrl(3, state));
+            // Editing: a hall map that has turned up since (the poller's check) takes the stored profile's seats first.
+            if (state.ProfileId is not null && state.SeedIds.Count > 0
+                && (await Jobs.PeekScreeningsAsync(state.SeedIds)).Any(m => m.Plan is not null))
+                RedirectManager.RedirectTo(WizardTexts.AfterLoadingUrl(current, state));
+            state = state with { Furthest = Math.Max(state.Furthest, current) };
+            return;
+        }
+
+        // Step 2 needs the dates of step 1 (an address changed by hand starts again there).
+        if (state.Dates.Count == 0)
+        {
+            RedirectManager.RedirectTo(WizardTexts.StepUrl(1, state));
+            return;
+        }
+        state = state with { Furthest = Math.Max(state.Furthest, 2) };
+        repertoire = CachedRepertoire.Read(Cache, state.Repertoire());
+        choices = ScreeningChoices.Build(repertoire.Days, ScreeningFilter.ImaxWithoutDubbing, PolishTime.FromUtc(now.UtcDateTime), state.FilmId);
+        var listed = choices.Screenings.Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
+        selected = state.ScreeningIds.Where(listed.Contains).ToHashSet(StringComparer.Ordinal);
+        selectedCount = selected.Count;
+        listedCount = listed.Count;
+    }
+
+    private static string? DateValue(DateOnly? date) => date is { } value ? WizardState.Text(value) : null;
+}

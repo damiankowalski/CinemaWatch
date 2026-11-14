@@ -34,12 +34,23 @@ public sealed class PollerSettingsRow
 
     public bool? ReuseScreeningDetails { get; set; }
 
+    /// <summary>The wizard's own budget (docs/SAAS.md §5.2).</summary>
+    public int? WizardRequestsPerHour { get; set; }
+
+    public int? WizardBurst { get; set; }
+
+    /// <summary>Requests an hour one account may cause through the wizard (cache misses only).</summary>
+    public int? WizardAccountRequestsPerHour { get; set; }
+
+    public double? WizardGapSeconds { get; set; }
+
     public DateTimeOffset? UpdatedAt { get; set; }
 
     public bool IsEmpty =>
         MinIntervalMinutes is null && RequestsPerHour is null && RequestGapMinSeconds is null && RequestGapMaxSeconds is null
         && ManualGapMinSeconds is null && ManualGapMaxSeconds is null && ManualFreshMinutes is null && JitterPercent is null
-        && FirstBlockPauseMinutes is null && MaxBlockPauseMinutes is null && ReuseScreeningDetails is null;
+        && FirstBlockPauseMinutes is null && MaxBlockPauseMinutes is null && ReuseScreeningDetails is null
+        && WizardRequestsPerHour is null && WizardBurst is null && WizardAccountRequestsPerHour is null && WizardGapSeconds is null;
 
     public PollerSettingsRow Copy() => (PollerSettingsRow)MemberwiseClone();
 }

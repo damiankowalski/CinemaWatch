@@ -9,8 +9,8 @@ request statistics, events, a pause switch, poller settings) and a heartbeat for
 
 | Project | Contents |
 | --- | --- |
-| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `CheckService`, `PollerSettings`, the development fake), the operator's panel and the heartbeat (`Operations/`) |
-| `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms, no JavaScript); hosts the background services in MVP 0 |
+| `src/CinemaWatch.Server` | No HTTP: database (EF Core + PostgreSQL, migrations in `Data/Migrations`), accounts (`AccountService`), profiles (`ProfileImport` checks a file, `ProfileService` stores it), e-mail over SMTP, the poller (`Polling/`: `PollerCycle`, `RequestGuard`, `UpstreamBlocks`, `CheckService`, `PollerSettings`, the development fake), the wizard's Cinema City data on demand (`Wizard/`: `WizardJobs`, `CinemaCityCache`, `LoadingTokens`; the wizard's state and step 2's lists: `WizardState`, `ScreeningChoices`), the operator's panel and the heartbeat (`Operations/`) |
+| `src/CinemaWatch.Web` | ASP.NET Core, Blazor with static server-side rendering (plain HTML forms; one small script for the hall map, every page works without it); hosts the background services in MVP 0; the wizard's pages in `Components/Pages/Wizard*.razor` and `Components/Wizard/` |
 | `tests/CinemaWatch.Saas.Tests` | Logic tests, database tests and the whole web flow (real app in memory, e-mails recorded) |
 
 How it works:
@@ -52,6 +52,36 @@ How it works:
 - Several profiles can be open at once. The header of a profile is a link that opens or closes it; the open profiles
   live in the address (`?profile=…` for the one in focus, `?open=…` for the others), so the page's own reloads,
   "Check now", enable, disable and delete keep them open until you close them.
+- **New profile and editing (wizard, SaaS 0.7.0):** the button on the home page opens `/wizard`, the desktop app's
+  steps (step bar at the top: the steps reached so far and the next one are buttons). Step 1: the city (one IMAX
+  cinema each, or all six) and a date or a range ("To" empty = one day; 31 days, 14 for all cities; the desktop's
+  messages). *Next* opens step 2 at once when the shared cache holds the whole repertoire; otherwise a loading starts
+  in the background and `/wizard/loading/<id>` shows its progress, reloads itself every 2 s and then opens step 2. A
+  refused loading (the owner's pause, a block, a used-up budget or limit) says on step 1 when to try again. Step 2
+  (`/wizard/2`): the films with IMAX screenings without dubbing that have not started, the chosen film's screenings
+  by day and cinema with check boxes, "select all / clear all", "Show screenings" after choosing another film (no
+  JavaScript); missing days can be loaded again. *Next* loads the hall maps (details, the layout from `seat_plans`,
+  free seats) the same way, unless everything is known. Step 3 (`/wizard/3`): one hall map per tab, drawn from the
+  geometry the desktop map uses (`CinemaWatch.Core` `HallLayout`): every seat a check box drawn as a circle (free
+  green, taken grey, watched ringed), row numbers that toggle the row, the minimum of adjacent seats, "Copy to
+  screenings in the same hall", "Clear", "Refresh the occupancy" when it is older than 10 minutes. The site's only
+  script, `wwwroot/seatmap.js` (no libraries, loaded on every page, active only on a map), adds painting (press on
+  a seat and drag), the rectangle (press on the background and drag), Esc, row numbers without a reload and live
+  counts - the rules of `CinemaWatch.Core` `SeatSelection`, tested against the same case file. With a finger a tap
+  toggles a seat and dragging scrolls; without JavaScript everything works through the form. Step 4 (`/wizard/4`):
+  the desktop's summary - the screenings with their watched seats row by row (screenings without seats are skipped),
+  the notification condition, the name (default as in the desktop: film, city, dates) and the interval (the
+  desktop's 5/10/15/30/60 minutes, none below `Saas:Limits:MinIntervalMinutes`). *Save* builds the profile as the
+  desktop app does (`Server/Wizard/WizardProfile`) and stores it through the import's checks and limits
+  (`ProfileService.SaveAsync`); a name another profile has is refused, never replaced. **Edit** on the profile list
+  (`POST /wizard/edit/<id>`) opens the wizard on a stored profile: started screenings drop out, the dates start
+  today, the seats come from the stored profile once the hall maps are known (missing ones load first, then
+  `/wizard/seed` fills them in) and it ends on step 4. Saving an edit keeps the id and the enabled state, and the
+  notification state of the screenings and seats still watched (a seat already reported free is not reported
+  again). All of it posts to `/wizard/go`; the state (`city`, `from`, `to`, `film`, `s`, `max`, `m` - each
+  screening's seats as one bit per seat of its layout, Base64Url (`SeatCode`) -, `tab`, `adj`, `name`, `int`, and
+  when editing `p` and `seed`) travels in hidden fields and in the address of the page the answer redirects to -
+  nothing in the database until *Save*.
 - Profile limit: 5 per account (enabled, disabled and ended alike). The owner sets another limit per account (1-50)
   in the **Users** list; an empty field means the default. Lowering a limit deletes nothing.
 
@@ -150,6 +180,8 @@ the PC: every stop of the app would otherwise raise an alarm). The service and i
 | `Saas:Poller:ManualFreshMinutes` | `appsettings.json`: `1`; Development: `0` | how old a result "Check now" may reuse instead of asking |
 | `Saas:Poller:FirstBlockPauseMinutes`, `MaxBlockPauseMinutes` | `appsettings.json`: `60`, `1440`; Development: `2`, `10` | pause after a block, doubling |
 | `Saas:Poller:Enabled`, `TickSeconds`, `JitterPercent`, `ReuseScreeningDetails`, `CheckLogDays`, `HistoryDays` | `appsettings.json`: `true`, `30`, `20`, `false`, `30`, `90` | `ReuseScreeningDetails = true`: one request per check instead of two (not measured yet) |
+| `Saas:Poller:Wizard:RequestsPerHour`, `Burst`, `AccountRequestsPerHour`, `GapSeconds` | `appsettings.json`: `120`, `90`, `90`, `1` | the wizard's own budget (next to the poller's), how much of it can be saved up, the limit of one account (cache misses only) and the pause between its requests |
+| `Saas:Poller:Wizard:RepertoireNearMinutes`, `RepertoireLaterMinutes`, `DetailsMinutes`, `FreeSeatsMinutes`, `KeepResultMinutes` | `appsettings.json`: `30`, `180`, `1440`, `10`, `30` | how long the shared cache keeps the repertoire (today and tomorrow / later days), screening details and free seats; how long a finished loading's result is kept |
 | `Saas:Heartbeat:Url` | empty (off); user secrets for a test | a secret; empty or https; start-up fails otherwise |
 | `Saas:Heartbeat:IntervalMinutes` | `appsettings.json`: `5` | 1-60; the external check's period should be at least this |
 | `Mail:Host`, `Mail:Port`, `Mail:Security`, `Mail:UserName`, `Mail:Password`, `Mail:FromAddress`, `Mail:FromName` | `appsettings.json`: `localhost`, `2525`, `None` (smtp4dev) | the provider is chosen in stage 4; its password only in secrets |
@@ -166,7 +198,8 @@ sign-in and reveals nothing else. It answers only inside the server (the deploym
 request that came through Cloudflare (`CF-Connecting-IP` or `CF-Ray` header) gets 404.
 
 The minimum interval and the `Saas:Poller` values for the budget, the pauses, `ManualFreshMinutes`, `JitterPercent`
-and `ReuseScreeningDetails` are defaults: the operator's panel can change them within fixed ranges.
+and `ReuseScreeningDetails`, and the wizard's budget, burst, account limit and pause are defaults: the operator's panel
+can change them within fixed ranges. The cache times are configuration only.
 
 User secrets are a .NET development feature: a JSON file outside the repository,
 `%APPDATA%\Microsoft\UserSecrets\cinemawatch-web\secrets.json`, read only in the Development environment.
@@ -234,7 +267,10 @@ moment, the log says so; start it and use "Nie pamiętasz hasła?" on the sign-i
 In Development the poller never talks to Cinema City: it uses captured responses (the Sadyba IMAX hall) steered by
 files in `C:\DEV\CINEMAWATCH\saas-fake` (the app creates the folder and a `README.txt` in it). The log says
 `Poller uses the development FAKE of Cinema City`. Screening ids are those of your profiles (shown in the page
-address of the booking link, e.g. `.../order/1765592`).
+address of the booking link, e.g. `.../order/1765592`). The wizard (from SaaS 0.7.0) gets every cinema's repertoire on
+any day from the fake too: the captured Sadyba day of 16 Dec 2026 moved to that cinema and day, with screening ids
+`<cinema><yyMMdd><position>` - e.g. `106026121613` is the 16:00 IMAX screening in Sadyba on 16 Dec 2026. A fake folder
+from an older version keeps its old `README.txt`; delete the file and it is written again at the next start.
 
 ```powershell
 # A seat frees up (keys as in the profile, e.g. row 4 seat 19 in Sadyba = 1_18_4)
@@ -280,6 +316,12 @@ $env:CINEMAWATCH_TEST_DB = $builder.ConnectionString
 Remove-Variable password, builder
 dotnet run --project tests\CinemaWatch.Saas.Tests
 Remove-Item Env:CINEMAWATCH_TEST_DB
+```
+
+The hall map's script against the case file shared with the C# tests (Node.js; on the development PC the zip in
+`C:\DEV\CINEMAWATCH\node`, not on PATH; CI uses the runner's Node):
+```powershell
+& C:\DEV\CINEMAWATCH\node\node.exe --test tests\web\seatmap.test.js
 ```
 
 ### A new migration (after changing the data model)

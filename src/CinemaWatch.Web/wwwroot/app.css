@@ -174,7 +174,7 @@ nav a:hover { text-decoration: underline; }
 .form .hint { margin: 0; }
 .form button { margin-top: 1.1rem; justify-self: start; }
 
-input[type=email], input[type=password], input[type=text], input[type=number], select {
+input[type=email], input[type=password], input[type=text], input[type=number], input[type=date], select {
     width: 100%;
     padding: 0.55rem 0.7rem;
     border: 1px solid var(--line);
@@ -503,3 +503,203 @@ tr.quiet td { color: var(--muted); }
 .field-error { margin: 0.25rem 0 0; color: var(--danger); font-size: 0.875rem; }
 .settings label.check { display: flex; align-items: center; gap: 0.5rem; }
 .settings fieldset .hint { margin: 0.35rem 0 0.75rem; }
+
+/* Wizard (new profile): the desktop app's four steps; the step bar is drawn first but comes last in the form, so
+   Enter in a field presses "Next". */
+
+.page-head .new-profile { margin: 0 0 0.75rem; }
+
+.wizard { display: flex; flex-direction: column; }
+.wizard .steps { order: -1; }
+.wizard .form { max-width: 26rem; margin-top: 0.5rem; }
+
+.steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1.25rem;
+    margin: 0 0 1.25rem;
+    padding: 0 0 0.75rem;
+    border-bottom: 1px solid var(--line);
+    list-style: none;
+    counter-reset: none;
+}
+
+.steps .step {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.95rem;
+}
+
+.steps button.step { cursor: pointer; color: var(--ink); }
+.steps button.step:hover { text-decoration: underline; text-decoration-color: var(--free); text-underline-offset: 3px; }
+.steps .current .step { color: var(--ink); font-weight: 600; }
+
+.steps .number {
+    display: inline-grid;
+    place-items: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border: 1px solid var(--seat);
+    border-radius: 50%;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.steps .done .number { border-color: var(--free); color: var(--free); }
+.steps .current .number { border-color: var(--free); background: var(--free); color: var(--on-free); }
+
+.wizard-buttons { margin: 1.5rem 0 0; }
+
+.film-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0.5rem 0 1rem; }
+.film-choice label { font-weight: 600; }
+.film-choice select { width: auto; max-width: 100%; flex: 1 1 16rem; }
+
+.selection-bar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem 1rem; margin: 0 0 0.5rem; }
+
+.day h2 { margin: 1.25rem 0 0.25rem; font-size: 1.05rem; }
+.day h3 { margin: 0.75rem 0 0.25rem; font-size: 0.95rem; font-weight: 600; color: var(--muted); }
+
+.screenings { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.screenings li { border-bottom: 1px solid var(--line); }
+
+.screening {
+    display: grid;
+    grid-template-columns: auto 3.25rem 1fr auto;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+    padding: 0.45rem 0.25rem;
+    cursor: pointer;
+}
+
+.screening:hover { background: var(--surface); }
+.screening .time { font-weight: 600; font-variant-numeric: tabular-nums; }
+.screening .detail { color: var(--muted); font-size: 0.9rem; }
+.screening .availability { font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+.screening .availability.sold-out { color: var(--warn); }
+
+@media (max-width: 34rem) {
+    .screening { grid-template-columns: auto 3.25rem 1fr; }
+    .screening .availability { grid-column: 3; }
+}
+
+.loading progress { width: 100%; max-width: 26rem; height: 0.75rem; accent-color: var(--free); }
+.loading p { margin: 0.35rem 0 1rem; }
+
+/* Step 3: the hall map. Seats are check boxes drawn as circles where the shared geometry (Core HallLayout) puts them,
+   in % of the map; sizes follow the map's width (container units), so the whole hall scales like the desktop's
+   Viewbox. Free seats green, taken ones grey, watched ones ringed in the accent colour. */
+
+.hall-tabs { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0 0 1rem; }
+
+.hall-tab {
+    display: grid;
+    gap: 0.1rem;
+    padding: 0.45rem 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.hall-tab .hint { font-size: 0.8rem; }
+.hall-tab.current { border-color: var(--free); box-shadow: inset 0 -3px 0 var(--free); cursor: default; }
+button.hall-tab:hover { border-color: var(--ink); }
+
+.hall {
+    position: relative;
+    width: 100%;
+    max-width: 60rem;
+    margin: 0.5rem 0;
+    container-type: inline-size;
+    user-select: none;
+    touch-action: pan-y;
+}
+
+.hall .screen {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    border-radius: 3px;
+    background: var(--seat);
+    color: var(--muted);
+    font-size: calc(var(--seat-size) * 0.32);
+    letter-spacing: 0.2em;
+}
+
+.hall .seat, .hall .row-label {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    width: var(--seat-size);
+    height: var(--seat-size);
+    margin: 0;
+    padding: 0;
+    border-radius: 50%;
+    font: inherit;
+    font-size: calc(var(--seat-size) * 0.4);
+    line-height: 1;
+}
+
+.hall .seat {
+    background: var(--seat);
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.hall .seat.free { background: var(--free); color: var(--on-free); }
+.hall .seat.taken { background: var(--seat); color: var(--muted); }
+
+.hall .seat input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+/* Watched: a ring in the ink colour and a darker fill, so it reads on free and taken seats alike. */
+.hall .seat:has(input:checked) { box-shadow: 0 0 0 calc(var(--seat-size) * 0.12) var(--ink); }
+.hall .seat:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.hall .row-label {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.hall .row-label:hover { border-color: var(--ink); color: var(--ink); }
+.hall .row-label.partial { border-color: var(--free); color: var(--ink); }
+.hall .row-label.full { border-color: var(--free); background: var(--free); color: var(--on-free); }
+
+/* The rectangle of a drag from the background (seatmap.js). */
+.hall .selection-rectangle {
+    position: absolute;
+    border: 1px dashed var(--ink);
+    background: color-mix(in srgb, var(--free) 15%, transparent);
+    pointer-events: none;
+}
+
+.selection-text { margin: 0.25rem 0 1rem; font-weight: 600; }
+
+.seat-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0 0 0.75rem; }
+.seat-tools select { width: auto; }
+
+/* Step 4: the summary - one block per screening, its watched seats row by row (as in the desktop app). */
+.wizard h2 { margin: 1.25rem 0 0.25rem; font-size: 1.05rem; }
+.summary-list { margin: 0 0 0.75rem; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.summary-list > li { padding: 0.5rem 0; border-bottom: 1px solid var(--line); }
+.summary-list p { margin: 0.1rem 0; }
+.summary-title { display: flex; flex-wrap: wrap; gap: 0 0.75rem; align-items: baseline; }
+.summary-rows { margin: 0.1rem 0 0; padding-left: 1.25rem; color: var(--muted); font-size: 0.95rem; }

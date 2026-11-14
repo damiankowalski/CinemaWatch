@@ -59,6 +59,14 @@ jobs:
       - name: Test (shared logic)
         run: dotnet run --project tests/CinemaWatch.Tests -c Release
 
+      # The hall map's script mirrors the Core selection rules: the same case file as the C# tests (no packages;
+      # Node comes with the runner image). The file is named explicitly: Node 22 and later read the arguments as glob
+      # patterns, and a directory alone runs nothing or fails, depending on the version.
+      - name: Test hall map script
+        run: |
+          node --version
+          node --test tests/web/seatmap.test.js
+
       - name: Test probe
         run: dotnet run --project tests/CinemaWatch.Probe.Tests -c Release
 

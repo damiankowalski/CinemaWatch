@@ -1,0 +1,39 @@
+@using CinemaWatch.Server.Wizard
+@*
+    The step bar, as in the desktop app: every step reached so far and the next one are buttons of the page's form
+    (name "go"), so a click carries what was typed; going forward runs the same checks as "Next". Without a form
+    (the progress page) the steps are only shown.
+*@
+<ol class="steps" aria-label="@T("Kroki kreatora", "Wizard steps")">
+    @for (var number = WizardState.FirstStep; number <= WizardState.LastStep; number++)
+    {
+        var step = number;
+        var reachable = InForm && step != Current && (step <= Furthest || step == Current + 1);
+        <li class="@(step == Current ? "current" : step <= Furthest ? "done" : null)">
+            @if (reachable)
+            {
+                <button type="submit" name="go" value="@step" class="step" title="@T("Przejdź do tego kroku", "Go to this step")">
+                    <span class="number">@step</span> @WizardTexts.StepTitle(step)
+                </button>
+            }
+            else
+            {
+                <span class="step" aria-current="@(step == Current ? "step" : null)">
+                    <span class="number">@step</span> @WizardTexts.StepTitle(step)
+                </span>
+            }
+        </li>
+    }
+</ol>
+
+@code {
+    [Parameter, EditorRequired]
+    public int Current { get; set; }
+
+    [Parameter]
+    public int Furthest { get; set; } = WizardState.FirstStep;
+
+    /// <summary>True when the bar is inside the page's form (its steps are buttons).</summary>
+    [Parameter]
+    public bool InForm { get; set; } = true;
+}

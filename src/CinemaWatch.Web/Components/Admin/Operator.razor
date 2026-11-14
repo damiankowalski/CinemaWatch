@@ -1,6 +1,7 @@
 @page "/admin"
 @attribute [Authorize(Policy = OwnerAuthorizationHandler.Policy)]
 @using CinemaWatch.Server.Operations
+@using CinemaWatch.Server.Wizard
 @inject OperatorService Operations
 @inject PollerSettings Settings
 @inject IOptions<PollerOptions> PollerConfig
@@ -212,8 +213,8 @@
     }
     else
     {
-        <p>@T("Wstrzymanie zatrzymuje od następnego cyklu wszystkie zapytania do Cinema City – w tle i „Sprawdź teraz” – aż je wznowisz, także po restarcie. Użytkownicy zobaczą komunikat; nikt nie dostaje e-maila.",
-              "Pausing stops all requests to Cinema City from the next cycle - background checks and \"Check now\" - until you resume them, restarts included. Users see a notice; nobody is e-mailed.")</p>
+        <p>@T("Wstrzymanie zatrzymuje od następnego cyklu wszystkie zapytania do Cinema City – w tle, „Sprawdź teraz” i dane kreatora (od razu) – aż je wznowisz, także po restarcie. Użytkownicy zobaczą komunikat; nikt nie dostaje e-maila.",
+              "Pausing stops all requests to Cinema City from the next cycle - background checks, \"Check now\" and the wizard's data (at once) - until you resume them, restarts included. Users see a notice; nobody is e-mailed.")</p>
         <form action="admin/pause" method="post">
             <AntiforgeryToken />
             <button type="submit" class="button danger-outline">@T("Wstrzymaj sprawdzanie", "Pause checks")</button>
@@ -239,6 +240,17 @@
             @T($" Średni czas odpowiedzi (24 h): {average} ms.", $" Average response time (24 h): {average} ms.")
         }
     </p>
+    @{ var wizard = overview.Wizard; var cache = wizard.Cache; }
+    <p>
+        @T($"Kreator (dane na żądanie, osobny budżet): ostatnia godzina {wizard.Budget.LastHour} z budżetu {wizard.Budget.PerHour} na godzinę; w puli teraz {wizard.Budget.Available} z {wizard.Budget.Capacity}.",
+           $"Wizard (data on demand, a budget of its own): last hour {wizard.Budget.LastHour} of the budget of {wizard.Budget.PerHour} an hour; {wizard.Budget.Available} of {wizard.Budget.Capacity} in the bucket now.")
+        @T($" Limit konta: {wizard.AccountPerHour} zapytań spoza pamięci na godzinę (konta, które go teraz częściowo zużyły: {wizard.AccountsUsingLimit}). Ładowania w toku: {wizard.Running}.",
+           $" Account limit: {wizard.AccountPerHour} requests outside the cache an hour (accounts that have used part of it now: {wizard.AccountsUsingLimit}). Loadings running: {wizard.Running}.")
+    </p>
+    <p class="hint">
+        @T($"Pamięć podręczna od startu procesu: wpisy {cache.Entries}, odpowiedzi z pamięci {cache.Hits}, wspólne z trwającym pobraniem {cache.Shared}, pobrania {cache.Loads}.",
+           $"Cache since the process started: entries {cache.Entries}, answers from memory {cache.Hits}, shared with a load in flight {cache.Shared}, loads {cache.Loads}.")
+    </p>
 
     <h3>@T("Ostatnie 24 godziny", "The last 24 hours")</h3>
     <div class="table-scroll">
@@ -251,7 +263,8 @@
                     <th scope="col" class="number">@T("Błędy", "Errors")</th>
                     <th scope="col" class="number">@T("Blokady", "Blocks")</th>
                     <th scope="col" class="number">@T("„Sprawdź teraz”", "\"Check now\"")</th>
-                    <th scope="col">@T("Budżet godziny", "Hour's budget")</th>
+                    <th scope="col" class="number">@T("Kreator", "Wizard")</th>
+                    <th scope="col">@T("Budżet godziny (poller)", "Hour's budget (poller)")</th>
                 </tr>
             </thead>
             <tbody>
@@ -264,7 +277,8 @@
                         <td class="number @(hour.Failed > 0 ? "problem" : null)">@hour.Failed</td>
                         <td class="number @(hour.Blocked > 0 ? "problem" : null)">@hour.Blocked</td>
                         <td class="number">@hour.Manual</td>
-                        <td><span class="meter" aria-hidden="true"><span style="width: @BudgetShare(hour.Requests, use.PerHour)%"></span></span></td>
+                        <td class="number">@hour.Wizard</td>
+                        <td><span class="meter" aria-hidden="true"><span style="width: @BudgetShare(hour.Requests - hour.Wizard, use.PerHour)%"></span></span></td>
                     </tr>
                 }
             </tbody>
@@ -313,7 +327,7 @@
                 <thead>
                     <tr>
                         <th scope="col">@T("Czas", "Time")</th>
-                        <th scope="col">@T("Seans", "Screening")</th>
+                        <th scope="col">@T("Seans / źródło", "Screening / source")</th>
                         <th scope="col">@T("Zapytanie", "Request")</th>
                         <th scope="col">@T("Wynik", "Result")</th>
                         <th scope="col" class="number">ms</th>
@@ -325,7 +339,7 @@
                     {
                         <tr>
                             <td>@When(request.At)</td>
-                            <td>@request.ScreeningId@(request.Manual ? T(" (ręcznie)", " (manual)") : "")</td>
+                            <td>@request.ScreeningId@(request.Manual ? T(" (ręcznie)", " (manual)") : "")@(request.Source == RequestSource.Wizard ? T(" (kreator)", " (wizard)") : "")</td>
                             <td>@request.Endpoint</td>
                             <td class="@(IsSuccess(request) ? null : "problem")">@Outcome(request)</td>
                             <td class="number">@request.DurationMs</td>
@@ -382,7 +396,7 @@
 </section>
 
 <section id="settings" class="prose">
-    <h2>@T("Ustawienia pollera", "Poller settings")</h2>
+    <h2>@T("Ustawienia pollera i kreatora", "Poller and wizard settings")</h2>
     <p>@T("Wartości z konfiguracji (appsettings.json, zmienne środowiskowe) możesz tu zmienić w stałych zakresach. Zmiana działa od następnego cyklu (do 30 sekund) i trafia do zdarzeń. Wartość równa tej z konfiguracji nie jest zapisywana, więc późniejsza zmiana konfiguracji znowu działa.",
           "Here you can change values from the configuration (appsettings.json, environment variables) within fixed ranges. A change applies from the next cycle (within 30 seconds) and is recorded in the events. A value equal to the configuration's is not stored, so a later change of the configuration applies again.")</p>
 
@@ -432,6 +446,23 @@
             <SettingField Id="max-pause" Label="@T("Najdłuższa przerwa", "Longest pause")" Unit="min"
                           Setting="@Number(TuningKey.MaxBlockPauseMinutes)" Default="@Default(TuningKey.MaxBlockPauseMinutes)" Overridden="@Overridden(TuningKey.MaxBlockPauseMinutes)"
                           Error="@ErrorFor(TuningKey.MaxBlockPauseMinutes)" @bind-Value="Input.MaxBlockPauseMinutes" />
+        </fieldset>
+
+        <fieldset>
+            <legend>@T("Kreator (dane Cinema City na żądanie)", "Wizard (Cinema City data on demand)")</legend>
+            <SettingField Id="wizard-budget" Label="@T("Budżet zapytań kreatora (wszystkie konta, obok budżetu pollera)", "Wizard request budget (all accounts, next to the poller's)")" Unit="@T("na godzinę", "an hour")"
+                          Setting="@Number(TuningKey.WizardRequestsPerHour)" Default="@Default(TuningKey.WizardRequestsPerHour)" Overridden="@Overridden(TuningKey.WizardRequestsPerHour)"
+                          Error="@ErrorFor(TuningKey.WizardRequestsPerHour)" @bind-Value="Input.WizardRequestsPerHour" />
+            <SettingField Id="wizard-burst" Label="@T("Zapas budżetu kreatora (największe wyszukiwanie: 84)", "Wizard budget saved up (the largest search: 84)")" Unit="@T("zapytań", "requests")"
+                          Setting="@Number(TuningKey.WizardBurst)" Default="@Default(TuningKey.WizardBurst)" Overridden="@Overridden(TuningKey.WizardBurst)"
+                          Error="@ErrorFor(TuningKey.WizardBurst)" @bind-Value="Input.WizardBurst" />
+            <SettingField Id="wizard-account" Label="@T("Limit jednego konta (zapytania spoza pamięci)", "Limit of one account (requests outside the cache)")" Unit="@T("na godzinę", "an hour")"
+                          Setting="@Number(TuningKey.WizardAccountRequestsPerHour)" Default="@Default(TuningKey.WizardAccountRequestsPerHour)" Overridden="@Overridden(TuningKey.WizardAccountRequestsPerHour)"
+                          Error="@ErrorFor(TuningKey.WizardAccountRequestsPerHour)" @bind-Value="Input.WizardAccountRequestsPerHour" />
+            <SettingField Id="wizard-gap" Label="@T("Odstęp między zapytaniami kreatora", "Pause between wizard requests")" Unit="s"
+                          Setting="@Number(TuningKey.WizardGapSeconds)" Default="@Default(TuningKey.WizardGapSeconds)" Overridden="@Overridden(TuningKey.WizardGapSeconds)"
+                          Error="@ErrorFor(TuningKey.WizardGapSeconds)" @bind-Value="Input.WizardGapSeconds" />
+            <p class="hint">@T("Zmiana działa od następnego ładowania.", "A change applies from the next loading.")</p>
         </fieldset>
 
         <fieldset>
@@ -545,7 +576,11 @@
             TuningKey.ManualFreshMinutes => T("świeży wynik (min)", "fresh result (min)"),
             TuningKey.JitterPercent => T("losowy dodatek (%)", "random addition (%)"),
             TuningKey.FirstBlockPauseMinutes => T("pierwsza przerwa po blokadzie (min)", "first pause after a block (min)"),
-            _ => T("najdłuższa przerwa po blokadzie (min)", "longest pause after a block (min)"),
+            TuningKey.MaxBlockPauseMinutes => T("najdłuższa przerwa po blokadzie (min)", "longest pause after a block (min)"),
+            TuningKey.WizardRequestsPerHour => T("budżet kreatora (na godzinę)", "wizard budget (an hour)"),
+            TuningKey.WizardBurst => T("zapas budżetu kreatora", "wizard budget saved up"),
+            TuningKey.WizardAccountRequestsPerHour => T("limit konta w kreatorze (na godzinę)", "wizard account limit (an hour)"),
+            _ => T("odstęp kreatora (s)", "wizard pause (s)"),
         }
         : T("zapamiętane szczegóły seansu", "stored screening details");
 
@@ -581,6 +616,7 @@
         ServiceEventKind.HeartbeatFailed => T("błąd heartbeatu", "heartbeat failed"),
         ServiceEventKind.AccountDeleted => T("usunięcie konta", "account deleted"),
         ServiceEventKind.AccountMailLimited => T("limit e-maili z hasłem", "password e-mail limit"),
+        ServiceEventKind.WizardBudgetExhausted => T("budżet kreatora wyczerpany", "wizard budget used up"),
         _ => kind.ToString(),
     };
 
@@ -628,6 +664,10 @@
         public string? JitterPercent { get; set; }
         public string? FirstBlockPauseMinutes { get; set; }
         public string? MaxBlockPauseMinutes { get; set; }
+        public string? WizardRequestsPerHour { get; set; }
+        public string? WizardBurst { get; set; }
+        public string? WizardAccountRequestsPerHour { get; set; }
+        public string? WizardGapSeconds { get; set; }
         public bool ReuseScreeningDetails { get; set; }
 
         public IReadOnlyDictionary<TuningKey, string?> Values() => new Dictionary<TuningKey, string?>
@@ -642,6 +682,10 @@
             [TuningKey.JitterPercent] = JitterPercent,
             [TuningKey.FirstBlockPauseMinutes] = FirstBlockPauseMinutes,
             [TuningKey.MaxBlockPauseMinutes] = MaxBlockPauseMinutes,
+            [TuningKey.WizardRequestsPerHour] = WizardRequestsPerHour,
+            [TuningKey.WizardBurst] = WizardBurst,
+            [TuningKey.WizardAccountRequestsPerHour] = WizardAccountRequestsPerHour,
+            [TuningKey.WizardGapSeconds] = WizardGapSeconds,
         };
 
         public static SettingsInput From(PollerSettings settings)
@@ -659,6 +703,10 @@
                 JitterPercent = Value(TuningKey.JitterPercent),
                 FirstBlockPauseMinutes = Value(TuningKey.FirstBlockPauseMinutes),
                 MaxBlockPauseMinutes = Value(TuningKey.MaxBlockPauseMinutes),
+                WizardRequestsPerHour = Value(TuningKey.WizardRequestsPerHour),
+                WizardBurst = Value(TuningKey.WizardBurst),
+                WizardAccountRequestsPerHour = Value(TuningKey.WizardAccountRequestsPerHour),
+                WizardGapSeconds = Value(TuningKey.WizardGapSeconds),
                 ReuseScreeningDetails = settings.Poller.ReuseScreeningDetails,
             };
         }

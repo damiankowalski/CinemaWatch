@@ -42,6 +42,9 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
 
     public RecordingPacer Pacer { get; } = new();
 
+    /// <summary>The wizard's pauses between requests (recorded; a test can hold them with <see cref="RecordingPacer.Hold"/>).</summary>
+    public RecordingPacer WizardPacer { get; } = new();
+
     public RecordingHeartbeatClient HeartbeatClient { get; } = new();
 
     public const int SignInAnswerMilliseconds = 40;
@@ -75,6 +78,7 @@ internal sealed class TestApp : WebApplicationFactory<CinemaWatch.Web.Components
             services.AddSingleton<TimeProvider>(Time);
             services.AddSingleton<ICinemaCityNetwork>(Network);
             services.AddSingleton<IRequestPacer>(Pacer);
+            services.AddSingleton<CinemaWatch.Server.Wizard.IWizardPacer>(WizardPacer);
         });
     }
 
@@ -128,10 +132,26 @@ internal sealed class ManualTime(DateTimeOffset start) : TimeProvider
     public void Advance(TimeSpan by) => _now += by;
 }
 
-/// <summary>Pauses between screenings are only recorded (manual or not), never waited for.</summary>
-internal sealed class RecordingPacer : IRequestPacer
+/// <summary>
+/// Pauses between screenings (or wizard items) are only recorded (manual or not), never waited for - unless a test
+/// holds them (<see cref="Hold"/>) to keep a wizard loading running.
+/// </summary>
+internal sealed class RecordingPacer : CinemaWatch.Server.Wizard.IWizardPacer
 {
     private readonly List<bool> _pauses = [];
+    private TaskCompletionSource? _hold;
+
+    /// <summary>From now on every pause waits until the returned action is called.</summary>
+    public Action Hold()
+    {
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _hold = hold;
+        return () =>
+        {
+            _hold = null;
+            hold.TrySetResult();
+        };
+    }
 
     public int Pauses
     {
@@ -148,7 +168,7 @@ internal sealed class RecordingPacer : IRequestPacer
     {
         lock (_pauses)
             _pauses.Add(manual);
-        return Task.CompletedTask;
+        return _hold?.Task.WaitAsync(cancellationToken) ?? Task.CompletedTask;
     }
 }
 

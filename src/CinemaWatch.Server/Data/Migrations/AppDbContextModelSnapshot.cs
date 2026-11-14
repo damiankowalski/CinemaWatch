@@ -196,6 +196,12 @@ namespace CinemaWatch.Server.Data.Migrations
                         .HasColumnType("character varying(32)")
                         .HasColumnName("screening_id");
 
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("source");
+
                     b.Property<int?>("Status")
                         .HasColumnType("integer")
                         .HasColumnName("status");
@@ -367,6 +373,22 @@ namespace CinemaWatch.Server.Data.Migrations
                     b.Property<DateTimeOffset?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
+
+                    b.Property<int?>("WizardAccountRequestsPerHour")
+                        .HasColumnType("integer")
+                        .HasColumnName("wizard_account_requests_per_hour");
+
+                    b.Property<int?>("WizardBurst")
+                        .HasColumnType("integer")
+                        .HasColumnName("wizard_burst");
+
+                    b.Property<double?>("WizardGapSeconds")
+                        .HasColumnType("double precision")
+                        .HasColumnName("wizard_gap_seconds");
+
+                    b.Property<int?>("WizardRequestsPerHour")
+                        .HasColumnType("integer")
+                        .HasColumnName("wizard_requests_per_hour");
 
                     b.HasKey("Id")
                         .HasName("pk_poller_settings");

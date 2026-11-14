@@ -71,7 +71,7 @@ services:
 
   cloudflared:
     # Pinned; update deliberately (a release at least two weeks old).
-    image: cloudflare/cloudflared:2026.10.3
+    image: cloudflare/cloudflared:2026.10.7
     restart: unless-stopped
     command: tunnel --no-autoupdate run
     environment:
