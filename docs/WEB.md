@@ -155,4 +155,6 @@ Next: Android (planned). The full plan and every decision are in [`SAAS.md`](SAA
 
 ## License
 
-[MIT](../LICENSE) © 2026 Damian Kowalski
+[PolyForm Noncommercial 1.0.0](../LICENSE) © 2026 Damian Kowalski: free for noncommercial use; any commercial use
+needs the author's written permission. Versions before 14 November 2026 were released under MIT (see the
+[README](../README.md#license)).

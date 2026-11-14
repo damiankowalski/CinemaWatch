@@ -23,7 +23,7 @@ ARG VERSION=dev
 LABEL org.opencontainers.image.source="https://github.com/damiankowalski/CinemaWatch" \
       org.opencontainers.image.title="cinemawatch-web" \
       org.opencontainers.image.description="CinemaWatch SaaS: web app and poller (MVP 0)" \
-      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0" \
       org.opencontainers.image.version="${VERSION}"
 WORKDIR /app
 COPY --from=build /app ./

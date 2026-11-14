@@ -13,7 +13,7 @@
   <a href="https://github.com/damiankowalski/CinemaWatch/releases/latest"><img src="https://img.shields.io/github/v/release/damiankowalski/CinemaWatch" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/.NET-10-512BD4" alt=".NET 10">
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4" alt="Windows 10 | 11">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/damiankowalski/CinemaWatch" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue" alt="License: PolyForm Noncommercial 1.0.0"></a>
 </p>
 
 <p align="center">
@@ -218,4 +218,11 @@ physically adjacent. Wheelchair spaces are flagged in the layout and reported se
 
 ## License
 
-[MIT](LICENSE) © 2026 Damian Kowalski
+[PolyForm Noncommercial 1.0.0](LICENSE) © 2026 Damian Kowalski.
+
+You may read, run and change the code for any noncommercial purpose - personal use, study, hobby projects. Any
+commercial use (selling it, offering it as a paid service, using it in a business) needs the author's written
+permission from the author.
+
+Versions published before 14 November 2026 (up to and including desktop `v1.5.0` and SaaS `web-v0.7.0`) were released
+under the MIT license, and copies of those versions keep it.
