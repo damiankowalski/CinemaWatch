@@ -34,9 +34,9 @@
 | Item | Value |
 | --- | --- |
 | Platform | Domain `damiankowalski.pl`, registrar, DNS and DNSSEC (Cloudflare), the server (OVHcloud VPS-1, Warsaw) and its configuration: [VPS-1 SERVER.md] §1 |
-| Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch since 6 Nov 2026 (0.7.0-beta.1 with the wizard since 14 Nov), behind Cloudflare Access (§1.6) and the app's own sign-in |
+| Website | `cinemawatch.damiankowalski.pl` since 14 Nov 2026 (stage 7, §4.30; the old `staging-cinemawatch.damiankowalski.pl` still answers until 15 Nov): CinemaWatch since 6 Nov 2026 (0.7.0 with the wizard since 14 Nov; `cloudflared` 2026.10.7), behind Cloudflare Access (§1.6) and the app's own sign-in |
 | E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
-| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1`, `0.5.2`, `0.6.0-beta.1`, `0.7.0-beta.1` (deployed), with `sha-<commit>` tags |
+| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1`, `0.5.2`, `0.6.0-beta.1`, `0.7.0-beta.1`, `0.7.0` (deployed), with `sha-<commit>` tags |
 | Heartbeat monitor | Healthchecks.io, checks `cinemawatch-staging` (§1.7; the alarm by e-mail tested on 7 Nov 2026) and `cinemawatch-backup` (§1.8) |
 | Backups | Daily at 02:30 UTC: `pg_dump`, encrypted with `age`, to Backblaze B2 bucket `cinemawatch-backup` (EU Central), the newest 7 also on the server; restore from B2 tested on 7 Nov 2026 (§1.8) |
 | Costs | Shared with the other applications on the server: [VPS-1 SERVER.md] §1 |
@@ -441,8 +441,23 @@ the move is in [VPS-1 SERVER.md] §3 (stage 7b).
 2. **Beta** (§4.29): commit `7a1d963` pushed, CI green - three jobs since the `ansible` job moved to VPS-1 (the runbook
    said four; corrected). Tag `web-v0.7.0-beta.1`, image built, `deploy.sh 0.7.0-beta.1` (migration `AddWizard` at
    start-up).
-3. **Owner's check** (14 Nov 2026): the wizard on `staging-cinemawatch.damiankowalski.pl` works. Next: the stable
-   `web-v0.7.0` (§4.29 step 6), then §4.30.
+3. **Owner's check** (14 Nov 2026): the wizard on `staging-cinemawatch.damiankowalski.pl` works.
+4. **Stable** (14 Nov 2026): pull request #15, Squash and merge, tag `web-v0.7.0` on `main`, image built,
+   `deploy.sh 0.7.0` (`== Done: 0.7.0`, three containers, `cloudflared` 2026.10.7). Next: §4.30.
+
+### Stage 7 - the final address (14 Nov 2026)
+
+1. **Access** (§4.30 step 1): `cinemawatch.damiankowalski.pl` added to both Access applications (the whole host;
+   path `admin`); the policies unchanged.
+2. **Tunnel** (step 2): a second route of `staging-cinemawatch`, `cinemawatch.damiankowalski.pl` → `http://web:8080`;
+   no new tunnel, the connector (2026.10.7) unchanged. The dashboard now lists tunnels outside Zero Trust too
+   (*Tunnels*, column *Routes*).
+3. **Check from outside** (step 3, from the Mac): `/` and `/admin` on the new host answer `302` to
+   `damiankowalski.cloudflareaccess.com`, each with its own application.
+4. **Server** (step 4): `.env` copied to `.env.before-stage7`, `SAAS_BASE_URL` set to the new address,
+   `deploy.sh 0.7.0` (a second run changed nothing: `web` stays *Running* when its configuration is the same).
+5. **Decided** ([`SAAS.md`](SAAS.md) §9): the old address goes the next day (15 Nov), not after a week; the READMEs
+   get a section on the web version without a link to the site (stage 7.3).
 
 ---
 
@@ -1042,12 +1057,13 @@ it, so the site is never reachable without the PIN. Do it after the stable `web-
 5. **Owner's check (browser):** open `https://cinemawatch.damiankowalski.pl`, the PIN, the app's sign-in (everybody
    signs in again once: the cookies belonged to the old host name), the profile list, *Sprawdź teraz* on one profile,
    `/admin`. Send yourself an invitation or the password help e-mail: its link starts with the new address.
-6. **Testers:** tell them the new address (the e-mail is the owner's). The old address keeps working for a week, so
-   links in older e-mails still open.
-7. **After a week, remove the old address** (Cloudflare, browser): the route `staging-cinemawatch.damiankowalski.pl`
+6. **Testers:** tell them the new address and that the old one stops working the next day (the e-mail is the
+   owner's).
+7. **The next day, remove the old address** (Cloudflare, browser): the route `staging-cinemawatch.damiankowalski.pl`
    in the tunnel (step 2's list) → delete; DNS → the `CNAME staging-cinemawatch` record, if it is still there →
    delete; in both Access applications remove the old hostname. Check: `curl.exe -sI
    https://staging-cinemawatch.damiankowalski.pl/` no longer reaches the app (a Cloudflare error or no DNS answer).
+   On a Mac use `curl` and `grep -iE '^HTTP|^location:'` instead of `curl.exe` and `Select-String` (here and in step 3).
 8. **Docs:** here §1, §1.6, §2.4, §3 (work log) and the runbooks naming the old host (§4.21, §4.28);
    `infra/compose/env.example` (`SAAS_BASE_URL`); [`SAAS.md`](SAAS.md) §7 stage 7, the header.
 
@@ -1060,9 +1076,8 @@ never touched, so it works throughout. Delete `.env.before-stage7` once the move
 
 Stage 5 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- Stage 6.4.6: SaaS 0.7.0-beta.1 (the wizard, `cloudflared` 2026.10.7) on staging, the owner's check the same day,
-  then the stable 0.7.0 (§4.29). No separate stable 0.6.0 (13 Nov 2026).
-- Stage 7: the same site moves to `cinemawatch.damiankowalski.pl` (§4.30); the old address goes a week later.
+- Stage 7 (§4.30): steps 1-4 done on 14 Nov 2026; left: the owner's check (5), the testers (6), removing the old
+  address on 15 Nov (7), documents (8).
 - Stage 5 ([`SAAS.md`](SAAS.md) §7): the testers keep using the site, but the test no longer gates anything
   (13 Nov 2026). The switch to model A (§4.28) is postponed.
 - Stage 5.8 (an inventory of everything that needs updates and a runbook for it) belongs to the server now:

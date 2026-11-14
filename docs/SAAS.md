@@ -11,9 +11,9 @@
 > Keep it current: update *Plan* (§7), *Decision log* (§9) and *Open questions* (§10) after every step, and
 > `SAAS_INFRA.md` after every infrastructure change.
 >
-> **13-14 November 2026:** sped up (§9): SaaS 0.7.0 (the wizard and hall map) runs on staging as
-> `0.7.0-beta.1` since 14 Nov, checked by the owner; next the stable `web-v0.7.0`, then stage 7 moves the same site
-> to `cinemawatch.damiankowalski.pl`.
+> **13-14 November 2026:** sped up (§9): the stable SaaS 0.7.0 (the wizard and hall map) runs since
+> 14 Nov (stage 6 done) and answers at `cinemawatch.damiankowalski.pl` (stage 7, steps 1-4 done 14 Nov). **Next:**
+> the owner's check on the new address, the testers told, the old address removed (15 Nov), documents, READMEs (7.3).
 >
 > Last updated: 8 November 2026. Status: **stage 5 started** (first SaaS test). Stage 4 done; its optional 4.6 was
 > skipped on purpose (§11). CinemaWatch runs on the VPS at `staging-cinemawatch.damiankowalski.pl` since 6 Nov 2026
@@ -562,7 +562,7 @@ and server work recorded in `SAAS_INFRA.md`. Items 5.2-5.4 get a short plan and 
       deployed on staging and checked by the owner in the browser (by 8 Nov 2026).
 - [x] 5.4 "Request an account": **dropped** (7 Nov 2026, §9). New accounts come only from the owner's invitation by
       e-mail; there is no public form.
-- [ ] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). **Moved into
+- [x] 5.5 `cloudflared` 2026.10.3 → 2026.10.7 (released 30 Oct 2026): **no exception** (7 Nov 2026, §9). **Moved into
       SaaS 0.7.0** (13 Nov 2026, §9): the compose change is committed on `feature/saas-wizard` on 13 Nov (two weeks
       after the release); there is no separate stable `web-v0.6.0`. The 0.7.0 image also carries the .NET patch of
       10 Nov 2026. Then `deploy.sh` and the connector's version in the dashboard (*Tunnels → staging-cinemawatch*).
@@ -591,7 +591,7 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
       checkboxes, not SVG; no interactive Blazor; `CinemaWatch.ViewModels` not reused on the site (§5.2, §9).
 - [x] 6.3 The wizard (decided 8 Nov 2026): the four desktop steps, clickable; state in the form; saving through the
       import's validation; editing of every profile in MVP 1 (§5.2).
-- [ ] 6.4 Increments (each with tests; the desktop tests keep passing; a short plan before each):
+- [x] 6.4 Increments (each with tests; the desktop tests keep passing; a short plan before each):
   - [x] 6.4.1 **Desktop 1.5.0 - multi-select** (done: `v1.5.0`) (`feature/seat-multiselect`): the rules in `CinemaWatch.Core` with
         tests and the shared case file; gestures in `HallMapViewModel` and the WPF map (mouse capture, the rectangle
         drawn on the map). XAML cannot be built in Claude's sandbox: the owner builds and tests the window. Beta
@@ -622,13 +622,13 @@ multi-select on the hall map (1.5.0) and the site's map is built with the same r
         known), `ProfileService.SaveAsync` (the import's `Check`, limit and row lock; the notification state trimmed
         to the seats still watched), *Edit* on the profile list (`/wizard/edit/<id>`, `/wizard/seed`). Checked by the
         owner in the browser (12 Nov 2026).
-  - [ ] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's check, stable `web-v0.7.0`; documents (§7, §9, §10,
+  - [x] 6.4.6 Beta `web-v0.7.0-beta.1` on staging, the owner's check, stable `web-v0.7.0`; documents (§7, §9, §10,
         `SAAS_INFRA.md` state and work log). **Planned 12 Nov 2026, sped up 13 Nov 2026** (§9): no `web-v0.6.0` first
         (`main` is already in the branch, `cloudflared` 2026.10.7 comes with 0.7.0), the beta tag, `deploy.sh`, the
         wizard's budget at 60 an hour to start; the owner checks on the same day and the stable tag follows when
         nothing blocks; no tester days. Runbook `SAAS_INFRA.md` §4.29. **`web-v0.7.0-beta.1` deployed on staging
-        and checked by the owner (14 Nov 2026)**; CI green (three jobs). Left: the pull request, the stable tag
-        `web-v0.7.0` on `main` and its deployment (§4.29 step 6).
+        and checked by the owner (14 Nov 2026)**; CI green (three jobs). **Done 14 Nov 2026:** pull request #15
+        (Squash and merge), tag `web-v0.7.0` on `main`, `deploy.sh 0.7.0` on staging; `cloudflared` 2026.10.7 runs (5.5).
 
 ### Stage 7 - The final address (`cinemawatch.damiankowalski.pl`)
 Decided 13 Nov 2026 (§9): **no new instance.** The staging site, with its database, accounts and profiles, gets
@@ -637,11 +637,20 @@ the final address. The same server, the same containers, the same tunnel and bac
 separate staging: new versions are checked locally with the fake (`Saas:Poller:Source = Fake`) and then with a beta
 tag on the live site, as with 0.7.0.
 - [ ] 7.1 Right after the stable `web-v0.7.0` (6.4.6): runbook `SAAS_INFRA.md` §4.30. Access first for the new host,
-      then the tunnel's route, then `SAAS_BASE_URL` and `deploy.sh`; the old address keeps working for a week (links
-      in old e-mails), then its route, its DNS record and its Access entries are removed. Everybody signs in again
-      once (the cookies belong to the old host name).
+      then the tunnel's route, then `SAAS_BASE_URL` and `deploy.sh`; the old address goes **the next day** (owner's
+      call, 14 Nov 2026, §9): its route, its DNS record and its Access entries are removed. Everybody signs in again
+      once (the cookies belong to the old host name). **Steps 1-4 done 14 Nov 2026** (both hosts in the two Access
+      applications, the second route of the tunnel, `302` to Access for `/` and `/admin` on the new host,
+      `SAAS_BASE_URL` changed and `web` restarted). Left: step 5 (the owner's check in the browser, the link in an
+      e-mail), step 6 (testers told), step 7 (the old address removed, 15 Nov), step 8 (documents).
 - [ ] 7.2 Documents: §1 here, `SAAS_INFRA.md` §1, §1.6, §2.4, §3 and the runbooks that name the old host;
       `infra/compose/env.example`. Access stays in front of the whole site on the final address too (§9, 13 Nov 2026).
+- [ ] 7.3 READMEs (planned 14 Nov 2026, §9; a short plan to the owner first): the root `README.md` gets a short
+      section on the web version - private, by invitation only, what it does, a screenshot of the wizard's hall map,
+      links to `src/CinemaWatch.Web/README.md` and `docs/SAAS.md` - and an updated *Roadmap* (web version done,
+      Android planned); no link to the site and no instructions for strangers. `src/CinemaWatch.Web/README.md`: the
+      title and the opening paragraph still say MVP 0 / stage 3 and "privacy page (draft)" - brought up to 0.7.0
+      (the wizard and hall map, the final address, Access in front of the whole site).
 
 ### After the MVP (order flexible)
 Plans and limits → Stripe test mode → OIDC provider (Keycloak) → queue between poller and notifier → Kubernetes (k3s)
@@ -884,7 +893,9 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | Nov 2026 | Desktop 1.5.0 merged to `main` on 8 Nov 2026, before `web-v0.6.0`; the stable 0.6.0 image (tag on or after 13 Nov) is built from a `main` that already holds it | Only `CinemaWatch.Core` gains a class the server does not use; Web and Server keep version 0.6.0; CI on the merge result (database tests, container smoke test) was green |
 | Nov 2026 | The server's configuration (`infra/ansible`) and its documentation (domain, DNS, the VPS, runbooks, glossary) move to the private repository `damiankowalski/VPS-1` (stage 7b, 11-12 Nov 2026; decision F-017 of the Finanse project); `SAAS_INFRA.md` keeps CinemaWatch's own parts and points to VPS-1 for the rest | The server is shared with a second application (Finanse): one source of truth for it, outside either application; each application keeps its image, compose file, deploy and backup scripts. The move changed nothing on the server (second Ansible run `changed=0`) |
 | 13 Nov 2026 | Faster to the final site: no separate stable `web-v0.6.0` (`cloudflared` 2026.10.7 goes into 0.7.0); the 0.7.0 beta is checked by the owner on the day it is deployed and the stable tag follows without tester days; the stage 5 test no longer gates anything; errors are fixed on the live site | The owner waited only for the `cloudflared` two-week rule (met on 13 Nov); a hobby project for the owner and a few friends, so a short way back (`deploy.sh` with the previous version and the dump) is enough |
-| 13 Nov 2026 | The final address `cinemawatch.damiankowalski.pl` is the staging site moved, not a new instance (stage 7): a second route of the same tunnel, the Access applications extended to the new host, `SAAS_BASE_URL` changed; the old host works for a week, then goes. No staging environment after that | One instance fits VPS-1 and the backups as they are; the accounts and profiles stay; checks of new versions run locally with the fake and as a beta on the live site |
+| 13 Nov 2026 | The final address `cinemawatch.damiankowalski.pl` is the staging site moved, not a new instance (stage 7): a second route of the same tunnel, the Access applications extended to the new host, `SAAS_BASE_URL` changed; the old host goes the day after the move (14 Nov 2026: not after a week as first planned). No staging environment after that | One instance fits VPS-1 and the backups as they are; the accounts and profiles stay; checks of new versions run locally with the fake and as a beta on the live site |
+| 14 Nov 2026 | The old address `staging-cinemawatch.damiankowalski.pl` is removed the day after the move, not after a week; no use is kept for it | The links in the app's e-mails expire within 24 hours and the notification e-mails link to Cinema City, so no old link needs it; a staging environment, if ever needed again, is a new route of the same runbook |
+| 14 Nov 2026 | The repository's READMEs describe the web version (stage 7.3) but never link to the site or explain how to get in; the address stays in the planning documents only | The site is invitation-only behind Access and the app's sign-in, so a link brings nobody useful; security does not rest on hiding the address (it is in `docs/` and in DNS anyway), but there is no reason to advertise it |
 | 13 Nov 2026 | Cloudflare Access stays in front of the whole site on the final address (not only `/admin`); access model A stays in §11 as a later option. The privacy notice no longer calls the gate a testing measure | Owner's call: two gates for a private site of a few people is the safer default; a tester is still added in the Access policy and invited in the app (`SAAS_INFRA.md` §4.22) |
 
 ---

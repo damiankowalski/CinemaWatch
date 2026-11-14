@@ -22,6 +22,11 @@ this repository; the decisions and history live in the docs below, not in any ch
 - Pragmatic, maintainable solutions; no over-engineering.
 - "dyskutujemy" / "nie twórz jeszcze zmian" = discussion only: change no files.
 - Before a larger feature: a short plan and the few decisions needed; build only after his confirmation.
+- A step that needs his go-ahead (a commit, for example): say in a line or two that the state allows it and ask; do it
+  after his yes, and only then give his next steps. Never write instructions that start "after my commit" while the
+  commit has not happened.
+- Damian works on Windows and on a Mac: check the shell before giving commands (PowerShell's `Select-String` and
+  `curl.exe` do not exist in zsh).
 - SaaS, Linux servers, Docker and cloud are new to Damian: explain briefly, one new concept at a time, and always say
   how to verify and how to undo a step. Mark commands for him as **Windows (PowerShell)** or **server (bash, SSH)**.
 
