@@ -28,8 +28,11 @@ this repository; the decisions and history live in the docs below, not in any ch
 ## How we work here (Claude Code)
 - You edit the working tree directly and run builds and tests yourself. Damian reviews the diff.
 - **Git: you never push, tag, merge, rebase, reset --hard or delete branches.** You may create a feature branch,
-  stage and - when Damian says so - commit on it. Pushing, pull requests, Squash and merge, tags and releases are
-  Damian's (give him the exact commands). Never rewrite `main`.
+  stage and - when Damian says so - commit on it. Pushing, Squash and merge, tags and releases are Damian's (give him
+  the exact commands). Never rewrite `main`.
+- **GitHub (`gh`):** once Damian has pushed a branch you open its pull request (`gh pr create`, title and body in
+  English) and read CI (`gh pr checks`, `gh pr view`, `gh run list`, `gh run view`). You never merge, close, release or
+  change repository settings; those `gh` commands are denied in `.claude/settings.json`.
 - Before you start: `git status`, `git branch --show-current`, `git log --oneline -3`; never build on assumed state.
 - **No server access.** Deployments to the VPS (staging/production at damiankowalski.pl) are Damian's: write the
   steps, he runs them over SSH.
