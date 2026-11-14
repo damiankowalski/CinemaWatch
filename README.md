@@ -38,6 +38,10 @@ dubbing.
 > Na skrócie po polsku: CinemaWatch monitoruje wybrane miejsca na wyprzedane seanse w salach IMAX Cinema City
 > i pokazuje powiadomienie Windows, gdy któreś się zwolni. Kliknięcie otwiera stronę zakupu biletu.
 
+> **There is also a web version.** [CinemaWatch Web](docs/WEB.md) runs the same wizard and hall map in the browser,
+> checks on a server around the clock and notifies by e-mail. It is a private service for the owner and invited
+> friends (no sign-up); profiles move freely between the two.
+
 ## Features
 
 - **All six IMAX cinemas** - pick a city or *All cities*; screenings are grouped by day and city.
@@ -186,7 +190,7 @@ beta and merged through a pull request.
 | `src/CinemaWatch.ViewModels` | Wizard view models without WPF references (fully testable) |
 | `src/CinemaWatch.App` | WPF app: views, hall map, Windows notifications, dialogs |
 | `tests/CinemaWatch.Tests` | Dependency-free tests using captured API responses |
-| `src/CinemaWatch.Server`, `src/CinemaWatch.Web` | SaaS (private web app, [details](src/CinemaWatch.Web/README.md)): accounts, profiles, the poller and e-mails; the container image (`src/CinemaWatch.Web/Dockerfile`) |
+| `src/CinemaWatch.Server`, `src/CinemaWatch.Web` | CinemaWatch Web (private web app, [overview](docs/WEB.md), [developer details](src/CinemaWatch.Web/README.md)): accounts, profiles, the wizard, the poller and e-mails; the container image (`src/CinemaWatch.Web/Dockerfile`) |
 | `tests/CinemaWatch.Saas.Tests` | SaaS tests: logic, database and the whole web flow |
 | `infra/compose` | SaaS on the server: Docker Compose file, `.env` template, container test, deployment script |
 | `infra/backup` | SaaS database backup (encrypted, off the server) and the restore test; installed on the server by the shared server's own configuration (private repository `damiankowalski/VPS-1` since 12 Nov 2026) |
@@ -208,6 +212,8 @@ physically adjacent. Wheelchair spaces are flagged in the layout and reported se
 
 ## Roadmap
 
+- ~~Web version~~ - done: [CinemaWatch Web](docs/WEB.md) (private, by invitation).
+- Android app (planned).
 - Other technologies (2D, 3D, 4DX) and the remaining Cinema City cinemas - the data model is ready for it.
 
 ## License

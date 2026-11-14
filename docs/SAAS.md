@@ -641,16 +641,17 @@ tag on the live site, as with 0.7.0.
       call, 14 Nov 2026, §9): its route, its DNS record and its Access entries are removed. Everybody signs in again
       once (the cookies belong to the old host name). **Steps 1-4 done 14 Nov 2026** (both hosts in the two Access
       applications, the second route of the tunnel, `302` to Access for `/` and `/admin` on the new host,
-      `SAAS_BASE_URL` changed and `web` restarted). Left: step 5 (the owner's check in the browser, the link in an
-      e-mail), step 6 (testers told), step 7 (the old address removed, 15 Nov), step 8 (documents).
+      `SAAS_BASE_URL` changed and `web` restarted); step 5 (the owner's check in the browser) and step 6 (testers told)
+      done the same day. Left: step 7 (the old address removed, 15 Nov), step 8 (documents).
 - [ ] 7.2 Documents: §1 here, `SAAS_INFRA.md` §1, §1.6, §2.4, §3 and the runbooks that name the old host;
       `infra/compose/env.example`. Access stays in front of the whole site on the final address too (§9, 13 Nov 2026).
-- [ ] 7.3 READMEs (planned 14 Nov 2026, §9; a short plan to the owner first): the root `README.md` gets a short
-      section on the web version - private, by invitation only, what it does, a screenshot of the wizard's hall map,
-      links to `src/CinemaWatch.Web/README.md` and `docs/SAAS.md` - and an updated *Roadmap* (web version done,
-      Android planned); no link to the site and no instructions for strangers. `src/CinemaWatch.Web/README.md`: the
-      title and the opening paragraph still say MVP 0 / stage 3 and "privacy page (draft)" - brought up to 0.7.0
-      (the wizard and hall map, the final address, Access in front of the whole site).
+- [ ] 7.3 READMEs (14 Nov 2026, §9): **written** - `docs/WEB.md`, the readers' page of the web version (what it
+      is, features, how it works, responsible use, security and privacy, technology, status, documents); the root
+      `README.md` stays the desktop's, with a short note pointing to `docs/WEB.md`, the project table and the
+      *Roadmap* updated; `src/CinemaWatch.Web/README.md` is now the developer guide for 0.7.0. No link to the site,
+      no instructions for strangers. Left: the owner's screenshots of the four wizard steps
+      (`docs/images/web-step1-city-and-dates.png`, `web-step2-film-and-screenings.png`, `web-step3-hall-map.png`,
+      `web-step4-summary.png`), then the commented-out table in `docs/WEB.md` is switched on.
 
 ### After the MVP (order flexible)
 Plans and limits → Stripe test mode → OIDC provider (Keycloak) → queue between poller and notifier → Kubernetes (k3s)
@@ -895,6 +896,7 @@ Prices per month excluding VAT, checked Oct-Nov 2026.
 | 13 Nov 2026 | Faster to the final site: no separate stable `web-v0.6.0` (`cloudflared` 2026.10.7 goes into 0.7.0); the 0.7.0 beta is checked by the owner on the day it is deployed and the stable tag follows without tester days; the stage 5 test no longer gates anything; errors are fixed on the live site | The owner waited only for the `cloudflared` two-week rule (met on 13 Nov); a hobby project for the owner and a few friends, so a short way back (`deploy.sh` with the previous version and the dump) is enough |
 | 13 Nov 2026 | The final address `cinemawatch.damiankowalski.pl` is the staging site moved, not a new instance (stage 7): a second route of the same tunnel, the Access applications extended to the new host, `SAAS_BASE_URL` changed; the old host goes the day after the move (14 Nov 2026: not after a week as first planned). No staging environment after that | One instance fits VPS-1 and the backups as they are; the accounts and profiles stay; checks of new versions run locally with the fake and as a beta on the live site |
 | 14 Nov 2026 | The old address `staging-cinemawatch.damiankowalski.pl` is removed the day after the move, not after a week; no use is kept for it | The links in the app's e-mails expire within 24 hours and the notification e-mails link to Cinema City, so no old link needs it; a staging environment, if ever needed again, is a new route of the same runbook |
+| 14 Nov 2026 | The web version gets its own readers' page `docs/WEB.md`; the root `README.md` stays the desktop's with a pointer to it (owner's choice) | GitHub shows only one README on the repository's front page (no tabs for several); the desktop is the downloadable product and its README with screenshots and anchors stays as it is, while the web version gets a page of equal weight one click away |
 | 14 Nov 2026 | The repository's READMEs describe the web version (stage 7.3) but never link to the site or explain how to get in; the address stays in the planning documents only | The site is invitation-only behind Access and the app's sign-in, so a link brings nobody useful; security does not rest on hiding the address (it is in `docs/` and in DNS anyway), but there is no reason to advertise it |
 | 13 Nov 2026 | Cloudflare Access stays in front of the whole site on the final address (not only `/admin`); access model A stays in §11 as a later option. The privacy notice no longer calls the gate a testing measure | Owner's call: two gates for a private site of a few people is the safer default; a tester is still added in the Access policy and invited in the app (`SAAS_INFRA.md` §4.22) |
 

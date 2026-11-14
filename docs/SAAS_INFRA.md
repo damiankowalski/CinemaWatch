@@ -458,6 +458,7 @@ the move is in [VPS-1 SERVER.md] §3 (stage 7b).
    `deploy.sh 0.7.0` (a second run changed nothing: `web` stays *Running* when its configuration is the same).
 5. **Decided** ([`SAAS.md`](SAAS.md) §9): the old address goes the next day (15 Nov), not after a week; the READMEs
    get a section on the web version without a link to the site (stage 7.3).
+6. **Owner's check** (step 5) on the new address: OK; the testers told the new address (step 6).
 
 ---
 
@@ -1076,8 +1077,7 @@ never touched, so it works throughout. Delete `.env.before-stage7` once the move
 
 Stage 5 plan and order: [`SAAS.md`](SAAS.md) §7.
 
-- Stage 7 (§4.30): steps 1-4 done on 14 Nov 2026; left: the owner's check (5), the testers (6), removing the old
-  address on 15 Nov (7), documents (8).
+- Stage 7 (§4.30): steps 1-6 done on 14 Nov 2026; left: removing the old address on 15 Nov (7), documents (8).
 - Stage 5 ([`SAAS.md`](SAAS.md) §7): the testers keep using the site, but the test no longer gates anything
   (13 Nov 2026). The switch to model A (§4.28) is postponed.
 - Stage 5.8 (an inventory of everything that needs updates and a runbook for it) belongs to the server now:

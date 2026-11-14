@@ -1,11 +1,14 @@
-# CinemaWatch.Web - SaaS web app (MVP 0)
+# CinemaWatch.Web - developer guide (SaaS 0.7.0)
 
-Private web app for the owner and invited friends (plan: [`docs/SAAS.md`](../../docs/SAAS.md) §5.1). Today
-(stage 3, the whole MVP 0, plus the container image of stage 4): accounts by invitation, sign-in, password reset, account page, data download,
-account deletion, Polish/English UI, privacy page (draft); import of desktop profiles (`*.cinemawatch.json`), the
-profile list, a profile limit per account; background checks of the watched screenings, notification e-mails with the
-booking link, the notification history, "Check now" and a test e-mail; the operator's panel (status of the components,
-request statistics, events, a pause switch, poller settings) and a heartbeat for an external "dead man's switch".
+Private web app for the owner and invited friends; the overview for readers is [`docs/WEB.md`](../../docs/WEB.md),
+the plan [`docs/SAAS.md`](../../docs/SAAS.md). This file is for developers: how the app behaves in detail, its
+configuration, local development and tests. Today (SaaS 0.7.0, MVP 1): accounts by invitation, sign-in, password
+reset, account page, data download, account deletion, Polish/English UI, the privacy notice; the wizard and the hall
+map for new profiles and for editing any profile, import of desktop profiles (`*.cinemawatch.json`), the profile list,
+a profile limit per account; background checks of the watched screenings, notification e-mails with the booking link,
+the notification history, "Check now" and a test e-mail; the operator's panel (status of the components, request
+statistics, events, a pause switch, poller and wizard settings) and a heartbeat for an external "dead man's switch".
+On the server it runs behind Cloudflare Access for the whole site ([`docs/SAAS_INFRA.md`](../../docs/SAAS_INFRA.md)).
 
 | Project | Contents |
 | --- | --- |
