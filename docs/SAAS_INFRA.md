@@ -34,9 +34,9 @@
 | Item | Value |
 | --- | --- |
 | Platform | Domain `damiankowalski.pl`, registrar, DNS and DNSSEC (Cloudflare), the server (OVHcloud VPS-1, Warsaw) and its configuration: [VPS-1 SERVER.md] §1 |
-| Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch since 6 Nov 2026 (0.6.0-beta.1 since 7-8 Nov), behind Cloudflare Access (§1.6) and the app's own sign-in |
+| Website | `staging-cinemawatch.damiankowalski.pl`: CinemaWatch since 6 Nov 2026 (0.7.0-beta.1 with the wizard since 14 Nov), behind Cloudflare Access (§1.6) and the app's own sign-in |
 | E-mail | Sending only, through Resend from `mail.damiankowalski.pl` (§1.5); no mailbox, nothing received |
-| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1`, `0.5.2` (deployed), with `sha-<commit>` tags |
+| Container image | `ghcr.io/damiankowalski/cinemawatch-web`, public package; versions `0.5.0-beta.1`, `0.5.1`, `0.5.2`, `0.6.0-beta.1`, `0.7.0-beta.1` (deployed), with `sha-<commit>` tags |
 | Heartbeat monitor | Healthchecks.io, checks `cinemawatch-staging` (§1.7; the alarm by e-mail tested on 7 Nov 2026) and `cinemawatch-backup` (§1.8) |
 | Backups | Daily at 02:30 UTC: `pg_dump`, encrypted with `age`, to Backblaze B2 bucket `cinemawatch-backup` (EU Central), the newest 7 also on the server; restore from B2 tested on 7 Nov 2026 (§1.8) |
 | Costs | Shared with the other applications on the server: [VPS-1 SERVER.md] §1 |
@@ -432,6 +432,17 @@ the move is in [VPS-1 SERVER.md] §3 (stage 7b).
    `~/CinemaWatch`, so that file stays here.
 3. **Clean-up here** (12 Nov 2026): `infra/ansible` and the CI job `ansible` removed; the moved sections of this file
    replaced by pointers. Nothing changed in `infra/compose`, `infra/backup` or on the server.
+
+### Stage 6 - the wizard on staging (6.4.6; 13-14 Nov 2026)
+
+1. **Sped up** (13 Nov 2026, [`SAAS.md`](SAAS.md) §9): no separate stable `web-v0.6.0`; `cloudflared` 2026.10.7 went
+   into 0.7.0 (two weeks after its release); no tester days; the stage 5 test no longer gates anything. Stage 7 planned:
+   the same site moves to `cinemawatch.damiankowalski.pl` (§4.30); Access stays in front of the whole site.
+2. **Beta** (§4.29): commit `7a1d963` pushed, CI green - three jobs since the `ansible` job moved to VPS-1 (the runbook
+   said four; corrected). Tag `web-v0.7.0-beta.1`, image built, `deploy.sh 0.7.0-beta.1` (migration `AddWizard` at
+   start-up).
+3. **Owner's check** (14 Nov 2026): the wizard on `staging-cinemawatch.damiankowalski.pl` works. Next: the stable
+   `web-v0.7.0` (§4.29 step 6), then §4.30.
 
 ---
 
@@ -960,7 +971,8 @@ is deployed and the stable `web-v0.7.0` follows when nothing blocks; no tester d
    ```
 
    Check: `git status` says the branch is ahead of `origin` by one commit before the push; then GitHub *Actions*, the
-   run for the branch's last commit - all four jobs green.
+   run for the branch's last commit - all three jobs green (`build`, `linux`, `container`; the `ansible` job went to
+   VPS-1 on 12 Nov 2026).
 2. **Windows (PowerShell)**: the beta tag on the branch's last commit; `web-image.yml` builds, tests and publishes
    `ghcr.io/damiankowalski/cinemawatch-web:0.7.0-beta.1`.
 
